@@ -37,4 +37,3 @@ dashboardRoutes.get('/', async (c) => {
     categories: categories.results, reading: reading.results, recommendations: rpgs.slice(0, 5), readingBacklog: rpgs.filter((r) => r.readingStatus !== 'READ').slice(0, 8),
     activeTables: rpgs.filter((r) => ['PREPARING','SCHEDULED','PLAYING'].includes(r.tableStatus)).slice(0, 5), campaigns });
 });
-

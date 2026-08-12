@@ -52,4 +52,3 @@ export function calculateRpgNextAction(candidate: RecommendationCandidate): stri
   if (candidate.tableStatus === 'PREPARING') return 'Agendar mesa';
   return 'Acompanhar mesa';
 }
-

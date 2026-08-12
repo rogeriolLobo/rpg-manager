@@ -8,4 +8,3 @@ describe('segurança',()=>{
   it('gera códigos únicos e persiste apenas representação derivada',async()=>{const codes=generateRecoveryCodes();expect(new Set(codes).size).toBe(10);expect(codes.every(code=>code.startsWith('RGM-'))).toBe(true);expect(await hashSecret(codes[0],'pepper')).not.toContain(codes[0]);});
   it('aplica CSP e HSTS somente em produção',()=>{const headers=new Headers();applySecurityHeaders(headers,true);expect(headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");expect(headers.get('Strict-Transport-Security')).toContain('max-age=31536000');const local=new Headers();applySecurityHeaders(local,false);expect(local.has('Strict-Transport-Security')).toBe(false);});
 });
-

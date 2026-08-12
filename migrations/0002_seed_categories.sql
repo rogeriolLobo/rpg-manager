@@ -29,4 +29,3 @@ INSERT INTO subgenres (id, category_id, name) VALUES
   ('cozy','alternativo','Viagem e Aconchego (Cozy / Slice of Life)'),
   ('super-herois','alternativo','Super-Heróis'),
   ('generico-universal','universal','Genérico / Universal');
-

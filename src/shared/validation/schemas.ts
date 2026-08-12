@@ -87,4 +87,3 @@ export const profileSchema = z.strictObject({
 export type RpgInput = z.infer<typeof rpgInputSchema>;
 export type CampaignInput = z.infer<typeof campaignInputSchema>;
 export type SessionInput = z.infer<typeof sessionInputSchema>;
-

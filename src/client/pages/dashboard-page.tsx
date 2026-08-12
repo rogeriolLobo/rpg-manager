@@ -17,4 +17,3 @@ export function PageHeader({eyebrow,title,description,action}:{eyebrow:string;ti
 export function Badge({children}:{children:React.ReactNode}){return <span className="badge">{String(children).replaceAll('_',' ')}</span>}
 export function Empty({title,text,action,to}:{title:string;text:string;action:string;to:string}){return <div className="empty-state"><Dice5/><h3>{title}</h3><p>{text}</p><Link className="secondary-button link-button" to={to}>{action}</Link></div>}
 export function formatDate(value:string|null|undefined){return value?new Intl.DateTimeFormat('pt-BR').format(new Date(`${value.slice(0,10)}T12:00:00`)):'—'}
-

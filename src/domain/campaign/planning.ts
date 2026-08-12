@@ -37,4 +37,3 @@ export function calculateCampaignProgress(state: CampaignPlanningState): number 
   if (!state.sessionGoal) return null;
   return Math.min(100, Math.round((state.sessionsCompleted / state.sessionGoal) * 100));
 }
-

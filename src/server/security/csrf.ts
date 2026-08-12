@@ -21,4 +21,3 @@ export async function requireCsrf(c: Context<{ Bindings: Env; Variables: AppVari
   }
   return next();
 }
-

@@ -20,4 +20,3 @@ Assets estáticos são gratuitos e ilimitados em requests. Índices, paginação
 - Pages + Functions: funcional, mas sem vantagem para esta aplicação e não é a recomendação atual para novos full-stack.
 - VPS/SaaS de banco: rejeitados por custo obrigatório.
 - Google Sheets como banco: rejeitado por segurança, integridade e acoplamento.
-

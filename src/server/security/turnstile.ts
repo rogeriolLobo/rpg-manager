@@ -14,4 +14,3 @@ export async function verifyTurnstile(env: Env, token: string | undefined, remot
   const result = await response.json<TurnstileResponse>();
   return result.success;
 }
-

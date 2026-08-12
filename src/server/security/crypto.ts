@@ -62,4 +62,3 @@ export function generateRecoveryCodes(count = 10): string[] {
     return `RGM-${value.slice(0, 6)}-${value.slice(6, 12)}-${value.slice(12, 16)}`;
   });
 }
-

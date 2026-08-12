@@ -28,4 +28,3 @@ Argon2id/WASM foi rejeitado no Free plan por custo de CPU/memória incompatível
 ## Riscos
 
 Autenticação própria aumenta responsabilidade de manutenção. O escopo fica deliberadamente pequeno, com validação de runtime, testes de sessão/recovery/CSRF/IDOR e possibilidade futura de migrar para biblioteca que ofereça token hash nativo sem quebrar o contrato HTTP.
-

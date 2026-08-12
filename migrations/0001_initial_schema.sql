@@ -161,4 +161,3 @@ CREATE TABLE import_jobs (
   confirmed_at TEXT,
   UNIQUE(user_id, payload_hash)
 );
-

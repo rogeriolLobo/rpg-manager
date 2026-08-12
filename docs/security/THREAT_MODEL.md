@@ -24,4 +24,3 @@ Ativos: credenciais, sessões, recovery codes, catálogo, campanhas, notas e bac
 ## Suposições e riscos residuais
 
 TLS e proteção de rede são fornecidos pela Cloudflare. O plano Free tem limites rígidos e pode negar serviço quando a cota acabar. Conta sem verificação de e-mail é uma limitação consciente da V1 gratuita; recovery codes provam posse do segredo de recuperação, não posse contínua do endereço de e-mail. Comprometimento simultâneo de D1 e do Secret reduz a proteção do pepper.
-

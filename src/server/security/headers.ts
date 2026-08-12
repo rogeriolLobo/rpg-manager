@@ -22,4 +22,3 @@ export function applySecurityHeaders(headers: Headers, production: boolean): voi
   headers.set('X-Frame-Options', 'DENY');
   if (production) headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 }
-
