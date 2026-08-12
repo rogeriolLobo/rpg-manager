@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rpg-manager",
+  "main": "./src/server/index.ts",
+  "compatibility_date": "2026-08-12",
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rpg-manager-production",
+      "database_id": "263f4695-de0c-4047-862e-a09ddde98e4a",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_LOGIN_RATE_LIMITER",
+      "namespace_id": "12082601",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "AUTH_REGISTRATION_RATE_LIMITER",
+      "namespace_id": "12082602",
+      "simple": { "limit": 5, "period": 60 }
+    },
+    {
+      "name": "AUTH_RECOVERY_RATE_LIMITER",
+      "namespace_id": "12082603",
+      "simple": { "limit": 5, "period": 60 }
+    },
+    {
+      "name": "AUTH_SENSITIVE_RATE_LIMITER",
+      "namespace_id": "12082604",
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+  "observability": { "enabled": true }
+}

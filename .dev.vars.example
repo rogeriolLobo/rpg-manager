@@ -1,0 +1,5 @@
+ENVIRONMENT=development
+PASSWORD_PEPPER=
+
+# Optional locally. Use Cloudflare's documented test secret, never production's.
+TURNSTILE_SECRET_KEY=
