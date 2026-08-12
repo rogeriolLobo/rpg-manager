@@ -1,0 +1,41 @@
+.sidebar {
+  overflow-y: auto;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+}
+
+.sidebar-footer span,
+.sidebar-footer small {
+  pointer-events: none;
+}
+
+.sidebar-footer .ghost-button {
+  position: relative;
+  z-index: 1;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 850px) {
+  .sidebar {
+    height: 100dvh;
+    min-height: 0;
+    max-height: 100dvh;
+    padding-top: calc(58px + 1rem);
+  }
+
+  .sidebar-footer {
+    position: static;
+    margin-top: auto;
+    background: #30171b;
+    padding-bottom: 0.75rem;
+  }
+}

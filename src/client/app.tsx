@@ -1,0 +1,17 @@
+import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { AppShell } from './components/app-shell';
+import { useAuth } from './auth/auth-context';
+import { LoginPage, RecoverPage, RegisterPage } from './pages/auth-pages';
+import { CampaignDetailPage, CampaignFormPage, CampaignsPage, SessionDetailPage, SessionFormPage } from './pages/campaign-pages';
+import { DashboardPage, Loading } from './pages/dashboard-page';
+import { LibraryPage, RpgDetailPage, RpgFormPage } from './pages/library-pages';
+import { PrivacyPage, ProfilePage, SecurityPage, SettingsPage } from './pages/settings-pages';
+import { Link } from 'react-router-dom';
+
+function Protected(){const {user,loading}=useAuth();if(loading)return <Loading/>;return user?<Outlet/>:<Navigate to="/login" replace/>;}
+function Home(){const {user}=useAuth();return <Navigate to={user?'/app':'/login'} replace/>;}
+function NotFound(){return <main className="not-found"><strong>404</strong><h1>Esta trilha não existe no mapa.</h1><p>Talvez um goblin tenha movido a página.</p><Link className="primary-button link-button" to="/">Voltar ao início</Link></main>}
+class ErrorBoundary extends Component<{children:ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return{failed:true};}componentDidCatch(error:Error,info:ErrorInfo){console.error('UI boundary',error.message,info.componentStack);}render(){return this.state.failed?<main className="not-found"><strong>!</strong><h1>O grimório encontrou um erro.</h1><p>Recarregue a página. Se persistir, use o identificador exibido pela API ao relatar o problema.</p><button className="primary-button" onClick={()=>location.reload()}>Recarregar</button></main>:this.props.children;}}
+export function App(){return <ErrorBoundary><Routes><Route path="/" element={<Home/>}/><Route path="/login" element={<LoginPage/>}/><Route path="/register" element={<RegisterPage/>}/><Route path="/recover-account" element={<RecoverPage/>}/><Route path="/privacy" element={<PrivacyPage/>}/><Route element={<Protected/>}><Route element={<AppShell/>}><Route path="/app" element={<DashboardPage/>}/><Route path="/app/library" element={<LibraryPage/>}/><Route path="/app/library/new" element={<RpgFormPage/>}/><Route path="/app/library/:id" element={<RpgDetailPage/>}/><Route path="/app/library/:id/edit" element={<RpgFormPage/>}/><Route path="/app/campaigns" element={<CampaignsPage/>}/><Route path="/app/campaigns/new" element={<CampaignFormPage/>}/><Route path="/app/campaigns/:id" element={<CampaignDetailPage/>}/><Route path="/app/campaigns/:id/edit" element={<CampaignFormPage/>}/><Route path="/app/campaigns/:id/sessions/new" element={<SessionFormPage/>}/><Route path="/app/campaigns/:id/sessions/:sessionId" element={<SessionDetailPage/>}/><Route path="/app/campaigns/:id/sessions/:sessionId/edit" element={<SessionFormPage/>}/><Route path="/app/settings" element={<SettingsPage/>}/><Route path="/app/settings/import" element={<SettingsPage/>}/><Route path="/app/security" element={<SecurityPage/>}/><Route path="/app/profile" element={<ProfilePage/>}/></Route></Route><Route path="*" element={<NotFound/>}/></Routes></ErrorBoundary>}
+
