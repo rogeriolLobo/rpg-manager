@@ -60,6 +60,21 @@ const labels: Record<string, string> = {
   WORLD: "World",
   JOURNAL: "Diário",
   RPG: "RPG",
+  ALLY: "Aliado",
+  ENEMY: "Inimigo",
+  RIVAL: "Rival",
+  FAMILY: "Família",
+  PARENT: "Pai ou mãe",
+  CHILD: "Filho ou filha",
+  SIBLING: "Irmãos",
+  PARTNER: "Parceiros",
+  ROMANCE: "Romance",
+  EMPLOYER: "Empregador",
+  SUBORDINATE: "Subordinado",
+  MEMBER_OF: "Membro de",
+  LEADER_OF: "Líder de",
+  OWES: "Deve a",
+  KNOWS: "Conhece",
 };
 
 export function displayLabel(value: string | null | undefined): string {

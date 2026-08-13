@@ -11,5 +11,7 @@ import './layout-fixes.css';
 import './group-pages.css';
 import './vault-pages.css';
 import './world-knowledge.css';
+import '@xyflow/react/dist/style.css';
+import './relations-pages.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><AuthProvider><ThemeProvider><ActiveWorldProvider><App/></ActiveWorldProvider></ThemeProvider></AuthProvider></BrowserRouter></StrictMode>);
