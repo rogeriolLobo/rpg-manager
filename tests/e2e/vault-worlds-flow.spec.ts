@@ -46,6 +46,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
 
   await navigateFromMenu('Vault');
   await page.getByRole('link',{name:'Nova entidade'}).click();
+  await expect(page).toHaveURL(/\/app\/vault\/new/u);
   await page.getByLabel('Tipo').selectOption('LOCATION');
   await page.getByLabel('Nome').fill('Taverna do Corvo');
   await page.getByLabel('World').selectOption({label:'Aldea'});
@@ -54,6 +55,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
 
   await navigateFromMenu('Vault');
   await page.getByRole('link',{name:'Nova entidade'}).click();
+  await expect(page).toHaveURL(/\/app\/vault\/new/u);
   await page.getByLabel('Nome').fill('A Noite do Corvo');
   await page.getByLabel('Tipo').selectOption('ADVENTURE');
   await expect(page.getByLabel('Formato')).toBeVisible();
