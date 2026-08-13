@@ -1,5 +1,7 @@
 const encoder = new TextEncoder();
-const PASSWORD_ITERATIONS = 600_000;
+// Cloudflare Workers rejects PBKDF2 iteration counts above 100,000.
+// Use the runtime maximum and keep the cost encoded in the stored hash.
+const PASSWORD_ITERATIONS = 100_000;
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';

@@ -15,7 +15,7 @@ Better Auth 1.6.x foi avaliado por oferecer e-mail/senha, cookies e adaptador D1
 
 Usar APIs padronizadas do runtime, sem criar primitivas criptográficas:
 
-- PBKDF2-HMAC-SHA-256 via `crypto.subtle`, 600.000 iterações, salt aleatório de 16 bytes e saída de 32 bytes;
+- PBKDF2-HMAC-SHA-256 via `crypto.subtle`, 100.000 iterações (limite do runtime Workers), salt aleatório de 16 bytes e saída de 32 bytes;
 - pepper de servidor opcional e recomendado, armazenado como Cloudflare Secret;
 - sessão opaca de 32 bytes gerada por CSPRNG; somente SHA-256 do token é persistido;
 - cookie `HttpOnly`, `Secure` em produção, `SameSite=Lax`, `Path=/`, duração de 7 dias;
@@ -23,7 +23,7 @@ Usar APIs padronizadas do runtime, sem criar primitivas criptográficas:
 - comparação de hashes em tempo constante;
 - rotação/revogação de sessão e eventos de segurança sem dados sensíveis.
 
-Argon2id/WASM foi rejeitado no Free plan por custo de CPU/memória incompatível com o limite de 10 ms. Scrypt de biblioteca também não oferece garantia operacional nesse limite. PBKDF2 é o fallback interoperável recomendado pela OWASP e executado pela primitiva nativa do runtime. O deploy só é considerado aprovado após registro/login reais e inspeção de CPU no Worker publicado.
+Argon2id/WASM foi rejeitado no Free plan por custo de CPU/memória incompatível com os limites operacionais adotados. Scrypt de biblioteca também não oferece garantia operacional nesse ambiente. PBKDF2 é executado pela primitiva nativa do runtime, com o custo máximo aceito pelo Workers; salt, pepper, política de senha, Turnstile e rate limiting compõem a proteção compensatória. O deploy só é considerado aprovado após registro/login reais e inspeção de CPU no Worker publicado.
 
 ## Riscos
 

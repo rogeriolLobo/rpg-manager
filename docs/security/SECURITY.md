@@ -2,7 +2,7 @@
 
 ## Controles implementados
 
-- senha: PBKDF2-HMAC-SHA-256, 600.000 iterações, salt CSPRNG único e pepper em secret;
+- senha: PBKDF2-HMAC-SHA-256 no máximo suportado pelo Workers (100.000 iterações), salt CSPRNG único e pepper em secret;
 - sessão: token opaco CSPRNG, somente hash SHA-256 com pepper no D1, expiração de 7 dias, revogação e rotação;
 - cookie: `HttpOnly`, `Secure` em HTTPS, `SameSite=Lax`, `Path=/`; CSRF token separado e legível pelo cliente;
 - CSRF: validação de `Origin` para métodos mutáveis e double-submit token comparado em tempo constante;
