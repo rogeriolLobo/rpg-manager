@@ -32,4 +32,10 @@ Relações conectam entidades do mesmo World sem copiá-las. A lista, o grafo e 
 
 O narrador enxerga a verdade autorizada; jogadores recebem apenas nós e arestas permitidos pelo backend. A diferença não cria um segundo grafo físico.
 
-Maps, Timeline, calendário, uploads, fichas, VTT, realtime e IA continuam reservados para versões futuras.
+## Timeline e Calendar
+
+Timeline ordena entidades EVENT por uma chave histórica independente do relógio real. Eras, data textual e precisão permitem representar cronologias incompletas ou aproximadas. Um World pode definir meses, dias da semana, ciclos e feriados próprios; nenhum calendário terrestre é presumido. Datas reais das sessões continuam em `campaign_sessions` e não são convertidas.
+
+Entidades relacionadas aparecem somente quando existe `entity_relations` explícita e autorizada. O sistema não infere relações por NLP ou IA.
+
+Maps, uploads, fichas, VTT, realtime e IA continuam reservados para versões futuras.

@@ -27,6 +27,10 @@ Uma relação só é retornada quando o usuário pode visualizar as duas entidad
 
 Criação e edição validam owner, World e ambas as pontas. IDs de outro usuário ou World não são aceitos. Prepared statements, schemas Zod estritos, limites e política 404 cobrem SQL injection, mass assignment e IDOR. Arquivamento não remove os nós.
 
+## Timeline e Calendar
+
+Timeline reutiliza o predicado permission-aware dos EVENTs antes de responder. Era e calendário não concedem acesso por si próprios. Somente o owner cria eras, configura o calendário e altera datas históricas; o servidor valida que EVENT, era e calendário pertencem ao mesmo World. Relações mostradas ao lado de eventos vêm da API de relações já filtrada, nunca de inferência textual.
+
 `style-src 'unsafe-inline'` permanece na V1 para os estilos de progresso calculados no React. Scripts inline continuam bloqueados. A remoção exige migrar larguras dinâmicas para classes/atributos previamente enumerados.
 
 ## Reporte

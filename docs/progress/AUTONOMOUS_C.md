@@ -20,7 +20,9 @@ Data: 2026-08-13
 - `0013_entity_relations.sql`, aditiva, com FKs `RESTRICT`, checks e índices.
 - aplicação local: aprovada;
 - `PRAGMA foreign_key_check` local: sem violações;
-- aplicação remota: pendente do gate de CI deste branch.
+- aplicação remota: aprovada;
+- `PRAGMA foreign_key_check` remoto: sem violações;
+- backup lógico pré-migration: 73.277 bytes, SHA-256 `65F3B2EB2C3C2148424FE7BA35EB593F8AB9EE2ED55A0E0A21730DD1FBEEF5F6`.
 
 ## Dependência
 
@@ -56,7 +58,16 @@ Data: 2026-08-13
 
 ## Deploy e smoke
 
-Pendentes do push, CI remoto verde, backup lógico e migration remota segura.
+- PR: `#4`, merge por squash no commit `899c2df`;
+- CI do PR: aprovado;
+- CI de `main`: aprovado no run `31748089878`;
+- Worker: `e53dc724-7547-4ec9-8479-5712f59cd8f7`;
+- health e `/app`: HTTP 200;
+- chunk lazy do Graph: HTTP 200;
+- API de relações sem sessão: HTTP 401;
+- CSP e `nosniff`: presentes;
+- sessão de produção existente, dashboard e Worlds: smoke autenticado aprovado;
+- a conta não possuía Worlds; nenhum dado fictício foi criado para forçar um smoke de mutação.
 
 ## Riscos e limitações
 
@@ -66,4 +77,4 @@ Pendentes do push, CI remoto verde, backup lógico e migration remota segura.
 
 ## Próximo passo
 
-Publicar a Fase C após os gates remotos e então iniciar Timeline/Calendar com migrations aditivas próprias.
+Iniciar Timeline/Calendar com migrations aditivas próprias.

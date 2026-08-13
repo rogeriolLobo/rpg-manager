@@ -13,5 +13,6 @@ import './vault-pages.css';
 import './world-knowledge.css';
 import '@xyflow/react/dist/style.css';
 import './relations-pages.css';
+import './timeline-pages.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><AuthProvider><ThemeProvider><ActiveWorldProvider><App/></ActiveWorldProvider></ThemeProvider></AuthProvider></BrowserRouter></StrictMode>);

@@ -75,6 +75,13 @@ const labels: Record<string, string> = {
   LEADER_OF: "Líder de",
   OWES: "Deve a",
   KNOWS: "Conhece",
+  EXACT: "Exata",
+  DAY: "Dia",
+  MONTH: "Mês",
+  YEAR: "Ano",
+  ERA: "Era",
+  APPROXIMATE: "Aproximada",
+  UNKNOWN: "Desconhecida",
 };
 
 export function displayLabel(value: string | null | undefined): string {

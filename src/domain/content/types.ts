@@ -40,6 +40,7 @@ export const RELATION_TYPES = [
   'CUSTOM',
 ] as const;
 export const RELATION_DIRECTIONS = ['DIRECTED', 'BIDIRECTIONAL'] as const;
+export const TEMPORAL_PRECISIONS = ['EXACT', 'DAY', 'MONTH', 'YEAR', 'ERA', 'APPROXIMATE', 'UNKNOWN'] as const;
 
 export type VaultEntityType = typeof ENTITY_TYPES[number];
 export type EntityVisibility = typeof ENTITY_VISIBILITIES[number];
@@ -52,6 +53,7 @@ export type WorldMemberRole = typeof WORLD_MEMBER_ROLES[number];
 export type CampaignEntityUsageType = typeof CAMPAIGN_ENTITY_USAGE_TYPES[number];
 export type RelationType = typeof RELATION_TYPES[number];
 export type RelationDirection = typeof RELATION_DIRECTIONS[number];
+export type TemporalPrecision = typeof TEMPORAL_PRECISIONS[number];
 
 export interface AdventureDetailsInput {
   adventureType: AdventureType;

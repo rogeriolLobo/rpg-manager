@@ -139,6 +139,42 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await expect(page.locator('.react-flow')).toBeVisible();
   await expect(page.getByText('Lucien · NPC')).toBeVisible();
 
+  await navigateFromMenu('Timeline');
+  await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
+  await page.getByRole('link',{name:'Novo evento'}).click();
+  await expect(page.getByLabel('Tipo')).toHaveValue('EVENT');
+  await page.getByLabel('Nome').fill('Queda do Sino');
+  await page.getByLabel('Resumo').fill('Marco do calendário de Aldea.');
+  await page.getByLabel('Visibilidade').selectOption('PRIVATE');
+  await page.getByRole('button',{name:'Salvar entidade'}).click();
+  await expect(page.getByRole('heading',{name:'Queda do Sino'})).toBeVisible();
+
+  await navigateFromMenu('Timeline');
+  await page.getByLabel('Nova era').fill('Era Atual');
+  await page.getByLabel('Ordem').fill('10');
+  await page.getByRole('button',{name:'Criar',exact:true}).click();
+  await expect(page.getByRole('listitem').getByText('Era Atual')).toBeVisible();
+  await page.getByText('Configurar calendário fictício').click();
+  const calendarForm=page.locator('form').filter({has:page.getByLabel('Meses do calendário')});
+  await calendarForm.getByLabel('Nome').fill('Cômputo de Aldea');
+  await calendarForm.getByLabel('Meses do calendário').fill('Aurora:30\nNévoa:18');
+  await calendarForm.getByLabel('Dias da semana').fill('Corvo, Lua, Cinzas');
+  await calendarForm.getByLabel('Ciclos do calendário').fill('Lua Rubra:17:2');
+  await calendarForm.getByLabel('Feriados do calendário').fill('Fundação:Aurora:1:Início da corte');
+  await calendarForm.getByRole('button',{name:'Salvar calendário'}).click();
+  await page.getByRole('button',{name:'Configurar data'}).click();
+  await page.getByLabel('Data histórica textual').fill('Ano -40 da Era Atual');
+  await page.getByLabel('Chave de ordenação').fill('-40010');
+  await page.getByLabel('Era do evento').selectOption({label:'Era Atual'});
+  await page.getByLabel('Precisão temporal').selectOption('DAY');
+  await page.getByLabel('Texto exibido').fill('1 de Aurora, ano -40');
+  await page.getByLabel('Usar Cômputo de Aldea').check();
+  await page.getByLabel('Ano do World').fill('-40');
+  await page.getByLabel('Mês do World').selectOption({label:'Aurora'});
+  await page.getByLabel('Dia do World').fill('1');
+  await page.getByRole('button',{name:'Salvar data'}).click();
+  await expect(page.getByText('1 de Aurora, ano -40')).toBeVisible();
+
   await navigateFromMenu('Diário');
   await page.getByRole('button',{name:'Nova página'}).click();
   await page.getByLabel('Título').fill('Próxima sessão');
