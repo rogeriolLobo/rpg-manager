@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
 import { Badge, Empty, Loading, PageHeader } from "./dashboard-page";
+import { displayLabel } from "../labels";
 
 export interface Rpg {
   id: string;
@@ -21,6 +22,8 @@ export interface Rpg {
   wantsToPlay: boolean;
   priority: string;
   playGroupNotes: string;
+  playGroupId: string | null;
+  playGroupName: string | null;
   plannedPlayDate: string | null;
   tableStatus: string;
   gameMaster: string;
@@ -33,6 +36,7 @@ export interface Rpg {
 interface Metadata {
   categories: Array<{ id: string; name: string }>;
   subgenres: Array<{ id: string; categoryId: string; name: string }>;
+  groups: Array<{ id: string; name: string }>;
 }
 export function LibraryPage() {
   const [params, setParams] = useSearchParams();
@@ -204,8 +208,8 @@ export function LibraryPage() {
                   <td>
                     <Badge>{item.readingStatus}</Badge>
                   </td>
-                  <td>{item.priority}</td>
-                  <td>{item.tableStatus}</td>
+                  <td>{displayLabel(item.priority)}</td>
+                  <td>{displayLabel(item.tableStatus)}</td>
                   <td>{item.recommendationScore}</td>
                 </tr>
               ))}
@@ -242,7 +246,7 @@ function BookCard({ item }: { item: Rpg }) {
         <p>{item.subgenreName ?? "Sem subgênero"}</p>
         <div className="book-meta">
           <span>
-            {item.priority === "NONE" ? "Sem prioridade" : item.priority}
+            {displayLabel(item.priority)}
           </span>
           <strong>{item.recommendationScore} pts</strong>
         </div>
@@ -260,6 +264,7 @@ const initial = {
   wantsToPlay: false,
   priority: "NONE",
   playGroupNotes: "",
+  playGroupId: "",
   plannedPlayDate: "",
   tableStatus: "IDEA",
   gameMaster: "",
@@ -285,6 +290,7 @@ export function RpgFormPage() {
           wantsToPlay: item.wantsToPlay,
           priority: item.priority,
           playGroupNotes: item.playGroupNotes,
+          playGroupId: item.playGroupId ?? "",
           plannedPlayDate: item.plannedPlayDate ?? "",
           tableStatus: item.tableStatus,
           gameMaster: item.gameMaster,
@@ -313,6 +319,7 @@ export function RpgFormPage() {
       wantsToPlay: Boolean(form.wantsToPlay),
       priority: String(form.priority),
       playGroupNotes: String(form.playGroupNotes),
+      playGroupId: form.playGroupId || null,
       plannedPlayDate: form.plannedPlayDate || null,
       tableStatus: String(form.tableStatus),
       gameMaster: String(form.gameMaster),
@@ -437,7 +444,14 @@ export function RpgFormPage() {
           Quero jogar
         </label>
         <label>
-          Grupo / jogadores
+          Grupo de jogo
+          <select value={String(form.playGroupId)} onChange={(e) => update("playGroupId", e.target.value)}>
+            <option value="">Nenhum grupo cadastrado</option>
+            {metadata?.groups.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+          </select>
+        </label>
+        <label>
+          Grupo / jogadores (texto legado)
           <input
             value={String(form.playGroupNotes)}
             onChange={(e) => update("playGroupNotes", e.target.value)}
@@ -555,7 +569,7 @@ export function RpgDetailPage() {
             </div>
             <div>
               <dt>Prioridade</dt>
-              <dd>{item.priority}</dd>
+              <dd>{displayLabel(item.priority)}</dd>
             </div>
             <div>
               <dt>Já jogou</dt>
@@ -567,7 +581,7 @@ export function RpgDetailPage() {
             </div>
             <div>
               <dt>Grupo</dt>
-              <dd>{item.playGroupNotes || "Não definido"}</dd>
+              <dd>{item.playGroupName || item.playGroupNotes || "Não definido"}</dd>
             </div>
             <div>
               <dt>Mestre</dt>
@@ -575,7 +589,7 @@ export function RpgDetailPage() {
             </div>
             <div>
               <dt>Mesa</dt>
-              <dd>{item.tableStatus}</dd>
+              <dd>{displayLabel(item.tableStatus)}</dd>
             </div>
           </dl>
           <h2>Notas</h2>

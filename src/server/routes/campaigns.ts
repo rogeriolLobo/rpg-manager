@@ -5,18 +5,29 @@ import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
 export const campaignRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
-interface CampaignRow { id: string; rpg_id: string; rpg_title: string; name: string; status: CampaignStatus; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; legacy_members_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
-const SELECT = `SELECT c.*,r.title rpg_title,(SELECT COUNT(*) FROM campaign_sessions cs WHERE cs.campaign_id=c.id) sessions_completed,
+interface CampaignRow { id: string; rpg_id: string; rpg_title: string; name: string; status: CampaignStatus; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; play_group_id: string | null; play_group_name: string | null; legacy_members_text: string; legacy_characters_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
+const SELECT = `SELECT c.*,r.title rpg_title,g.name play_group_name,c.legacy_sessions_completed+(SELECT COUNT(*) FROM campaign_sessions cs WHERE cs.campaign_id=c.id) sessions_completed,
   EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.active=1 AND length(cm.character_name)>0) has_characters
-  FROM campaigns c JOIN rpgs r ON r.id=c.rpg_id`;
+  FROM campaigns c JOIN rpgs r ON r.id=c.rpg_id LEFT JOIN play_groups g ON g.id=c.play_group_id`;
 function present(row: CampaignRow) {
   const state: CampaignPlanningState = { status: row.status, sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date,
     frequency: row.frequency, nextSessionDate: row.next_session_date, hasCharacters: Boolean(row.has_characters), sessionsCompleted: Number(row.sessions_completed), sessionGoal: row.session_goal };
   return { id: row.id, rpgId: row.rpg_id, rpgTitle: row.rpg_title, name: row.name, status: row.status, gameMaster: row.game_master,
     sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date, frequency: row.frequency, nextSessionDate: row.next_session_date,
-    lastSessionDate: row.last_session_date, sessionGoal: row.session_goal, legacyMembersText: row.legacy_members_text, notes: row.notes,
+    lastSessionDate: row.last_session_date, sessionGoal: row.session_goal, playGroupId: row.play_group_id, playGroupName: row.play_group_name,
+    legacyMembersText: row.legacy_members_text, legacyCharactersText: row.legacy_characters_text, notes: row.notes,
     sessionsCompleted: state.sessionsCompleted, progress: calculateCampaignProgress(state), stage: calculateCampaignStage(state), nextAction: calculateNextCampaignAction(state),
     createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at };
+}
+
+async function groupMemberStatements(c: Context<{ Bindings: Env; Variables: AppVariables }>, groupId: string | null | undefined, campaignId: string, now: string): Promise<D1PreparedStatement[]> {
+  if (!groupId) return [];
+  const group = await c.env.DB.prepare('SELECT id FROM play_groups WHERE id=? AND user_id=?').bind(groupId, c.get('user').id).first();
+  if (!group) throw new ApiError(422, 'INVALID_PLAY_GROUP', 'Grupo de jogo inválido.');
+  const members = await c.env.DB.prepare('SELECT id,player_name,notes FROM play_group_members WHERE group_id=? AND active=1 ORDER BY player_name').bind(groupId).all<{id:string;player_name:string;notes:string}>();
+  return members.results.map((member) => c.env.DB.prepare(`INSERT OR IGNORE INTO campaign_members
+    (id,campaign_id,group_member_id,player_name,character_name,notes,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(), campaignId, member.id, member.player_name, '', member.notes, 1, now, now));
 }
 async function ownedCampaign(c: Context<{ Bindings: Env; Variables: AppVariables }>, id: string): Promise<CampaignRow> {
   const row = await c.env.DB.prepare(`${SELECT} WHERE c.id=? AND c.user_id=?`).bind(id, c.get('user').id).first<CampaignRow>();
@@ -32,21 +43,22 @@ campaignRoutes.post('/', async (c) => {
   const rpg = await c.env.DB.prepare('SELECT id FROM rpgs WHERE id=? AND user_id=?').bind(input.rpgId, user.id).first();
   if (!rpg) throw new ApiError(422, 'INVALID_RPG', 'RPG inválido.');
   const id = crypto.randomUUID(); const now = nowIso();
-  await c.env.DB.prepare(`INSERT INTO campaigns (id,user_id,rpg_id,name,status,game_master,session_zero_date,first_session_date,frequency,next_session_date,session_goal,legacy_members_text,notes,created_at,updated_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
-      cleanNullable(input.nextSessionDate),input.sessionGoal ?? null,input.legacyMembersText,input.notes,now,now,input.status==='COMPLETED'?now:null).run();
+  const memberStatements = await groupMemberStatements(c, input.playGroupId, id, now);
+  await c.env.DB.batch([c.env.DB.prepare(`INSERT INTO campaigns (id,user_id,rpg_id,name,status,game_master,session_zero_date,first_session_date,frequency,next_session_date,session_goal,play_group_id,legacy_members_text,legacy_characters_text,notes,created_at,updated_at,completed_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
+      cleanNullable(input.nextSessionDate),input.sessionGoal ?? null,cleanNullable(input.playGroupId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,now,input.status==='COMPLETED'?now:null),...memberStatements]);
   return c.json({ item: present(await ownedCampaign(c,id)) },201);
 });
 campaignRoutes.get('/:id', async (c) => {
   const row=await ownedCampaign(c,c.req.param('id')); const [members,sessions]=await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id,player_name playerName,character_name characterName,notes,active,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY active DESC,player_name').bind(row.id),
+    c.env.DB.prepare('SELECT id,group_member_id groupMemberId,player_name playerName,character_name characterName,notes,active,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY active DESC,player_name').bind(row.id),
     c.env.DB.prepare('SELECT id,session_number sessionNumber,title,played_at playedAt,summary,gm_notes gmNotes,next_hooks nextHooks,created_at createdAt,updated_at updatedAt FROM campaign_sessions WHERE campaign_id=? ORDER BY session_number DESC').bind(row.id),
   ]); return c.json({item:present(row),members:members.results,sessions:sessions.results});
 });
 campaignRoutes.patch('/:id',async(c)=>{const input=await readJson(c,campaignInputSchema);const user=c.get('user');
   const rpg=await c.env.DB.prepare('SELECT id FROM rpgs WHERE id=? AND user_id=?').bind(input.rpgId,user.id).first();if(!rpg)throw new ApiError(422,'INVALID_RPG','RPG inválido.');
-  const now=nowIso();const result=await c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,legacy_members_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
-    .bind(input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,input.legacyMembersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id).run();
+  const now=nowIso();const memberStatements=await groupMemberStatements(c,input.playGroupId,c.req.param('id'),now);const [result]=await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,play_group_id=?,legacy_members_text=?,legacy_characters_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
+    .bind(input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,cleanNullable(input.playGroupId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id),...memberStatements]);
   if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.json({item:present(await ownedCampaign(c,c.req.param('id')))});});
 campaignRoutes.delete('/:id',async(c)=>{const result=await c.env.DB.prepare('DELETE FROM campaigns WHERE id=? AND user_id=?').bind(c.req.param('id'),c.get('user').id).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.body(null,204);});
 

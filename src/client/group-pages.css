@@ -1,0 +1,48 @@
+.group-members {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.member-editor {
+  align-items: center;
+  border-top: 1px solid #eadfce;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.5fr) auto auto auto;
+  padding-top: 0.65rem;
+}
+
+.member-editor .form-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.campaign-member-editor {
+  align-items: center;
+  border-top: 1px solid #eadfce;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(160px, 1.4fr) auto auto auto;
+  padding-top: 0.65rem;
+}
+
+.campaign-member-editor .form-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 850px) {
+  .member-editor {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .campaign-member-editor {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .member-editor > input,
+  .campaign-member-editor > input {
+    grid-column: 1 / -1;
+  }
+}

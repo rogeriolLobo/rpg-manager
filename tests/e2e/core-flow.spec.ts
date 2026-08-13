@@ -28,6 +28,14 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("link", { name: "Já guardei, continuar" }).click();
   await expect(page).toHaveURL(/\/app$/u);
   await openNavigation();
+  await page.getByRole("link", { name: "Grupos" }).click();
+  await page.getByRole("link", { name: "Novo grupo" }).click();
+  await page.getByLabel("Nome do grupo").fill("Mesa E2E");
+  await page.getByRole("button", { name: "Salvar grupo" }).click();
+  await page.getByLabel("Nome do jogador").fill("Marcelo");
+  await page.getByRole("button", { name: "Adicionar jogador" }).click();
+  await expect(page.getByLabel("Nome de Marcelo")).toBeVisible();
+  await openNavigation();
   await page.getByRole("link", { name: "Biblioteca" }).click();
   await page.getByRole("link", { name: "Novo RPG" }).click();
   await page.getByLabel("Título").fill("Blue Rose E2E");
@@ -35,6 +43,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByLabel("Subgênero").selectOption("alta-fantasia");
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
+  await page.getByLabel("Grupo de jogo").selectOption({label:"Mesa E2E"});
   await page.getByLabel("Quero jogar").check();
   await page.getByLabel("Grupo / jogadores").fill("Adriana, Marcelo");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
@@ -45,14 +54,16 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("link", { name: "Criar campanha" }).click();
   await page.getByLabel("Nome da campanha").fill("A Coroa de E2E");
   await page.getByLabel("Mestre").fill("Rogério");
+  await page.getByLabel("Grupo de jogo").selectOption({label:"Mesa E2E"});
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(
     page.getByRole("heading", { name: "A Coroa de E2E" }),
   ).toBeVisible();
+  await expect(page.getByLabel("Jogador Marcelo")).toBeVisible();
   await page.getByLabel("Nome do jogador").fill("Adriana");
   await page.getByLabel("Nome do personagem").fill("Lina");
   await page.getByRole("button", { name: "Adicionar" }).click();
-  await expect(page.getByText("Lina")).toBeVisible();
+  await expect(page.getByLabel("Personagem de Adriana")).toHaveValue("Lina");
 
   await page.getByRole("link", { name: "Registrar sessão" }).first().click();
   await page.getByLabel("Título").fill("O chamado");

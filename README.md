@@ -57,7 +57,11 @@ Detalhes e rollback estão em [CLOUDFLARE.md](docs/deployment/CLOUDFLARE.md). Ne
 
 ## Importação e backup
 
-Em **Configurações**, envie o CSV exportado da aba `Catálogo de Livros`, revise a prévia e confirme. A cópia capturada da fonte original está em [google-sheets-catalog.csv](data/import/google-sheets-catalog.csv). JSON completo e CSV do catálogo podem ser baixados pela mesma tela. Consulte [GOOGLE_SHEETS.md](docs/import/GOOGLE_SHEETS.md).
+Em **Configurações**, envie primeiro o CSV da aba `Catálogo de Livros` e depois, se necessário, o CSV da aba `Campanhas`. Ambos exigem prévia e confirmação. A cópia capturada do catálogo está em [google-sheets-catalog.csv](data/import/google-sheets-catalog.csv). JSON completo e CSV do catálogo podem ser baixados pela mesma tela. Consulte [GOOGLE_SHEETS.md](docs/import/GOOGLE_SHEETS.md).
+
+## Grupos de jogo
+
+Em **Grupos**, crie um grupo e seus jogadores. O grupo pode ser associado a vários RPGs e campanhas. Ao associá-lo a uma campanha, os membros ativos entram no elenco e podem receber personagem, notas e presença específicos. Consulte [ADR-003-play-groups.md](docs/architecture/ADR-003-play-groups.md).
 
 ## Estrutura
 

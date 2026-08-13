@@ -24,7 +24,15 @@ export function SettingsPage() {
             CSV exportado da aba “Catálogo de Livros”. Nada é gravado antes da
             confirmação.
           </p>
-          <ImportForm />
+          <ImportForm kind="catalog" />
+        </section>
+        <section className="panel setting-card">
+          <FileSpreadsheet />
+          <h2>Importar campanhas</h2>
+          <p>
+            CSV exportado da aba “Campanhas”. Importe o catálogo primeiro.
+          </p>
+          <ImportForm kind="campaigns" />
         </section>
         <section className="panel setting-card">
           <FileJson />
@@ -49,7 +57,7 @@ export function SettingsPage() {
     </div>
   );
 }
-function ImportForm() {
+function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
   const [preview, setPreview] = useState<{
     jobId: string;
     count: number;
@@ -66,12 +74,17 @@ function ImportForm() {
     ) as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    setPreview(await postJson("/import/preview", { csv: await file.text() }));
+    try {
+      const previewPath=kind==="catalog"?"/import/preview":"/import/campaigns/preview";
+      setPreview(await postJson(previewPath, { csv: await file.text() }));
+    } catch (reason) {
+      setMessage(reason instanceof Error?reason.message:"Falha inesperada.");
+    }
   };
   const confirmImport = async () => {
     if (!preview) return;
     const result = await postJson<{ imported: number; skipped: number }>(
-      "/import/confirm",
+      kind==="catalog"?"/import/confirm":"/import/campaigns/confirm",
       { jobId: preview.jobId },
     );
     setMessage(

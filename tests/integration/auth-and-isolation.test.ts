@@ -305,6 +305,67 @@ describe("API real com D1", () => {
       ).status,
     ).toBe(404);
   });
+  it("reutiliza grupos em RPGs e campanhas e sincroniza o elenco", async () => {
+    const account = await register("groups@example.com");
+    const groupResponse = await request("/groups", "POST", { name: "Mesa de sábado", notes: "Grupo principal" }, account.cookie, account.csrf);
+    expect(groupResponse.status).toBe(201);
+    const groupId = ((await groupResponse.json()) as {item:{id:string}}).item.id;
+    const memberResponse = await request(`/groups/${groupId}/members`, "POST", { playerName: "Adriana", notes: "Prefere fantasia", active: true }, account.cookie, account.csrf);
+    expect(memberResponse.status).toBe(201);
+    const groupMemberId = ((await memberResponse.json()) as {id:string}).id;
+    const rpgResponse = await request("/rpgs", "POST", { ...rpg, playGroupId: groupId, playGroupNotes: "" }, account.cookie, account.csrf);
+    expect(rpgResponse.status).toBe(201);
+    const rpgBody = (await rpgResponse.json()) as {item:{id:string;playGroupName:string;readiness:string}};
+    expect(rpgBody.item.playGroupName).toBe("Mesa de sábado");
+    const campaignResponse = await request("/campaigns", "POST", { ...campaign, rpgId: rpgBody.item.id, playGroupId: groupId, legacyCharactersText: "" }, account.cookie, account.csrf);
+    expect(campaignResponse.status).toBe(201);
+    const campaignId = ((await campaignResponse.json()) as {item:{id:string}}).item.id;
+    const detail = await request(`/campaigns/${campaignId}`, "GET", undefined, account.cookie);
+    expect(((await detail.json()) as {members:Array<{playerName:string}>}).members.map((item)=>item.playerName)).toEqual(["Adriana"]);
+    const update = await request(`/groups/${groupId}/members/${groupMemberId}`, "PATCH", { playerName: "Adriana L.", notes: "", active: true }, account.cookie, account.csrf);
+    expect(update.status).toBe(200);
+    const updatedDetail = await request(`/campaigns/${campaignId}`, "GET", undefined, account.cookie);
+    expect(((await updatedDetail.json()) as {members:Array<{playerName:string}>}).members[0].playerName).toBe("Adriana L.");
+    const intruder = await register("groups-intruder@example.com");
+    const intruderGroupResponse = await request("/groups", "POST", { name: "Outro grupo", notes: "" }, intruder.cookie, intruder.csrf);
+    const intruderGroupId = ((await intruderGroupResponse.json()) as {item:{id:string}}).item.id;
+    const crossAccountUpdate = await request(`/groups/${intruderGroupId}/members/${groupMemberId}`, "PATCH", { playerName: "Nome indevido", notes: "", active: false }, intruder.cookie, intruder.csrf);
+    expect(crossAccountUpdate.status).toBe(404);
+    const detailAfterCrossAccountUpdate = await request(`/campaigns/${campaignId}`, "GET", undefined, account.cookie);
+    expect(((await detailAfterCrossAccountUpdate.json()) as {members:Array<{playerName:string;active:number}>}).members[0]).toMatchObject({ playerName: "Adriana L.", active: 1 });
+    const backup = await request('/export','GET',undefined,account.cookie);
+    const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[]}};
+    expect(backupData.version).toBe(2);
+    expect(backupData.data.groups).toHaveLength(1);
+    expect(backupData.data.groupMembers).toHaveLength(1);
+  });
+  it("importa data planejada do catálogo e preserva a campanha legada", async () => {
+    const account = await register("imports@example.com");
+    const catalogCsv = [
+      'Sistema / Jogo,Categoria,Subgênero,Status da leitura,Quando jogar',
+      'Blue Rose,Fantasia,Alta Fantasia,Lendo,20/09/2026',
+    ].join('\n');
+    const catalogPreview = await request('/import/preview','POST',{csv:catalogCsv},account.cookie,account.csrf);
+    expect(catalogPreview.status).toBe(200);
+    const catalogJob = (await catalogPreview.json()) as {jobId:string;canConfirm:boolean};
+    expect(catalogJob.canConfirm).toBe(true);
+    expect((await request('/import/confirm','POST',{jobId:catalogJob.jobId},account.cookie,account.csrf)).status).toBe(200);
+    const catalog = await request('/rpgs','GET',undefined,account.cookie);
+    const importedRpg = ((await catalog.json()) as {items:Array<{plannedPlayDate:string}>}).items[0];
+    expect(importedRpg.plannedPlayDate).toBe('2026-09-20');
+    const campaignsCsv = [
+      'Campanha,RPG / Sistema,Status,Mestre,Grupo / Jogadores,Personagens,Sessão Zero,Primeira Sessão,Frequência,Próxima Sessão,Última Sessão,Sessões Realizadas,Meta de Sessões,Observações',
+      'A Coroa Azul,Blue Rose,Em andamento,Rogério,"Adriana, Marcelo","Lina, Téo",01/09/2026,08/09/2026,Quinzenal,22/09/2026,08/09/2026,3,12,Legado preservado',
+    ].join('\n');
+    const campaignPreview = await request('/import/campaigns/preview','POST',{csv:campaignsCsv},account.cookie,account.csrf);
+    expect(campaignPreview.status).toBe(200);
+    const campaignJob = (await campaignPreview.json()) as {jobId:string;canConfirm:boolean};
+    expect(campaignJob.canConfirm).toBe(true);
+    expect((await request('/import/campaigns/confirm','POST',{jobId:campaignJob.jobId},account.cookie,account.csrf)).status).toBe(200);
+    const campaigns = await request('/campaigns','GET',undefined,account.cookie);
+    const importedCampaign = ((await campaigns.json()) as {items:Array<{legacyMembersText:string;legacyCharactersText:string;sessionsCompleted:number;lastSessionDate:string}>}).items[0];
+    expect(importedCampaign).toMatchObject({legacyMembersText:'Adriana, Marcelo',legacyCharactersText:'Lina, Téo',sessionsCompleted:3,lastSessionDate:'2026-09-08'});
+  });
   it("rejeita payload excessivo e devolve cabeçalhos defensivos", async () => {
     const account = await register("headers@example.com");
     const oversized = await worker.default.fetch(`${origin}/api/v1/rpgs`, {

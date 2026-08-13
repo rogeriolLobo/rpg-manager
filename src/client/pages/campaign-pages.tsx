@@ -1,4 +1,4 @@
-import { CalendarPlus, Plus, Trash2, UserPlus } from "lucide-react";
+import { CalendarPlus, Plus, Save, Trash2, UserPlus } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Link,
@@ -15,6 +15,7 @@ import {
   Loading,
   PageHeader,
 } from "./dashboard-page";
+import { displayLabel } from "../labels";
 
 interface Campaign {
   id: string;
@@ -29,7 +30,10 @@ interface Campaign {
   nextSessionDate: string | null;
   lastSessionDate: string | null;
   sessionGoal: number | null;
+  playGroupId: string | null;
+  playGroupName: string | null;
   legacyMembersText: string;
+  legacyCharactersText: string;
   notes: string;
   sessionsCompleted: number;
   progress: number | null;
@@ -52,6 +56,7 @@ interface GameSession {
   gmNotes: string;
   nextHooks: string;
 }
+interface PlayGroup { id:string; name:string }
 export function CampaignsPage() {
   const [items, setItems] = useState<Campaign[]>();
   useEffect(() => {
@@ -133,7 +138,9 @@ const blank = {
   frequency: "",
   nextSessionDate: "",
   sessionGoal: "",
+  playGroupId: "",
   legacyMembersText: "",
+  legacyCharactersText: "",
   notes: "",
 };
 export function CampaignFormPage() {
@@ -141,15 +148,14 @@ export function CampaignFormPage() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const [rpgs, setRpgs] = useState<Rpg[]>([]);
+  const [groups, setGroups] = useState<PlayGroup[]>([]);
   const [form, setForm] = useState<Record<string, string>>({
     ...blank,
     rpgId: search.get("rpgId") ?? "",
   });
   const [error, setError] = useState("");
   useEffect(() => {
-    void api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title").then((result) =>
-      setRpgs(result.items),
-    );
+    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups")]).then(([rpgResult,groupResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);});
     if (id)
       void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) =>
         setForm({
@@ -162,7 +168,9 @@ export function CampaignFormPage() {
           frequency: item.frequency ?? "",
           nextSessionDate: item.nextSessionDate ?? "",
           sessionGoal: item.sessionGoal?.toString() ?? "",
+          playGroupId: item.playGroupId ?? "",
           legacyMembersText: item.legacyMembersText,
+          legacyCharactersText: item.legacyCharactersText,
           notes: item.notes,
         }),
       );
@@ -178,6 +186,7 @@ export function CampaignFormPage() {
       firstSessionDate: form.firstSessionDate || null,
       nextSessionDate: form.nextSessionDate || null,
       sessionGoal: form.sessionGoal ? Number(form.sessionGoal) : null,
+      playGroupId: form.playGroupId || null,
     };
     try {
       const result = id
@@ -290,12 +299,23 @@ export function CampaignFormPage() {
           />
         </label>
         <label>
+          Grupo de jogo
+          <select value={form.playGroupId} onChange={(e) => update("playGroupId", e.target.value)}>
+            <option value="">Nenhum grupo</option>
+            {groups.map((group)=><option value={group.id} key={group.id}>{group.name}</option>)}
+          </select>
+        </label>
+        <label>
           Grupo legado (se ambíguo)
           <input
             value={form.legacyMembersText}
             onChange={(e) => update("legacyMembersText", e.target.value)}
             maxLength={2000}
           />
+        </label>
+        <label className="span-2">
+          Personagens legados (se ambíguos)
+          <input value={form.legacyCharactersText} onChange={(e) => update("legacyCharactersText", e.target.value)} maxLength={2000}/>
         </label>
         <label className="span-2">
           Notas
@@ -394,7 +414,8 @@ export function CampaignDetailPage() {
             "Progresso",
             data.item.progress === null ? "Sem meta" : `${data.item.progress}%`,
           ],
-          ["Frequência", data.item.frequency ?? "Não definida"],
+          ["Frequência", data.item.frequency ? displayLabel(data.item.frequency) : "Não definida"],
+          ["Grupo", data.item.playGroupName ?? "Não definido"],
         ].map(([label, value]) => (
           <article key={label}>
             <span>{label}</span>
@@ -423,32 +444,11 @@ export function CampaignDetailPage() {
             </button>
           </form>
           {data.members.length ? (
-            <ul className="clean-list members-list">
+            <div className="group-members">
               {data.members.map((member) => (
-                <li key={member.id}>
-                  <div>
-                    <strong>{member.playerName}</strong>
-                    <span>
-                      {member.characterName || "Personagem não definido"}
-                    </span>
-                  </div>
-                  <button
-                    className="icon-button"
-                    aria-label={`Excluir ${member.playerName}`}
-                    onClick={async () => {
-                      if (confirm("Excluir este membro?")) {
-                        await deleteApi(
-                          `/campaigns/${id}/members/${member.id}`,
-                        );
-                        await load();
-                      }
-                    }}
-                  >
-                    <Trash2 />
-                  </button>
-                </li>
+                <CampaignMemberEditor key={member.id} campaignId={id!} member={member} onUpdated={load}/>
               ))}
-            </ul>
+            </div>
           ) : (
             <p>Nenhum jogador cadastrado.</p>
           )}
@@ -457,6 +457,7 @@ export function CampaignDetailPage() {
               <strong>Texto legado:</strong> {data.item.legacyMembersText}
             </p>
           )}
+          {data.item.legacyCharactersText && <p className="legacy-note"><strong>Personagens legados:</strong> {data.item.legacyCharactersText}</p>}
         </section>
         <section className="panel">
           <h2>Planejamento</h2>
@@ -516,6 +517,12 @@ export function CampaignDetailPage() {
       </button>
     </div>
   );
+}
+
+function CampaignMemberEditor({campaignId,member,onUpdated}:{campaignId:string;member:Member;onUpdated:()=>Promise<void>}) {
+  const [form,setForm]=useState({playerName:member.playerName,characterName:member.characterName,notes:member.notes,active:Boolean(member.active)}); const [error,setError]=useState('');
+  const save=async()=>{setError('');try{await patchJson(`/campaigns/${campaignId}/members/${member.id}`,form);await onUpdated();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
+  return <div className="campaign-member-editor"><input aria-label={`Jogador ${member.playerName}`} value={form.playerName} onChange={(event)=>setForm({...form,playerName:event.target.value})}/><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/><input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
 }
 
 export function SessionFormPage() {

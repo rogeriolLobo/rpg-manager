@@ -43,6 +43,7 @@ export const rpgInputSchema = z.strictObject({
   wantsToPlay: z.boolean(),
   priority: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH']),
   playGroupNotes: trimmed(1000).default(''),
+  playGroupId: z.string().trim().max(80).nullable().optional(),
   plannedPlayDate: optionalDate,
   tableStatus: z.enum(['IDEA', 'PREPARING', 'SCHEDULED', 'PLAYING', 'COMPLETED']),
   gameMaster: trimmed(100).default(''),
@@ -55,18 +56,31 @@ export const campaignInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(160),
   status: z.enum(['PLANNING', 'SESSION_ZERO', 'PREPARING', 'IN_PROGRESS', 'PAUSED', 'COMPLETED']),
   gameMaster: trimmed(100).default(''),
+  playGroupId: z.string().trim().max(80).nullable().optional(),
   sessionZeroDate: optionalDate,
   firstSessionDate: optionalDate,
   frequency: z.enum(['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'BIMONTHLY', 'IRREGULAR']).nullable().optional(),
   nextSessionDate: optionalDate,
   sessionGoal: z.number().int().positive().max(999).nullable().optional(),
   legacyMembersText: trimmed(2000).default(''),
+  legacyCharactersText: trimmed(2000).default(''),
   notes: trimmed(10000).default(''),
 });
 
 export const memberInputSchema = z.strictObject({
   playerName: z.string().trim().min(1).max(100),
   characterName: trimmed(100).default(''),
+  notes: trimmed(2000).default(''),
+  active: z.boolean().default(true),
+});
+
+export const playGroupInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  notes: trimmed(5000).default(''),
+});
+
+export const playGroupMemberInputSchema = z.strictObject({
+  playerName: z.string().trim().min(1).max(100),
   notes: trimmed(2000).default(''),
   active: z.boolean().default(true),
 });

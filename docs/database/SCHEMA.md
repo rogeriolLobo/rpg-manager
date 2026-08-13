@@ -13,6 +13,9 @@
 - `campaign_session_attendance`: relação N:N entre sessão e membro.
 - `user_preferences`: preferências extensíveis por usuário.
 - `import_jobs`: prévias temporárias, hash idempotente e confirmação.
+- `play_groups` e `play_group_members`: grupos reutilizáveis pertencentes ao usuário.
+- `rpgs.play_group_id` e `campaigns.play_group_id`: vínculo opcional sem remover os textos legados.
+- `campaign_members.group_member_id`: origem rastreável do membro copiado de um grupo.
 
 UUIDs aleatórios são gerados no Worker. Exclusão de conta remove os dados privados por cascata deliberada; taxonomia é restringida. Checks limitam enums e booleanos. Os índices cobrem sessão por token/expiração, catálogo por usuário/filtros, campanhas por usuário e sessões por campanha/data.
 

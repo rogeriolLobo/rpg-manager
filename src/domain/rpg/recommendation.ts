@@ -37,18 +37,22 @@ export function compareRecommendations(a: RecommendationCandidate, b: Recommenda
 }
 
 export function calculateRpgReadiness(candidate: RecommendationCandidate): string {
-  if (!candidate.wantsToPlay) return 'Avaliar interesse';
-  if (candidate.readingStatus !== 'READ') return 'Ler antes de jogar';
-  if (!candidate.hasPlayGroup) return 'Definir grupo';
-  if (candidate.tableStatus === 'IDEA') return 'Preparar mesa';
-  return 'Pronto para jogar';
+  if (candidate.tableStatus === 'PLAYING') return 'Em andamento';
+  if (candidate.tableStatus === 'SCHEDULED') return 'Já agendado';
+  if (candidate.tableStatus === 'PREPARING') return 'Preparando';
+  if (candidate.wantsToPlay) {
+    if (candidate.readingStatus === 'READ') return candidate.hasPlayGroup ? 'Pronto para marcar' : 'Definir grupo';
+    return candidate.hasPlayGroup ? 'Ler antes de jogar' : 'Ler e definir grupo';
+  }
+  if (candidate.readingStatus === 'READ') return candidate.hasPlayGroup ? 'Pronto, se houver interesse' : 'Regras lidas; avaliar interesse';
+  return candidate.hasPlayGroup ? 'Grupo disponível; avaliar interesse' : 'Avaliar interesse';
 }
 
 export function calculateRpgNextAction(candidate: RecommendationCandidate): string {
+  if (candidate.tableStatus === 'PLAYING') return 'Continuar campanha';
+  if (candidate.tableStatus === 'SCHEDULED') return 'Preparar próxima sessão';
+  if (candidate.tableStatus === 'PREPARING') return 'Fechar data e sessão zero';
   if (!candidate.wantsToPlay) return 'Marcar Quero jogar? se interessar';
   if (candidate.readingStatus !== 'READ') return 'Priorizar leitura';
-  if (!candidate.hasPlayGroup) return 'Convidar jogadores';
-  if (candidate.tableStatus === 'IDEA') return 'Iniciar preparação';
-  if (candidate.tableStatus === 'PREPARING') return 'Agendar mesa';
-  return 'Acompanhar mesa';
+  return candidate.hasPlayGroup ? 'Marcar a mesa' : 'Convidar jogadores';
 }
