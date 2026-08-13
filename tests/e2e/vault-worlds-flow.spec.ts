@@ -53,8 +53,9 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
 
   await navigateFromMenu('Vault');
   await page.getByRole('link',{name:'Nova entidade'}).click();
-  await page.getByLabel('Tipo').selectOption('ADVENTURE');
   await page.getByLabel('Nome').fill('A Noite do Corvo');
+  await page.getByLabel('Tipo').selectOption('ADVENTURE');
+  await expect(page.getByLabel('Formato')).toBeVisible();
   await page.getByLabel('World').selectOption({label:'Aldea'});
   await page.getByLabel('Formato').selectOption('ONE_SHOT');
   await page.getByLabel('Sessões recomendadas').fill('1');
