@@ -175,6 +175,27 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await page.getByRole('button',{name:'Salvar data'}).click();
   await expect(page.getByText('1 de Aurora, ano -40')).toBeVisible();
 
+  await navigateFromMenu('Bestiário');
+  await expect(page.getByRole('heading',{name:'Criaturas de Aldea'})).toBeVisible();
+  await page.getByLabel('Nome').fill('Ficha de ameaça');
+  await page.getByLabel('Descrição').fill('Modelo narrativo da mesa.');
+  await page.getByLabel('Chave').fill('ameaca');
+  await page.getByLabel('Rótulo').fill('Ameaça');
+  await page.getByLabel('Tipo').selectOption('NUMBER');
+  await page.getByLabel('Obrigatório').check();
+  await page.getByRole('button',{name:'Criar modelo'}).click();
+  await expect(page.getByText('Ficha de ameaça')).toBeVisible();
+  await page.getByRole('link',{name:'Nova criatura'}).click();
+  await expect(page.getByLabel('Tipo')).toHaveValue('CREATURE');
+  await page.getByLabel('Nome').fill('Corvo de Cinzas');
+  await page.getByLabel('Classificação').fill('Espírito');
+  await page.getByLabel('Habitat').fill('Ruínas antigas');
+  await page.getByLabel('Modelo de estatísticas').selectOption({label:'Ficha de ameaça'});
+  await page.getByRole('spinbutton',{name:'Ameaça',exact:true}).fill('3');
+  await page.getByRole('button',{name:'Salvar entidade'}).click();
+  await expect(page.getByRole('heading',{name:'Corvo de Cinzas'})).toBeVisible();
+  await expect(page.getByText('Ficha de ameaça')).toBeVisible();
+
   await navigateFromMenu('Diário');
   await page.getByRole('button',{name:'Nova página'}).click();
   await page.getByLabel('Título').fill('Próxima sessão');

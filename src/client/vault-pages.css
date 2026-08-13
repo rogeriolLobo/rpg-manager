@@ -159,6 +159,58 @@
 .adventure-fields legend {
   padding: 0 0.4rem;
 }
+.gm-field,
+.gm-detail {
+  background: var(--warning-background);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+}
+.specialized-user > strong {
+  display: block;
+  margin-bottom: 0.55rem;
+}
+.selected-user {
+  align-items: center;
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+}
+.stat-block {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+}
+.bestiary-layout {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.8fr);
+}
+.bestiary-layout > div,
+.template-form,
+.template-fields {
+  display: grid;
+  gap: 1rem;
+}
+.bestiary-layout h2 {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+.template-field {
+  align-items: end;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr 1.2fr 0.8fr auto auto;
+  padding: 0.75rem;
+}
+.template-field .checkbox-row {
+  padding-bottom: 0.7rem;
+}
+.template-list {
+  margin-top: 1rem;
+}
 .vault-detail-grid {
   grid-template-columns: minmax(320px, 0.75fr) minmax(0, 1.5fr);
 }
@@ -171,8 +223,12 @@
   }
 }
 @media (max-width: 850px) {
-  .vault-detail-grid {
+  .vault-detail-grid,
+  .bestiary-layout {
     grid-template-columns: 1fr;
+  }
+  .template-field {
+    grid-template-columns: 1fr 1fr;
   }
 }
 @media (max-width: 580px) {
