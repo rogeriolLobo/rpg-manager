@@ -116,6 +116,28 @@ async function securityEvent(
   );
 }
 
+async function authStage<T>(
+  c: AppContext,
+  stage: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        requestId: c.get("requestId"),
+        operation: "AUTH_REGISTER",
+        stage,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : "Unknown error",
+      }),
+    );
+    throw error;
+  }
+}
+
 async function enforceRateLimit(
   c: AppContext,
   normalizedEmail: string,
@@ -242,22 +264,28 @@ export async function requireAuth(
 export async function register(c: AppContext): Promise<Response> {
   const input = await readJson(c, registerSchema);
   const normalizedEmail = normalizeEmail(input.email);
-  await enforceRateLimit(
-    c,
-    normalizedEmail,
-    c.env.AUTH_REGISTRATION_RATE_LIMITER,
+  await authStage(c, "rate-limit", () =>
+    enforceRateLimit(
+      c,
+      normalizedEmail,
+      c.env.AUTH_REGISTRATION_RATE_LIMITER,
+    ),
   );
-  if (!(await verifyTurnstile(c.env, input.turnstileToken, clientIp(c))))
+  if (
+    !(await authStage(c, "turnstile", () =>
+      verifyTurnstile(c.env, input.turnstileToken, clientIp(c)),
+    ))
+  )
     throw new ApiError(
       403,
       "TURNSTILE_REQUIRED",
       "Não foi possível validar a proteção contra bots.",
     );
-  const existing = await c.env.DB.prepare(
-    "SELECT id FROM users WHERE email_normalized=?",
-  )
-    .bind(normalizedEmail)
-    .first();
+  const existing = await authStage(c, "account-lookup", () =>
+    c.env.DB.prepare("SELECT id FROM users WHERE email_normalized=?")
+      .bind(normalizedEmail)
+      .first(),
+  );
   if (existing) {
     await hashPassword(input.password, c.env.PASSWORD_PEPPER);
     throw new ApiError(
@@ -267,12 +295,18 @@ export async function register(c: AppContext): Promise<Response> {
     );
   }
   const userId = crypto.randomUUID();
-  const passwordHash = await hashPassword(
-    input.password,
-    c.env.PASSWORD_PEPPER,
+  const passwordHash = await authStage(c, "password-hash", () =>
+    hashPassword(input.password, c.env.PASSWORD_PEPPER),
   );
   const codes = generateRecoveryCodes();
-  const session = await newSession(c.env, userId, summarizedUserAgent(c));
+  const session = await authStage(c, "session-create", () =>
+    newSession(c.env, userId, summarizedUserAgent(c)),
+  );
+  const codeHashes = await authStage(c, "recovery-code-hash", () =>
+    Promise.all(
+      codes.map((code) => hashSecret(code, c.env.PASSWORD_PEPPER)),
+    ),
+  );
   const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
       `INSERT INTO users (id,email,email_normalized,display_name,password_hash,created_at,updated_at,password_changed_at)
@@ -292,21 +326,21 @@ export async function register(c: AppContext): Promise<Response> {
     ).bind(userId, session.now),
     sessionInsert(session),
   ];
-  for (const code of codes)
+  for (const codeHash of codeHashes)
     statements.push(
       c.env.DB.prepare(
         "INSERT INTO account_recovery_codes (id,user_id,code_hash,created_at) VALUES (?,?,?,?)",
       ).bind(
         crypto.randomUUID(),
         userId,
-        await hashSecret(code, c.env.PASSWORD_PEPPER),
+        codeHash,
         session.now,
       ),
     );
   statements.push(
     await securityEvent(c.env, userId, "ACCOUNT_CREATED", c.get("requestId")),
   );
-  await c.env.DB.batch(statements);
+  await authStage(c, "database-commit", () => c.env.DB.batch(statements));
   setSessionCookies(c, session.token, session.csrfToken);
   return c.json(
     {
