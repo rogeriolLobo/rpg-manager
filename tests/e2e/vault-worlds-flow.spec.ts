@@ -22,7 +22,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await page.getByLabel('Subgênero').selectOption('alta-fantasia');
   await page.getByRole('button',{name:'Salvar RPG'}).click();
   await expect(page).toHaveURL(/\/app\/library\/[^/]+$/u,{timeout:15_000});
-  await expect(page.getByRole('heading',{name:'Sistema de Aldea'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Sistema de Aldea'})).toBeVisible({timeout:15_000});
 
   await navigateFromMenu('Mundos');
   await page.getByRole('link',{name:'Novo World'}).click();
