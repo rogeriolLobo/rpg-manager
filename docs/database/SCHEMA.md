@@ -23,6 +23,6 @@
 - `campaign_entities`: vínculo N:N reutilizável entre campanhas e conteúdo do Vault.
 - `campaigns.adventure_entity_id`: Adventure principal opcional; campanhas V1 permanecem válidas com `NULL`.
 
-UUIDs aleatórios são gerados no Worker. Exclusão de conta remove os dados privados por cascata deliberada; taxonomia é restringida. Checks limitam enums e booleanos. Os índices cobrem sessão por token/expiração, catálogo por usuário/filtros, campanhas por usuário e sessões por campanha/data.
+UUIDs aleatórios são gerados no Worker. A exclusão de conta apaga sessões e códigos, anonimiza a identidade e preserva o registro tombstone para manter RPGs, Worlds, entidades, campanhas e histórico. Checks limitam enums, estados e booleanos. `RESTRICT` protege World/Entity contra exclusão destrutiva; `CASCADE` remove somente relações subordinadas sem identidade própria. Os índices cobrem sessão, catálogo, campanhas, Worlds, filtros do Vault e relações de membership/vínculo.
 
 O schema executável e único fonte de verdade está em `migrations/`.

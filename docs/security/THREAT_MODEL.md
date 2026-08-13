@@ -13,14 +13,16 @@ Ativos: credenciais, sessões, recovery codes, catálogo, campanhas, notas e bac
 | CSRF | mesma origem, SameSite=Lax, validação estrita de Origin e token double-submit ligado à sessão | testes sem Origin/token |
 | XSS | React escaping, notas como texto, sem `dangerouslySetInnerHTML`, CSP | payload persistido continua texto |
 | SQL Injection | prepared statements D1 e allowlists de ordenação | payloads de regressão |
-| IDOR/BOLA e manipulação de IDs | queries sempre incluem `user_id`; política 404 para recurso alheio | testes User A x User B |
+| IDOR/BOLA e manipulação de IDs | ownership ou predicado central de visibility/membership; política 404 para recurso alheio | testes User A x User B em Entity, World e vínculos |
 | Privilege escalation/mass assignment | DTOs Zod estritos e mapeamento explícito de campos | payload desconhecido rejeitado |
 | Session fixation | token novo no login/recovery/troca sensível; sessão anterior revogada | teste de token antigo |
 | Vazamento de secrets | `.dev.vars` ignorado, Cloudflare Secrets, nenhum `VITE_*` secreto | revisão de git/build |
 | Dados sensíveis em logs | log estruturado somente com request id, rota, método, status e duração | inspeção dos handlers |
 | Abuso/oversized payload | limite de body, paginação, rate limit e validação de comprimento | testes 413/422 |
 | Acesso entre usuários | ownership no SQL para RPG, campanha, membro e sessão | suíte de isolamento |
-| Exclusão inconsistente | FKs explícitas, cascata apenas em dados pertencentes e RESTRICT entre RPG/campanha | migration + testes |
+| Vazamento de segredo GM | `GM_ONLY` filtrado no SQL e role derivada de membership persistida, nunca do payload | teste GM x player |
+| Manipulação de visibility/role | DTO estrito, campos permitidos mapeados e endpoints separados para membership | testes de enum, mass assignment e impersonação |
+| Exclusão inconsistente | conta anonimizada, FKs explícitas, RESTRICT em Entity/World e dependências verificadas | migrations + testes de preservação |
 
 ## Suposições e riscos residuais
 

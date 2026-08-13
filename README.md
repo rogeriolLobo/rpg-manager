@@ -1,6 +1,6 @@
 # RPG Manager
 
-Aplicação full-stack para biblioteca, campanhas e sessões de RPG. React e a API Hono são publicados na mesma origem por um Cloudflare Worker; os dados privados ficam no Cloudflare D1 e todas as consultas são delimitadas pelo usuário autenticado.
+Aplicação full-stack para biblioteca, grupos, Worlds, Vault, campanhas e sessões de RPG. React e a API Hono são publicados na mesma origem por um Cloudflare Worker; os dados privados ficam no Cloudflare D1 e toda leitura ou mutação é autorizada no servidor.
 
 ## Pré-requisitos
 
@@ -63,11 +63,21 @@ Em **Configurações**, envie primeiro o CSV da aba `Catálogo de Livros` e depo
 
 Em **Grupos**, crie um grupo e seus jogadores. O grupo pode ser associado a vários RPGs e campanhas. Ao associá-lo a uma campanha, os membros ativos entram no elenco e podem receber personagem, notas e presença específicos. Consulte [ADR-003-play-groups.md](docs/architecture/ADR-003-play-groups.md).
 
+## Worlds e Vault
+
+**Worlds** organizam cenários opcionais; **Vault** reúne as entidades que a conta possui ou pode visualizar. Uma entidade pode existir sem World e ser reutilizada em várias campanhas. A V2.0 inclui 11 tipos de entidade, Adventure como conteúdo preparado, Location hierárquica, arquivamento e as visibilidades `PRIVATE`, `GROUP`, `CAMPAIGN`, `PLAYERS` e `GM_ONLY`.
+
+- [Visão do Vault](docs/vault/OVERVIEW.md)
+- [Visão de Worlds](docs/worlds/OVERVIEW.md)
+- [API V2](docs/api/API.md)
+- [Modelo do Vault](docs/architecture/ADR-004-vault-entity-model.md)
+- [Permissões de conteúdo](docs/architecture/ADR-005-content-permissions.md)
+
 ## Estrutura
 
 - `src/client`: React, rotas, formulários e estados de interface;
 - `src/server`: API `/api/v1`, autenticação, segurança e acesso D1;
-- `src/domain`: regras puras de ranking e planejamento;
+- `src/domain`: regras puras de ranking, planejamento, permissões e validação de conteúdo;
 - `src/shared`: validação runtime Zod;
 - `migrations`: schema e dados de referência versionados;
 - `tests`: unitários, integração Worker+D1 e E2E;

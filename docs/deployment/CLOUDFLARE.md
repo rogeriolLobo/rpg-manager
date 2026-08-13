@@ -30,7 +30,7 @@ Configure o widget Turnstile para o hostname publicado. Não coloque o secret em
 
 ## Smoke e rollback
 
-Após publicar: valide `/api/v1/health`, headers, cadastro com Turnstile, sessão, CRUD e isolamento com duas contas de teste descartáveis. Exclua as contas ao fim. Se o Worker falhar, use o rollback de versões do Workers; se a migration alterar dados, aplique a migration compensatória previamente revisada. D1 e assets não são usados pelos testes automatizados remotos.
+Após publicar: valide `/api/v1/health`, headers, cadastro com Turnstile, sessão, uma campanha V1, criação de World, entidade privada, vínculo Campaign↔Entity e arquivamento/restauração. Para autorização compartilhada, use duas contas descartáveis e confirme que `GM_ONLY` não chega ao player. Exclua as contas ao fim. Se o Worker falhar, use o rollback de versões do Workers; migrations D1 já aplicadas não são revertidas pelo rollback do Worker e exigem migration compensatória revisada.
 
 ## Custo
 

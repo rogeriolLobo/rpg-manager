@@ -7,13 +7,19 @@
 - cookie: `HttpOnly`, `Secure` em HTTPS, `SameSite=Lax`, `Path=/`; CSRF token separado e legível pelo cliente;
 - CSRF: validação de `Origin` para métodos mutáveis e double-submit token comparado em tempo constante;
 - abuso: binding nativo por IP e conta, contador D1 por conta com atraso/bloqueio progressivo e Turnstile;
-- autorização: escopo por `user_id` e política 404 para recursos de outro usuário;
+- autorização: helpers centrais para owner/membership, predicado SQL do Vault e política 404 para recurso inacessível;
 - injeção: prepared statements e allowlists para ordenação; nenhum valor de usuário é interpolado em SQL;
 - XSS: React escapa texto, URLs são validadas e CSP restringe script/frame/object;
 - mass assignment: objetos Zod estritos; limites de tamanho e payload de 1 MB;
 - headers: CSP, HSTS, `nosniff`, frame denial, referrer, permissions e COOP;
 - secrets: `.dev.vars` e `.env` ignorados; secrets remotos pelo Wrangler;
 - logs: request ID, método, rota, status e duração; sem body, senha, token ou código.
+
+## Conteúdo compartilhado V2
+
+`PRIVATE`, `GROUP`, `CAMPAIGN`, `PLAYERS` e `GM_ONLY` são decididos no backend. Owner é o único que edita, arquiva, restaura ou exclui. Entidades arquivadas deixam de ser compartilhadas; continuam visíveis ao owner. `GROUP` exige conta cadastrada e membro ativo, `CAMPAIGN` exige membership autenticada, `PLAYERS` exige participante ativo (o narrador também lê) e `GM_ONLY` exige narrador ativo. O cliente não recebe conteúdo sem acesso, nem mesmo como dado oculto.
+
+World membership não é inferida de campanha. Convites são explícitos em `world_members`, e apenas o owner gerencia essa lista.
 
 `style-src 'unsafe-inline'` permanece na V1 para os estilos de progresso calculados no React. Scripts inline continuam bloqueados. A remoção exige migrar larguras dinâmicas para classes/atributos previamente enumerados.
 

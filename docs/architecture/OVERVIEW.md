@@ -13,17 +13,20 @@ Browser -> Worker Static Assets -> React Router
 ## Limites de responsabilidade
 
 - cliente: interação, acessibilidade, prévia e apresentação; nunca decide autorização ou pontuação;
-- API: autenticação, autorização, validação, paginação e orquestração;
-- domínio: pontuação, desempate, etapa, progresso e próxima ação;
+- API: autenticação, autorização no SQL, validação, paginação e orquestração;
+- domínio: pontuação, planejamento, resolução de visibilidade e invariantes de conteúdo;
 - D1: integridade relacional, unicidade e persistência multiusuário;
 - Cloudflare: TLS, execução, assets, rate limiting e Turnstile.
 
-Toda rota privada usa o usuário da sessão. RPGs usam `id + user_id`; recursos filhos passam primeiro por uma campanha pertencente ao usuário. Erros têm schema estável e request ID, sem stack trace.
+Toda rota privada usa o usuário da sessão. Recursos V1 de owner usam `id + user_id`; Worlds e entidades usam helpers centrais que resolvem ownership e membership de World, grupo ou campanha. Busca, filtro, paginação e autorização do Vault acontecem na mesma consulta para impedir vazamento por contagem ou payload. Erros têm schema estável e request ID, sem stack trace.
 
 ## Decisões
 
 - [ADR-001](ADR-001-cloudflare-hosting.md): Workers + Static Assets e D1 no Free Plan.
 - [ADR-002](ADR-002-authentication.md): autenticação interna estreita, baseada em Web Crypto e sessão opaca.
+- [ADR-003](ADR-003-play-groups.md): grupos reutilizáveis, contas cadastradas e narrador principal.
+- [ADR-004](ADR-004-vault-entity-model.md): entidade-base do Vault com extensões relacionais.
+- [ADR-005](ADR-005-content-permissions.md): autorização por ownership, visibility e membership.
 
 ## Regra de recomendação
 
