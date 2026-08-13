@@ -160,6 +160,7 @@ export function CampaignFormPage() {
   const [form, setForm] = useState<Record<string, string>>({
     ...blank,
     rpgId: search.get("rpgId") ?? "",
+    playGroupId: search.get("playGroupId") ?? "",
   });
   const [error, setError] = useState("");
   useEffect(() => {
@@ -442,7 +443,9 @@ export function CampaignDetailPage() {
         ].map(([label, value]) => (
           <article key={label}>
             <span>{label}</span>
-            <strong>{value}</strong>
+            <strong>{label === "Grupo" && data.item.playGroupId
+              ? <Link to={`/app/groups/${data.item.playGroupId}`}>{value}</Link>
+              : value}</strong>
           </article>
         ))}
       </section>

@@ -116,6 +116,27 @@ describe('Worlds, Vault e permissões V2', () => {
     expect((await list.json() as { items: unknown[] }).items).toHaveLength(ENTITY_TYPES.length);
   });
 
+  it('pagina Worlds e expõe as campanhas vinculadas ao grupo', async () => {
+    const owner = await register('context-navigation-owner');
+    for (let index = 1; index <= 13; index += 1) {
+      expect((await request('/worlds', 'POST', {
+        name: `World ${String(index).padStart(2, '0')}`, description: '', defaultRpgId: null, visibility: 'PRIVATE',
+      }, owner)).status).toBe(201);
+    }
+    const secondPage = await request('/worlds?page=2&pageSize=12&sort=name', 'GET', undefined, owner);
+    expect(secondPage.status).toBe(200);
+    const worlds = await secondPage.json() as { items:Array<{name:string}>;pagination:{page:number;pageSize:number;total:number} };
+    expect(worlds.pagination).toEqual({ page: 2, pageSize: 12, total: 13 });
+    expect(worlds.items.map((world) => world.name)).toEqual(['World 13']);
+
+    const groupId = await createGroup(owner, []);
+    const campaignId = await createCampaign(owner, await createRpg(owner), groupId);
+    const group = await request(`/groups/${groupId}`, 'GET', undefined, owner);
+    expect(group.status).toBe(200);
+    expect((await group.json() as { campaigns:Array<{id:string;name:string;rpgTitle:string}> }).campaigns)
+      .toEqual([{ id: campaignId, name: 'Campanha V2', rpgTitle: 'Blue Rose', status: 'IN_PROGRESS' }]);
+  });
+
   it('bloqueia IDOR de World, worldId alheio e vínculo cross-user', async () => {
     const owner = await register('world-owner');
     const outsider = await register('world-attacker');

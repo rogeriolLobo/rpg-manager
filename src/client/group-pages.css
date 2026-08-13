@@ -42,6 +42,7 @@
 .narrator-summary svg { color: var(--gold); }
 .narrator-summary small, .narrator-summary strong { display: block; }
 .narrator-summary small { color: var(--muted); }
+.group-campaigns { margin-bottom: 1rem; }
 
 .directory-search { margin-top: 1rem; }
 .directory-results { list-style: none; margin: 1rem 0 0; padding: 0; }

@@ -24,6 +24,20 @@
   margin-top: 1.5rem;
 }
 
+.world-summary-card {
+  background: #efe2cf;
+  border: 1px solid #ddc8aa;
+  border-radius: 0.7rem;
+  color: inherit;
+  padding: 0.8rem;
+}
+
+.world-summary-card:hover {
+  background: #e6d3b7;
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+
 @media (max-width: 850px) {
   .sidebar {
     height: 100dvh;

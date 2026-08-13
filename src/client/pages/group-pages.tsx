@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
 import { Empty, Loading, PageHeader } from './dashboard-page';
 import { RegisteredUserSearch, type DirectoryUser } from '../components/registered-user-search';
+import { displayLabel } from '../labels';
 
 interface PlayGroup {
   id: string;
@@ -23,6 +24,7 @@ interface PlayGroupMember {
   linkedUserId: string | null;
   isGameMaster: number;
 }
+interface GroupCampaign { id:string; name:string; status:string; rpgTitle:string }
 
 export function GroupsPage() {
   const [items, setItems] = useState<PlayGroup[]>();
@@ -40,13 +42,13 @@ export function GroupFormPage() {
 }
 
 export function GroupDetailPage() {
-  const {id}=useParams(); const navigate=useNavigate(); const [data,setData]=useState<{item:PlayGroup;members:PlayGroupMember[]}>(); const [error,setError]=useState('');
-  const load=()=>api<{item:PlayGroup;members:PlayGroupMember[]}>(`/groups/${id}`).then(setData);
-  useEffect(()=>{void api<{item:PlayGroup;members:PlayGroupMember[]}>(`/groups/${id}`).then(setData);},[id]);
+  const {id}=useParams(); const navigate=useNavigate(); const [data,setData]=useState<{item:PlayGroup;members:PlayGroupMember[];campaigns:GroupCampaign[]}>(); const [error,setError]=useState('');
+  const load=()=>api<{item:PlayGroup;members:PlayGroupMember[];campaigns:GroupCampaign[]}>(`/groups/${id}`).then(setData);
+  useEffect(()=>{void api<{item:PlayGroup;members:PlayGroupMember[];campaigns:GroupCampaign[]}>(`/groups/${id}`).then(setData);},[id]);
   if(!data)return <Loading/>;
   const add=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setError('');const element=event.currentTarget;const form=new FormData(element);try{await postJson(`/groups/${id}/members`,{playerName:form.get('playerName'),userId:null,notes:form.get('notes'),active:true,isGameMaster:form.get('isGameMaster')==='on'});element.reset();await load();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
   const addRegisteredUser=async(user:DirectoryUser,isGameMaster:boolean)=>{setError('');try{await postJson(`/groups/${id}/members`,{playerName:user.displayName,userId:user.id,notes:'',active:true,isGameMaster});await load();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
-  return <div className="page"><PageHeader eyebrow="Grupo de jogo" title={data.item.name} description={data.item.notes||'Sem observações.'} action={<Link className="secondary-button link-button" to={`/app/groups/${id}/edit`}>Editar grupo</Link>}/><section className="panel narrator-summary"><Shield/><div><small>Narrador principal</small><strong>{data.item.gameMasterName||'Ainda não definido'}</strong></div></section><section className="panel"><h2>Adicionar conta cadastrada</h2><p className="section-note">Busque pelo nome público ou pelo e-mail completo que a pessoa informou. O e-mail nunca aparece nos resultados.</p><RegisteredUserSearch onAdd={addRegisteredUser}/>{error&&<p className="form-error">{error}</p>}</section><section className="panel"><h2>Adicionar convidado por nome</h2><form className="form-grid" onSubmit={add}><label>Nome do jogador<input name="playerName" required maxLength={100}/></label><label>Observações<input name="notes" maxLength={2000}/></label><label className="checkbox span-2"><input type="checkbox" name="isGameMaster"/>Definir como narrador principal</label><div className="form-actions span-2"><button className="secondary-button"><UserPlus size={17}/>Adicionar convidado</button></div></form></section><section className="panel"><h2>Jogadores</h2>{data.members.length?<div className="group-members">{data.members.map((member)=><GroupMemberEditor key={member.id} groupId={id!} member={member} onUpdated={load}/>)}</div>:<p>Nenhum jogador cadastrado.</p>}</section><button className="danger-button" onClick={async()=>{if(confirm(`Excluir o grupo “${data.item.name}”? Os RPGs e campanhas serão preservados sem o vínculo.`)){await deleteApi(`/groups/${id}`);navigate('/app/groups');}}}><Trash2 size={17}/>Excluir grupo</button></div>;
+  return <div className="page"><PageHeader eyebrow="Grupo de jogo" title={data.item.name} description={data.item.notes||'Sem observações.'} action={<Link className="secondary-button link-button" to={`/app/groups/${id}/edit`}>Editar grupo</Link>}/><section className="panel narrator-summary"><Shield/><div><small>Narrador principal</small><strong>{data.item.gameMasterName||'Ainda não definido'}</strong></div></section><section className="panel group-campaigns"><div className="section-heading"><div><h2>Campanhas do grupo</h2><p className="section-note">Mesas que reutilizam esta formação de jogadores.</p></div><Link to={`/app/campaigns/new?playGroupId=${id}`}>Nova campanha</Link></div>{data.campaigns.length?<ul className="clean-list">{data.campaigns.map((campaign)=><li key={campaign.id}><span><Link to={`/app/campaigns/${campaign.id}`}>{campaign.name}</Link><small>{campaign.rpgTitle}</small></span><span className="badge">{displayLabel(campaign.status)}</span></li>)}</ul>:<p>Nenhuma campanha usa este grupo.</p>}</section><section className="panel"><h2>Adicionar conta cadastrada</h2><p className="section-note">Busque pelo nome público ou pelo e-mail completo que a pessoa informou. O e-mail nunca aparece nos resultados.</p><RegisteredUserSearch onAdd={addRegisteredUser}/>{error&&<p className="form-error">{error}</p>}</section><section className="panel"><h2>Adicionar convidado por nome</h2><form className="form-grid" onSubmit={add}><label>Nome do jogador<input name="playerName" required maxLength={100}/></label><label>Observações<input name="notes" maxLength={2000}/></label><label className="checkbox span-2"><input type="checkbox" name="isGameMaster"/>Definir como narrador principal</label><div className="form-actions span-2"><button className="secondary-button"><UserPlus size={17}/>Adicionar convidado</button></div></form></section><section className="panel"><h2>Jogadores</h2>{data.members.length?<div className="group-members">{data.members.map((member)=><GroupMemberEditor key={member.id} groupId={id!} member={member} onUpdated={load}/>)}</div>:<p>Nenhum jogador cadastrado.</p>}</section><button className="danger-button" onClick={async()=>{if(confirm(`Excluir o grupo “${data.item.name}”? Os RPGs e campanhas serão preservados sem o vínculo.`)){await deleteApi(`/groups/${id}`);navigate('/app/groups');}}}><Trash2 size={17}/>Excluir grupo</button></div>;
 }
 
 function GroupMemberEditor({groupId,member,onUpdated}:{groupId:string;member:PlayGroupMember;onUpdated:()=>Promise<void>}) {

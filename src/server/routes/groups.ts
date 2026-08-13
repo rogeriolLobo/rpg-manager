@@ -38,12 +38,19 @@ groupRoutes.post('/', async (c) => {
 
 groupRoutes.get('/:id', async (c) => {
   const item = await ownedGroup(c, c.req.param('id'));
-  const members = await c.env.DB.prepare(`SELECT m.id,COALESCE(u.display_name,m.player_name) playerName,m.user_id linkedUserId,
-    m.notes,m.active,m.is_game_master isGameMaster,m.created_at createdAt,m.updated_at updatedAt
-    FROM play_group_members m LEFT JOIN users u ON u.id=m.user_id
-    WHERE m.group_id=? ORDER BY m.is_game_master DESC,m.active DESC,playerName COLLATE NOCASE`)
-    .bind(c.req.param('id')).all();
-  return c.json({ item, members: members.results });
+  const [members, campaigns] = await c.env.DB.batch([
+    c.env.DB.prepare(`SELECT m.id,COALESCE(u.display_name,m.player_name) playerName,m.user_id linkedUserId,
+      m.notes,m.active,m.is_game_master isGameMaster,m.created_at createdAt,m.updated_at updatedAt
+      FROM play_group_members m LEFT JOIN users u ON u.id=m.user_id
+      WHERE m.group_id=? ORDER BY m.is_game_master DESC,m.active DESC,playerName COLLATE NOCASE`)
+      .bind(c.req.param('id')),
+    c.env.DB.prepare(`SELECT c.id,c.name,c.status,r.title rpgTitle
+      FROM campaigns c JOIN rpgs r ON r.id=c.rpg_id
+      WHERE c.play_group_id=? AND c.user_id=?
+      ORDER BY CASE c.status WHEN 'IN_PROGRESS' THEN 1 WHEN 'PREPARING' THEN 2 ELSE 3 END,c.updated_at DESC`)
+      .bind(c.req.param('id'), c.get('user').id),
+  ]);
+  return c.json({ item, members: members.results, campaigns: campaigns.results });
 });
 
 groupRoutes.patch('/:id', async (c) => {

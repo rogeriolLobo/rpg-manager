@@ -60,6 +60,12 @@ test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
   await page.getByRole('button',{name:'Salvar entidade'}).click();
   await expect(page.getByRole('heading',{name:'A Noite do Corvo'})).toBeVisible();
 
+  await navigateFromMenu('Mundos');
+  await page.getByRole('link',{name:/Aldea/u}).click();
+  await page.getByRole('link',{name:/Ver 1 NPC no Vault/u}).click();
+  await expect(page).toHaveURL(/worldId=.*type=NPC/u);
+  await expect(page.getByRole('link',{name:/Lucien/u})).toBeVisible();
+
   await navigateFromMenu('Campanhas');
   await page.getByRole('link',{name:'Nova campanha'}).click();
   await page.getByLabel('RPG').selectOption({label:'Sistema de Aldea'});
@@ -86,6 +92,19 @@ test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
   await page.getByRole('link',{name:/Lucien/u}).click();
   await page.getByRole('button',{name:'Restaurar',exact:true}).click();
   await expect(page.getByText('Esta entidade está arquivada')).toHaveCount(0);
+
+  const csrfCookie=(await page.context().cookies()).find((cookie)=>cookie.name==='rpg_csrf');
+  expect(csrfCookie).toBeDefined();
+  for(let index=1;index<=12;index+=1){
+    const response=await page.request.post('/api/v1/worlds',{headers:{'X-CSRF-Token':decodeURIComponent(csrfCookie!.value),Origin:'http://127.0.0.1:5173'},data:{name:`World paginado ${String(index).padStart(2,'0')}`,description:'',defaultRpgId:null,visibility:'PRIVATE'}});
+    expect(response.ok()).toBeTruthy();
+  }
+  await navigateFromMenu('Mundos');
+  await expect(page.getByRole('navigation',{name:'Paginação de Worlds'})).toBeVisible();
+  await expect(page.getByText('Página 1 de 2')).toBeVisible();
+  await page.getByRole('button',{name:'Próxima'}).click();
+  await expect(page).toHaveURL(/page=2/u);
+  await expect(page.getByRole('link',{name:/Aldea/u})).toBeVisible();
 
   await openNavigation();
   await page.getByRole('button',{name:'Sair'}).click();

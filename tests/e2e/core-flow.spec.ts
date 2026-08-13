@@ -63,6 +63,13 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(
     page.getByRole("heading", { name: "A Coroa de E2E" }),
   ).toBeVisible();
+  await page.getByRole("link", { name: "Mesa E2E", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Mesa E2E" })).toBeVisible();
+  await page.getByRole("link", { name: "Nova campanha" }).click();
+  await expect(page.getByLabel("Grupo de jogo")).toHaveValue(/.+/u);
+  await page.goBack();
+  await page.getByRole("link", { name: "A Coroa de E2E", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "A Coroa de E2E" })).toBeVisible();
   await expect(page.getByLabel("Jogador Marcelo")).toBeVisible();
   await page.getByLabel("Nome do jogador").fill("Adriana");
   await page.getByLabel("Nome do personagem").fill("Lina");
