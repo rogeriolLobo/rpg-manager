@@ -29,6 +29,9 @@ export interface Rpg {
   gameMaster: string;
   notes: string;
   coverUrl: string | null;
+  isbn: string | null;
+  coverSourceUrl: string | null;
+  coverSourceNote: string | null;
   recommendationScore: number;
   readiness: string;
   nextAction: string;
@@ -231,14 +234,7 @@ function BookCard({ item }: { item: Rpg }) {
   return (
     <Link to={`/app/library/${item.id}`} className="book-card">
       <div className="book-cover">
-        {item.coverUrl ? (
-          <img src={item.coverUrl} alt={`Capa de ${item.title}`} loading="lazy" referrerPolicy="no-referrer" />
-        ) : (
-          <>
-            <BookOpen />
-            <span>{item.categoryName ?? "RPG"}</span>
-          </>
-        )}
+        <CoverImage item={item} />
       </div>
       <div className="book-card-body">
         <Badge>{item.readingStatus}</Badge>
@@ -253,6 +249,25 @@ function BookCard({ item }: { item: Rpg }) {
       </div>
     </Link>
   );
+}
+
+function CoverImage({ item, eager = false }: { item: Rpg; eager?: boolean }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (!item.coverUrl || failedUrl === item.coverUrl) return <><BookOpen /><span>{item.categoryName ?? "RPG"}</span></>;
+  return <img
+    src={item.coverUrl}
+    alt={`Capa de ${item.title}`}
+    loading={eager ? "eager" : "lazy"}
+    referrerPolicy="no-referrer"
+    onError={() => {
+      setFailedUrl(item.coverUrl);
+      if (import.meta.env.DEV) {
+        let host = "inválido";
+        try { host = new URL(item.coverUrl!).hostname; } catch { /* URL já validada no servidor. */ }
+        console.warn("Falha ao carregar capa de RPG.", { host });
+      }
+    }}
+  />;
 }
 
 const initial = {
@@ -270,6 +285,9 @@ const initial = {
   gameMaster: "",
   notes: "",
   coverUrl: "",
+  isbn: "",
+  coverSourceUrl: "",
+  coverSourceNote: "",
 };
 export function RpgFormPage() {
   const { id } = useParams();
@@ -296,6 +314,9 @@ export function RpgFormPage() {
           gameMaster: item.gameMaster,
           notes: item.notes,
           coverUrl: item.coverUrl ?? "",
+          isbn: item.isbn ?? "",
+          coverSourceUrl: item.coverSourceUrl ?? "",
+          coverSourceNote: item.coverSourceNote ?? "",
         }),
       );
   }, [id]);
@@ -325,6 +346,9 @@ export function RpgFormPage() {
       gameMaster: String(form.gameMaster),
       notes: String(form.notes),
       coverUrl: form.coverUrl || null,
+      isbn: form.isbn || null,
+      coverSourceUrl: form.coverSourceUrl || null,
+      coverSourceNote: form.coverSourceNote || null,
     };
     try {
       const result = id
@@ -477,6 +501,18 @@ export function RpgFormPage() {
             onChange={(e) => update("coverUrl", e.target.value)}
           />
         </label>
+        <label>
+          ISBN (opcional)
+          <input value={String(form.isbn)} onChange={(e) => update("isbn", e.target.value)} maxLength={32} />
+        </label>
+        <label>
+          Fonte da capa (opcional)
+          <input type="url" value={String(form.coverSourceUrl)} onChange={(e) => update("coverSourceUrl", e.target.value)} maxLength={1000} />
+        </label>
+        <label className="span-2">
+          Nota da capa (opcional)
+          <input value={String(form.coverSourceNote)} onChange={(e) => update("coverSourceNote", e.target.value)} maxLength={1000} />
+        </label>
         <label className="span-2">
           Notas
           <textarea
@@ -549,14 +585,7 @@ export function RpgDetailPage() {
       <div className="detail-grid">
         <aside className="panel detail-cover">
           <div className="book-cover large">
-            {item.coverUrl ? (
-              <img src={item.coverUrl} alt={`Capa de ${item.title}`} />
-            ) : (
-              <>
-                <BookOpen />
-                <span>{item.categoryName ?? "RPG"}</span>
-              </>
-            )}
+            <CoverImage item={item} eager />
           </div>
           <strong>{item.recommendationScore} pontos</strong>
           <span>{item.nextAction}</span>
@@ -594,7 +623,10 @@ export function RpgDetailPage() {
               <dt>Mesa</dt>
               <dd>{displayLabel(item.tableStatus)}</dd>
             </div>
+            {item.isbn ? <div><dt>ISBN</dt><dd>{item.isbn}</dd></div> : null}
+            {item.coverSourceUrl ? <div><dt>Fonte da capa</dt><dd><a href={item.coverSourceUrl} target="_blank" rel="noreferrer">Abrir fonte</a></dd></div> : null}
           </dl>
+          {item.coverSourceNote ? <p className="section-note">{item.coverSourceNote}</p> : null}
           <h2>Notas</h2>
           <p className="pre-wrap">{item.notes || "Nenhuma nota."}</p>
           <h2>Campanhas</h2>

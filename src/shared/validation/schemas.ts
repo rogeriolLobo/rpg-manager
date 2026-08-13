@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 const optionalDate = z.union([z.iso.date(), z.literal(''), z.null()]).optional();
@@ -49,7 +50,18 @@ export const rpgInputSchema = z.strictObject({
   tableStatus: z.enum(['IDEA', 'PREPARING', 'SCHEDULED', 'PLAYING', 'COMPLETED']),
   gameMaster: trimmed(100).default(''),
   notes: trimmed(10000).default(''),
-  coverUrl: z.union([z.url().max(1000), z.literal(''), z.null()]).optional(),
+  coverUrl: z.union([
+    z.string().trim().max(1000).refine(isAllowedCoverUrl, 'Use uma URL HTTPS de um domínio de capas autorizado.'),
+    z.literal(''),
+    z.null(),
+  ]).optional(),
+  isbn: z.union([z.string().trim().max(32), z.null()]).optional(),
+  coverSourceUrl: z.union([
+    z.string().trim().max(1000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
+    z.literal(''),
+    z.null(),
+  ]).optional(),
+  coverSourceNote: z.union([z.string().trim().max(1000), z.null()]).optional(),
 });
 
 export const campaignInputSchema = z.strictObject({

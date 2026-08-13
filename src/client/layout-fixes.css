@@ -39,3 +39,10 @@
     padding-bottom: 0.75rem;
   }
 }
+.import-preview input[type="checkbox"] {
+  width: auto;
+}
+
+.import-preview table {
+  min-width: 720px;
+}

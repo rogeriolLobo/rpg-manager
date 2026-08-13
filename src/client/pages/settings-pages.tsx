@@ -58,13 +58,23 @@ export function SettingsPage() {
   );
 }
 function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
+  type PreviewItem = {
+    row?: number;
+    title: string;
+    classification?: "NOVO" | "ATUALIZACAO" | "IGNORADO" | "ERRO";
+    message?: string;
+    currentCoverUrl?: string | null;
+    incomingCoverUrl?: string | null;
+  };
   const [preview, setPreview] = useState<{
     jobId: string;
     count: number;
     issues: Array<{ row: number; message: string }>;
     canConfirm: boolean;
-    items: Array<{ title: string }>;
+    items: PreviewItem[];
+    summary?: Record<string, number>;
   }>();
+  const [approvedRows, setApprovedRows] = useState<number[]>([]);
   const [message, setMessage] = useState("");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -76,19 +86,25 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
     if (!file) return;
     try {
       const previewPath=kind==="catalog"?"/import/preview":"/import/campaigns/preview";
-      setPreview(await postJson(previewPath, { csv: await file.text() }));
+      const result = await postJson<NonNullable<typeof preview>>(previewPath, { csv: await file.text() });
+      setPreview(result);
+      setApprovedRows(kind === "catalog" ? result.items
+        .filter((item) => item.row && (item.classification === "NOVO" || item.classification === "ATUALIZACAO"))
+        .map((item) => item.row!) : []);
     } catch (reason) {
       setMessage(reason instanceof Error?reason.message:"Falha inesperada.");
     }
   };
   const confirmImport = async () => {
     if (!preview) return;
-    const result = await postJson<{ imported: number; skipped: number }>(
+    const result = await postJson<{ imported: number; updated?: number; skipped: number }>(
       kind==="catalog"?"/import/confirm":"/import/campaigns/confirm",
-      { jobId: preview.jobId },
+      kind === "catalog" ? { jobId: preview.jobId, approvedRows } : { jobId: preview.jobId },
     );
     setMessage(
-      `${result.imported} registros importados; ${result.skipped} duplicados ignorados.`,
+      kind === "catalog"
+        ? `${result.imported} novos; ${result.updated ?? 0} capas atualizadas; ${result.skipped} linhas sem alteração.`
+        : `${result.imported} registros importados; ${result.skipped} duplicados ignorados.`,
     );
     setPreview(undefined);
   };
@@ -103,10 +119,22 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
       </form>
       {preview && (
         <div className="import-preview">
-          <strong>{preview.count} registros válidos</strong>
-          {preview.items.map((item) => (
-            <span key={item.title}>{item.title}</span>
-          ))}
+          <strong>{preview.count} linhas analisadas</strong>
+          {kind === "catalog" && preview.summary ? <span>
+            {preview.summary.NOVO ?? 0} novos · {preview.summary.ATUALIZACAO ?? 0} atualizações · {preview.summary.IGNORADO ?? 0} ignorados · {preview.summary.ERRO ?? 0} erros
+          </span> : null}
+          {kind === "catalog" ? <div className="table-wrap"><table><thead><tr><th>Aprovar</th><th>Linha</th><th>Classificação</th><th>RPG</th><th>Resultado</th></tr></thead><tbody>
+            {preview.items.map((item) => {
+              const actionable = item.classification === "NOVO" || item.classification === "ATUALIZACAO";
+              return <tr key={`${item.row}-${item.title}`}>
+                <td><input type="checkbox" aria-label={`Aprovar linha ${item.row}`} disabled={!actionable} checked={Boolean(item.row && approvedRows.includes(item.row))} onChange={(event) => {
+                  if (!item.row) return;
+                  setApprovedRows((current) => event.target.checked ? [...current, item.row!] : current.filter((row) => row !== item.row));
+                }} /></td>
+                <td>{item.row}</td><td><span className="badge">{item.classification}</span></td><td>{item.title || "—"}</td><td>{item.message}</td>
+              </tr>;
+            })}
+          </tbody></table></div> : preview.items.map((item) => <span key={item.title}>{item.title}</span>)}
           {preview.issues.map((issue) => (
             <p className="form-error" key={`${issue.row}-${issue.message}`}>
               Linha {issue.row}: {issue.message}
@@ -114,7 +142,7 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
           ))}
           <button
             className="primary-button"
-            disabled={!preview.canConfirm}
+            disabled={!preview.canConfirm || (kind === "catalog" && approvedRows.length === 0)}
             onClick={() => void confirmImport()}
           >
             Confirmar importação

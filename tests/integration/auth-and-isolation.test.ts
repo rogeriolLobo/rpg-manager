@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Env } from "../../src/server/types";
 
 const worker = exports as unknown as {
@@ -392,7 +392,7 @@ describe("API real com D1", () => {
     expect(catalogPreview.status).toBe(200);
     const catalogJob = (await catalogPreview.json()) as {jobId:string;canConfirm:boolean};
     expect(catalogJob.canConfirm).toBe(true);
-    expect((await request('/import/confirm','POST',{jobId:catalogJob.jobId},account.cookie,account.csrf)).status).toBe(200);
+    expect((await request('/import/confirm','POST',{jobId:catalogJob.jobId,approvedRows:[2]},account.cookie,account.csrf)).status).toBe(200);
     const catalog = await request('/rpgs','GET',undefined,account.cookie);
     const importedRpg = ((await catalog.json()) as {items:Array<{plannedPlayDate:string}>}).items[0];
     expect(importedRpg.plannedPlayDate).toBe('2026-09-20');
@@ -408,6 +408,76 @@ describe("API real com D1", () => {
     const campaigns = await request('/campaigns','GET',undefined,account.cookie);
     const importedCampaign = ((await campaigns.json()) as {items:Array<{legacyMembersText:string;legacyCharactersText:string;sessionsCompleted:number;lastSessionDate:string}>}).items[0];
     expect(importedCampaign).toMatchObject({legacyMembersText:'Adriana, Marcelo',legacyCharactersText:'Lina, Téo',sessionsCompleted:3,lastSessionDate:'2026-09-08'});
+  });
+  it("atualiza somente a capa existente, preserva os dados e torna a repetição idempotente", async () => {
+    const account = await register("cover-imports@example.com");
+    const created = await request('/rpgs','POST',{...rpg,title:'Ryuutama',notes:'Notas existentes que não podem mudar',coverUrl:null},account.cookie,account.csrf);
+    expect(created.status).toBe(201);
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('image',{status:200,headers:{'Content-Type':'image/png'}})));
+    const coverUrl='https://i0.wp.com/www.huginnemuninn.com.br/wp-content/uploads/2024/02/capa-ryuutama.png?fit=600%2C847&ssl=1';
+    const csv=[
+      'Sistema / Jogo,Categoria,Subgênero,Status da leitura,Observações,Capa URL,ISBN,Fonte da capa,Nota da capa',
+      `  RYUUTAMA  ,Fantasia,Alta Fantasia,Lido,Texto do CSV não deve sobrescrever,${coverUrl},,https://www.huginnemuninn.com.br/product/ryuutama-um-rpg-de-fantasia-natural/,Fonte oficial`,
+    ].join('\n');
+    const previewResponse=await request('/import/preview','POST',{csv},account.cookie,account.csrf);
+    expect(previewResponse.status).toBe(200);
+    const preview=await previewResponse.json() as {jobId:string;items:Array<{row:number;classification:string}>};
+    expect(preview.items).toEqual([expect.objectContaining({row:2,classification:'ATUALIZACAO'})]);
+    const beforeConfirm=await request('/rpgs','GET',undefined,account.cookie);
+    expect(((await beforeConfirm.json()) as {items:Array<{coverUrl:string|null}>}).items[0].coverUrl).toBeNull();
+    const confirmed=await request('/import/confirm','POST',{jobId:preview.jobId,approvedRows:[2]},account.cookie,account.csrf);
+    expect(confirmed.status).toBe(200);
+    expect(await confirmed.json()).toMatchObject({imported:0,updated:1});
+    const afterConfirm=await request('/rpgs','GET',undefined,account.cookie);
+    const items=(await afterConfirm.json()) as {items:Array<{title:string;notes:string;coverUrl:string;coverSourceUrl:string}>};
+    expect(items.items).toHaveLength(1);
+    expect(items.items[0]).toMatchObject({title:'Ryuutama',notes:'Notas existentes que não podem mudar',coverUrl,coverSourceUrl:'https://www.huginnemuninn.com.br/product/ryuutama-um-rpg-de-fantasia-natural/'});
+    const repeated=await request('/import/preview','POST',{csv},account.cookie,account.csrf);
+    const repeatedPreview=await repeated.json() as {canConfirm:boolean;items:Array<{classification:string}>};
+    expect(repeatedPreview.canConfirm).toBe(false);
+    expect(repeatedPreview.items[0].classification).toBe('IGNORADO');
+    vi.unstubAllGlobals();
+  });
+  it("classifica capa insegura como erro sem gravar", async () => {
+    const account=await register('invalid-cover@example.com');
+    const csv=['Sistema / Jogo,Categoria,Subgênero,Status da leitura,cover_url','Novo RPG,Fantasia,Alta Fantasia,Lido,http://127.0.0.1/capa.jpg'].join('\n');
+    const response=await request('/import/preview','POST',{csv},account.cookie,account.csrf);
+    expect(response.status).toBe(200);
+    const preview=await response.json() as {canConfirm:boolean;items:Array<{classification:string;message:string}>};
+    expect(preview.canConfirm).toBe(false);
+    expect(preview.items[0]).toMatchObject({classification:'ERRO'});
+    expect(preview.items[0].message).toContain('CAPA INVÁLIDA');
+    const catalog=await request('/rpgs','GET',undefined,account.cookie);
+    expect(((await catalog.json()) as {items:unknown[]}).items).toHaveLength(0);
+  });
+  it("preserva a capa de Blue Rose e aplica somente as linhas aprovadas", async () => {
+    const account=await register('selective-cover@example.com');
+    const blueRose=await request('/rpgs','POST',{...rpg,title:'Blue Rose'},account.cookie,account.csrf);
+    const blueRoseId=((await blueRose.json()) as {item:{id:string}}).item.id;
+    const dragonAge=await request('/rpgs','POST',{...rpg,title:'Dragon Age'},account.cookie,account.csrf);
+    const dragonAgeId=((await dragonAge.json()) as {item:{id:string}}).item.id;
+    const alien=await request('/rpgs','POST',{...rpg,title:'Alien'},account.cookie,account.csrf);
+    const originalCover='https://www.jamboeditora.com.br/wp-content/uploads/2023/03/jamboeditora-capa-blue-rose-560x560.png';
+    await testEnv.DB.prepare('UPDATE rpgs SET cover_url=? WHERE id=?').bind(originalCover,blueRoseId).run();
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('image',{status:200,headers:{'Content-Type':'image/jpeg'}})));
+    const csv=[
+      'Sistema / Jogo,Categoria,Subgênero,Status da leitura,Capa URL',
+      'Blue Rose,Fantasia,Alta Fantasia,Lendo,https://covers.openlibrary.org/b/isbn/111-L.jpg',
+      'Dragon Age,Fantasia,Alta Fantasia,Lendo,https://covers.openlibrary.org/b/isbn/222-L.jpg',
+      'Alien,Ficção Científica,Space Opera,Lendo,https://covers.openlibrary.org/b/isbn/333-L.jpg',
+    ].join('\n');
+    const response=await request('/import/preview','POST',{csv},account.cookie,account.csrf);
+    expect(response.status).toBe(200);
+    const preview=await response.json() as {jobId:string;items:Array<{row:number;classification:string}>};
+    expect(preview.items.map((item)=>item.classification)).toEqual(['IGNORADO','ATUALIZACAO','ATUALIZACAO']);
+    const confirmed=await request('/import/confirm','POST',{jobId:preview.jobId,approvedRows:[3]},account.cookie,account.csrf);
+    expect(await confirmed.json()).toMatchObject({updated:1});
+    const rows=await testEnv.DB.prepare('SELECT id,cover_url FROM rpgs WHERE user_id=?').bind(account.user.id).all<{id:string;cover_url:string|null}>();
+    const covers=new Map(rows.results.map((item)=>[item.id,item.cover_url]));
+    expect(covers.get(blueRoseId)).toBe(originalCover);
+    expect(covers.get(dragonAgeId)).toBe('https://covers.openlibrary.org/b/isbn/222-L.jpg');
+    expect(covers.get(((await alien.json()) as {item:{id:string}}).item.id)).toBeNull();
+    vi.unstubAllGlobals();
   });
   it("rejeita payload excessivo e devolve cabeçalhos defensivos", async () => {
     const account = await register("headers@example.com");

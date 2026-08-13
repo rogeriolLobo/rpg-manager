@@ -1,8 +1,10 @@
+import { COVER_IMAGE_ORIGINS } from '../../shared/security/cover-url';
+
 const CSP = [
   "default-src 'self'",
   "script-src 'self' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
+  `img-src 'self' data: ${COVER_IMAGE_ORIGINS.join(' ')}`,
   "font-src 'self'",
   "connect-src 'self' https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com",

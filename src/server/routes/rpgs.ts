@@ -3,6 +3,7 @@ import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendati
 import { rpgInputSchema } from '../../shared/validation/schemas';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
+import { validateRemoteCoverImage } from '../security/cover-images';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -10,7 +11,8 @@ interface RpgRow {
   id: string; title: string; category_id: string | null; category_name: string | null; subgenre_id: string | null; subgenre_name: string | null;
   reading_status: RecommendationCandidate['readingStatus']; has_played: number; wants_to_play: number; priority: RecommendationCandidate['priority'];
   play_group_notes: string; planned_play_date: string | null; table_status: RecommendationCandidate['tableStatus']; game_master: string; notes: string;
-  play_group_id: string | null; play_group_name: string | null; cover_url: string | null; created_at: string; updated_at: string;
+  play_group_id: string | null; play_group_name: string | null; cover_url: string | null; isbn: string | null;
+  cover_source_url: string | null; cover_source_note: string | null; created_at: string; updated_at: string;
 }
 
 function present(row: RpgRow) {
@@ -22,7 +24,8 @@ function present(row: RpgRow) {
     id: row.id, title: row.title, categoryId: row.category_id, categoryName: row.category_name, subgenreId: row.subgenre_id,
     subgenreName: row.subgenre_name, readingStatus: row.reading_status, hasPlayed: candidate.hasPlayed, wantsToPlay: candidate.wantsToPlay,
     priority: row.priority, playGroupId: row.play_group_id, playGroupName: row.play_group_name, playGroupNotes: row.play_group_notes, plannedPlayDate: row.planned_play_date, tableStatus: row.table_status,
-    gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, createdAt: row.created_at, updatedAt: row.updated_at,
+    gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, isbn: row.isbn, coverSourceUrl: row.cover_source_url,
+    coverSourceNote: row.cover_source_note, createdAt: row.created_at, updatedAt: row.updated_at,
     recommendationScore: calculateRpgRecommendationScore(candidate), readiness: calculateRpgReadiness(candidate), nextAction: calculateRpgNextAction(candidate),
   };
 }
@@ -45,6 +48,12 @@ async function validateGroup(c: Context<{ Bindings: Env; Variables: AppVariables
   if (!playGroupId) return;
   const group = await c.env.DB.prepare('SELECT id FROM play_groups WHERE id=? AND user_id=?').bind(playGroupId, c.get('user').id).first();
   if (!group) throw new ApiError(422, 'INVALID_PLAY_GROUP', 'Grupo de jogo inválido.');
+}
+
+async function validateCoverImage(coverUrl: string | null | undefined): Promise<void> {
+  if (!coverUrl) return;
+  const result = await validateRemoteCoverImage(coverUrl);
+  if (!result.ok) throw new ApiError(422, 'INVALID_COVER_IMAGE', result.message);
 }
 
 rpgRoutes.get('/metadata', async (c) => {
@@ -90,11 +99,13 @@ rpgRoutes.post('/', async (c) => {
   const input = await readJson(c, rpgInputSchema); const user = c.get('user'); const id = crypto.randomUUID(); const now = nowIso();
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
   await validateGroup(c, input.playGroupId);
+  await validateCoverImage(input.coverUrl);
   try {
     await c.env.DB.prepare(`INSERT INTO rpgs (id,user_id,title,category_id,subgenre_id,reading_status,has_played,wants_to_play,priority,
-      play_group_notes,play_group_id,planned_play_date,table_status,game_master,notes,cover_url,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      play_group_notes,play_group_id,planned_play_date,table_status,game_master,notes,cover_url,isbn,cover_source_url,cover_source_note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(id, user.id, input.title, cleanNullable(input.categoryId), cleanNullable(input.subgenreId), input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
-        input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), now, now).run();
+        input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), cleanNullable(input.isbn),
+        cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), now, now).run();
   } catch (error) { if (String(error).includes('UNIQUE')) throw new ApiError(409, 'DUPLICATE_RPG', 'Já existe um RPG com este título.'); throw error; }
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(id, user.id).first<RpgRow>();
   return c.json({ item: present(row!) }, 201);
@@ -112,10 +123,12 @@ rpgRoutes.patch('/:id', async (c) => {
   const input = await readJson(c, rpgInputSchema); const user = c.get('user');
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
   await validateGroup(c, input.playGroupId);
+  await validateCoverImage(input.coverUrl);
   const result = await c.env.DB.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
-    play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,cover_url=?,updated_at=? WHERE id=? AND user_id=?`)
+    play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,cover_url=?,isbn=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=? AND user_id=?`)
     .bind(input.title, cleanNullable(input.categoryId), cleanNullable(input.subgenreId), input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
-      input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), nowIso(), c.req.param('id'), user.id).run();
+      input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), cleanNullable(input.isbn),
+      cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), nowIso(), c.req.param('id'), user.id).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(c.req.param('id'), user.id).first<RpgRow>();
   return c.json({ item: present(row!) });
