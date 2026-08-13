@@ -46,6 +46,17 @@ O body de entidade aceita apenas `entityType`, `name`, `summary`, `description`,
 
 Pastas, tags e aliases são metadados editoriais e nunca concedem acesso. O Portal do jogador usa `GET /knowledge/:worldId`, portanto não possui um caminho alternativo que ignore as permissões do Vault.
 
+## Timeline e Calendar
+
+- `GET /timeline/worlds/:worldId`: lista EVENTs autorizados, eras e calendário; aceita `search`, `eraId` e `precision`.
+- `POST /timeline/worlds/:worldId/eras`: cria uma era ordenável do World.
+- `PATCH /timeline/eras/:eraId`: atualiza nome, descrição e ordem.
+- `DELETE /timeline/eras/:eraId`: arquiva uma era sem uso.
+- `PUT /timeline/worlds/:worldId/calendar`: cria ou substitui a definição validada de meses, dias da semana, ciclos e feriados.
+- `PATCH /timeline/events/:entityId`: associa ordem histórica, precisão, era e data fictícia a uma entidade EVENT existente.
+
+`sortKey` é inteiro e não representa timestamp. Anos negativos, meses variáveis e eras não gregorianas são aceitos. O backend bloqueia dias inexistentes, referências cross-world e alterações do calendário que invalidariam eventos. Datas de sessão (`played_at`) permanecem independentes.
+
 ## Campanhas
 
 - `adventureEntityId` é opcional no create/update de campanha.
