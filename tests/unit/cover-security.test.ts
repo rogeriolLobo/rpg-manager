@@ -7,6 +7,10 @@ afterEach(() => vi.unstubAllGlobals());
 describe('segurança das capas', () => {
   it('aceita apenas HTTPS público e os hosts de imagem autorizados', () => {
     expect(isAllowedCoverUrl('https://covers.openlibrary.org/b/isbn/123-L.jpg')).toBe(true);
+    expect(isAllowedCoverUrl('https://cdn11.bigcommerce.com/store/product-cover.png')).toBe(true);
+    expect(isAllowedCoverUrl('https://freeleaguepublishing.com/product-cover.jpg')).toBe(true);
+    expect(isAllowedCoverUrl('https://greenroninstore.com/product-cover.jpg')).toBe(true);
+    expect(isAllowedCoverUrl('https://pictures.abebooks.com/isbn/123-us.jpg')).toBe(true);
     expect(isAllowedCoverUrl('https://ia123456.us.archive.org/capa.jpg')).toBe(true);
     expect(isAllowedCoverUrl('https://evilus.archive.org/capa.jpg')).toBe(false);
     expect(isAllowedCoverUrl('http://covers.openlibrary.org/capa.jpg')).toBe(false);
