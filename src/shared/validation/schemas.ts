@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -211,6 +211,33 @@ export const entityRelationInputSchema = z.strictObject({
   strength: z.number().int().min(1).max(5).nullable().default(null),
 });
 
+export const worldEraInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  description: trimmed(2000).default(''),
+  sortOrder: z.number().int().min(-9999).max(9999),
+});
+
+export const worldCalendarInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  months: z.array(z.strictObject({ name: z.string().trim().min(1).max(80), days: z.number().int().min(1).max(1000) })).min(1).max(36),
+  weekdays: z.array(z.string().trim().min(1).max(80)).min(1).max(30),
+  cycles: z.array(z.strictObject({ name: z.string().trim().min(1).max(80), lengthDays: z.number().int().min(1).max(1_000_000), offset: z.number().int().min(-1_000_000).max(1_000_000) })).max(30),
+  holidays: z.array(z.strictObject({ name: z.string().trim().min(1).max(120), monthIndex: z.number().int().min(0).max(35), day: z.number().int().min(1).max(1000), description: trimmed(1000).default('') })).max(200),
+});
+
+export const eventTemporalInputSchema = z.strictObject({
+  historicalDate: trimmed(160).default(''),
+  sortKey: z.number().int().min(-9_000_000_000).max(9_000_000_000).nullable(),
+  eraId: z.string().trim().min(1).max(80).nullable(),
+  precision: z.enum(TEMPORAL_PRECISIONS),
+  calendarDate: z.strictObject({
+    year: z.number().int().min(-1_000_000).max(1_000_000),
+    monthIndex: z.number().int().min(0).max(35),
+    day: z.number().int().min(1).max(1000),
+  }).nullable(),
+  displayText: trimmed(160).default(''),
+});
+
 export const campaignEntityLinkSchema = z.strictObject({
   usageType: z.enum(CAMPAIGN_ENTITY_USAGE_TYPES),
 });
@@ -221,3 +248,6 @@ export type SessionInput = z.infer<typeof sessionInputSchema>;
 export type WorldInput = z.infer<typeof worldInputSchema>;
 export type VaultEntityInput = z.infer<typeof vaultEntityInputSchema>;
 export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
+export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
+export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
+export type EventTemporalInput = z.infer<typeof eventTemporalInputSchema>;
