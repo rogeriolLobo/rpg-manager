@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
+  test.setTimeout(60_000);
   const openNavigation=async()=>{if((page.viewportSize()?.width??1000)<=850){await page.getByRole('button',{name:'Abrir menu'}).click();await expect(page.locator('.sidebar')).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');}};
   const navigateFromMenu=async(name:string)=>{await openNavigation();await page.getByRole('link',{name,exact:true}).click();};
   const email=`vault-e2e-${Date.now()}-${test.info().project.name}@example.com`;

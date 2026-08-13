@@ -11,7 +11,7 @@
 - `campaign_members`: jogadores/personagens normalizados.
 - `campaign_sessions`: histórico e numeração calculada no servidor.
 - `campaign_session_attendance`: relação N:N entre sessão e membro.
-- `user_preferences`: preferências extensíveis por usuário.
+- `user_preferences`: preferências extensíveis por usuário, incluindo visualização da biblioteca e tema `LIGHT`, `DARK` ou `SYSTEM`.
 - `import_jobs`: prévias temporárias, hash idempotente e confirmação.
 - `play_groups` e `play_group_members`: grupos reutilizáveis, convidados e contas vinculadas; um narrador principal por grupo.
 - `rpgs.play_group_id` e `campaigns.play_group_id`: vínculo opcional sem remover os textos legados.

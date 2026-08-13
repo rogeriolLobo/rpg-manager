@@ -1,0 +1,3 @@
+ALTER TABLE user_preferences
+  ADD COLUMN theme TEXT NOT NULL DEFAULT 'SYSTEM'
+  CHECK(theme IN ('LIGHT', 'DARK', 'SYSTEM'));

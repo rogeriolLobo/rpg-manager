@@ -253,7 +253,10 @@ function BookCard({ item }: { item: Rpg }) {
 
 function CoverImage({ item, eager = false }: { item: Rpg; eager?: boolean }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  if (!item.coverUrl || failedUrl === item.coverUrl) return <><BookOpen /><span>{item.categoryName ?? "RPG"}</span></>;
+  if (!item.coverUrl || failedUrl === item.coverUrl) {
+    const initials = item.title.split(/\s+/u).filter(Boolean).slice(0,2).map((word)=>word[0]).join('').toLocaleUpperCase('pt-BR');
+    return <div className="cover-placeholder"><BookOpen aria-hidden="true"/><strong aria-hidden="true">{initials||'RPG'}</strong><span>{item.categoryName ?? "RPG"}</span></div>;
+  }
   return <img
     src={item.coverUrl}
     alt={`Capa de ${item.title}`}

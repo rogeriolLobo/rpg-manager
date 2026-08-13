@@ -21,6 +21,8 @@ Todas as rotas usam o prefixo `/api/v1`, sessão válida e CSRF nos métodos mut
 - `GET /vault/:id`: retorna somente quando `canViewEntity` autoriza.
 - `PATCH /vault/:id`: owner atualiza campos permitidos; entidade arquivada deve ser restaurada antes.
 - `POST /vault/:id/archive` / `restore`: somente owner.
+- `GET /preferences`: retorna a preferência visual da conta.
+- `PATCH /preferences`: persiste `LIGHT`, `DARK` ou `SYSTEM` com CSRF e isolamento por usuário.
 - `DELETE /vault/:id`: bloqueia quando existem campanha principal, vínculo ou Location filha.
 
 O body de entidade aceita apenas `entityType`, `name`, `summary`, `description`, `visibility`, `worldId`, `groupId`, `parentEntityId` e `adventure`. `ownerUserId`, roles, timestamps e metadados de segurança são rejeitados.
