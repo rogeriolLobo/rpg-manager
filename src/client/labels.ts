@@ -47,6 +47,19 @@ const labels: Record<string, string> = {
   MODULE: "Módulo",
   CUSTOM: "Personalizada",
   REFERENCE: "Referência",
+  HISTORY: "História",
+  RELIGION: "Religião",
+  CULTURE: "Cultura",
+  LEGEND: "Lenda",
+  PROPHECY: "Profecia",
+  SECRET: "Segredo",
+  DRAFT: "Rascunho",
+  CANON: "Cânone",
+  RUMOR: "Rumor",
+  ENTITY: "Entidade",
+  WORLD: "World",
+  JOURNAL: "Diário",
+  RPG: "RPG",
 };
 
 export function displayLabel(value: string | null | undefined): string {

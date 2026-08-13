@@ -25,7 +25,26 @@ Todas as rotas usam o prefixo `/api/v1`, sessão válida e CSRF nos métodos mut
 - `PATCH /preferences`: persiste `LIGHT`, `DARK` ou `SYSTEM` com CSRF e isolamento por usuário.
 - `DELETE /vault/:id`: bloqueia quando existem campanha principal, vínculo ou Location filha.
 
-O body de entidade aceita apenas `entityType`, `name`, `summary`, `description`, `visibility`, `worldId`, `groupId`, `parentEntityId` e `adventure`. `ownerUserId`, roles, timestamps e metadados de segurança são rejeitados.
+O body de entidade aceita apenas `entityType`, `name`, `summary`, `description`, `visibility`, `worldId`, `groupId`, `parentEntityId`, `adventure` e `lore`. Adventure inclui premissa, ganchos, cenas-chave e recompensas; Lore inclui classificação, estado editorial e fonte. `ownerUserId`, roles, timestamps e metadados de segurança são rejeitados.
+
+## World ativo e conhecimento V2.1
+
+- `GET /preferences/active-world`: retorna o World ativo somente se ele ainda estiver acessível e não arquivado.
+- `PATCH /preferences/active-world`: troca ou limpa o World ativo após autorização no servidor.
+- `GET /knowledge/:worldId`: Wiki paginada com filtros `search`, `type`, `folderId` e `tagId`. Retorna apenas entidades autorizadas.
+- `POST|PATCH|DELETE /knowledge/:worldId/folders`: estrutura editorial gerenciada pelo owner.
+- `POST|DELETE /knowledge/:worldId/tags`: vocabulário de tags do World gerenciado pelo owner.
+- `PATCH /knowledge/:worldId/entities/:entityId`: associa pasta, tags e aliases à mesma entidade do Vault.
+- `GET /knowledge/:worldId/entities/:entityId/backlinks`: menções editoriais derivadas de `[[nome ou alias]]`; não cria relações semânticas.
+- `GET /journal/:worldId`: páginas e pastas privadas do narrador.
+- `POST|PATCH|DELETE /journal/:worldId/folders`: organização privada; somente owner.
+- `POST|PATCH|DELETE /journal/:worldId/pages`: preparação privada; somente owner.
+- `GET|POST /world-invites/:worldId`: lista e cria convites como owner.
+- `DELETE /world-invites/:worldId/:inviteId`: revoga convite.
+- `POST /world-invites/accept/:token`: aceite autenticado e idempotente; o segredo é comparado pelo hash.
+- `GET /search?q=...&worldId=...`: busca agrupada em entidades, Worlds, campanhas, grupos, RPGs e Diário; `worldId` é opcional.
+
+Pastas, tags e aliases são metadados editoriais e nunca concedem acesso. O Portal do jogador usa `GET /knowledge/:worldId`, portanto não possui um caminho alternativo que ignore as permissões do Vault.
 
 ## Campanhas
 

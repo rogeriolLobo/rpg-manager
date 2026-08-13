@@ -23,6 +23,9 @@ Ativos: credenciais, sessões, recovery codes, catálogo, campanhas, notas e bac
 | Vazamento de segredo GM | `GM_ONLY` filtrado no SQL e role derivada de membership persistida, nunca do payload | teste GM x player |
 | Manipulação de visibility/role | DTO estrito, campos permitidos mapeados e endpoints separados para membership | testes de enum, mass assignment e impersonação |
 | Exclusão inconsistente | conta anonimizada, FKs explícitas, RESTRICT em Entity/World e dependências verificadas | migrations + testes de preservação |
+| Convite de World vazado | token CSPRNG mostrado uma vez; somente hash com pepper no D1; expiração, limite de uso e revogação | integração de aceite, repetição e expiração |
+| Vazamento por Wiki, aliases ou busca | metadados não concedem acesso; predicado de entidade aplicado antes de busca, paginação, tags, aliases e backlinks | integração owner x viewer x conteúdo privado |
+| Vazamento do Diário | todos os endpoints usam `ownedWorld`; páginas não têm modo público na V2.1 | viewer recebe 404 em leitura e mutação |
 
 ## Suposições e riscos residuais
 

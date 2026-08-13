@@ -4,10 +4,12 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './app';
 import { AuthProvider } from './auth/auth-context';
 import { ThemeProvider } from './theme/ThemeProvider';
+import { ActiveWorldProvider } from './world/active-world-context';
 import './theme/tokens.css';
 import './styles.css';
 import './layout-fixes.css';
 import './group-pages.css';
 import './vault-pages.css';
+import './world-knowledge.css';
 
-createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><AuthProvider><ThemeProvider><App/></ThemeProvider></AuthProvider></BrowserRouter></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><AuthProvider><ThemeProvider><ActiveWorldProvider><App/></ActiveWorldProvider></ThemeProvider></AuthProvider></BrowserRouter></StrictMode>);
