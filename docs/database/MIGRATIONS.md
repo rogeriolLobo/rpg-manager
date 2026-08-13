@@ -14,9 +14,10 @@ As migrations são append-only e numeradas:
 - `0010_active_world_and_wiki.sql`: World ativo, pastas, tags, aliases e organização editorial da Wiki.
 - `0011_lore_adventure_and_journal.sql`: detalhes ampliados de Lore/Adventure e Diário privado.
 - `0012_world_invites.sql`: convites com hash, expiração, limite de uso e revogação.
+- `0013_entity_relations.sql`: relações semânticas, direção, visibilidade, força, arquivo e índices do grafo.
 
 Local: `npm run db:migrate:local`. Produção: exporte o backup JSON, inspecione `d1_migrations`, revise o SQL e só então rode `npm run db:migrate:remote`. As migrations 0005–0009 são aditivas: não reescrevem campanhas V1; vínculos novos começam como `NULL`/vazios e a preferência visual começa em `SYSTEM`. Não edite uma migration já aplicada; crie a próxima. Mudanças destrutivas devem usar migration específica, cópia de segurança e plano de rollback testado.
 
-Após aplicar 0010–0012, valide `PRAGMA foreign_key_check`, confirme `wiki_folders`, `wiki_entity_metadata`, `world_tags`, `wiki_entity_aliases`, `lore_details`, `journal_folders`, `journal_pages` e `world_invites`. Execute também um smoke de campanha V1 sem Adventure/World, preferência de tema, Wiki owner, Portal viewer e aceite de convite.
+Após aplicar 0010–0013, valide `PRAGMA foreign_key_check`, confirme `wiki_folders`, `wiki_entity_metadata`, `world_tags`, `wiki_entity_aliases`, `lore_details`, `journal_folders`, `journal_pages`, `world_invites` e `entity_relations`. Execute também um smoke de campanha V1 sem Adventure/World, preferência de tema, Wiki owner, Portal viewer, aceite de convite e grafo vazio de um World existente.
 
 O Wrangler mantém o histórico em `d1_migrations`. Testes automatizados usam uma instância local isolada e nunca recebem o binding remoto.

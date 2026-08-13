@@ -28,7 +28,8 @@
 - `wiki_entity_aliases`: nomes alternativos normalizados para navegação e busca.
 - `journal_folders` / `journal_pages`: preparação privada do owner do World.
 - `world_invites`: hashes de convite com validade, limite de uso e revogação; o código em texto puro não é persistido.
+- `entity_relations`: arestas explícitas entre duas entidades do mesmo World, com tipo, direção, visibilidade, força, autoria e arquivamento.
 
-UUIDs aleatórios são gerados no Worker. A exclusão de conta apaga sessões e códigos, anonimiza a identidade e preserva o registro tombstone para manter RPGs, Worlds, entidades, campanhas e histórico. Checks limitam enums, estados e booleanos. `RESTRICT` protege World/Entity contra exclusão destrutiva; `CASCADE` remove somente relações subordinadas sem identidade própria. Os índices cobrem sessão, catálogo, campanhas, Worlds, filtros do Vault e relações de membership/vínculo.
+UUIDs aleatórios são gerados no Worker. A exclusão de conta apaga sessões e códigos, anonimiza a identidade e preserva o registro tombstone para manter RPGs, Worlds, entidades, campanhas e histórico. Checks limitam enums, estados e booleanos. `RESTRICT` protege World/Entity contra exclusão destrutiva; `CASCADE` remove somente relações subordinadas sem identidade própria. Relações usam FKs `RESTRICT`, não apagam entidades e possuem índice único parcial para impedir duplicatas ativas. Os índices cobrem sessão, catálogo, campanhas, Worlds, filtros do Vault, relações semânticas e vínculos de membership.
 
 O schema executável e único fonte de verdade está em `migrations/`.

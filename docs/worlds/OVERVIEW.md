@@ -26,4 +26,10 @@ O Diário pertence ao owner do World e contém páginas/pastas privadas. Não h�
 
 Convites só podem ser criados para Worlds com visibilidade `GROUP`. O código aleatório é mostrado uma vez, o D1 guarda apenas seu hash e o aceite cria membership `VIEWER`. Expiração, limite de usos e revogação são validados no servidor.
 
-Maps, Relationship Graph, genealogia, Timeline, calendário, uploads, fichas, VTT, realtime e IA não aparecem na interface V2.1 e continuam reservados para versões futuras.
+## Relações, Graph e Genealogia V2.2
+
+Relações conectam entidades do mesmo World sem copiá-las. A lista, o grafo e a genealogia leem `entity_relations`; backlinks editoriais continuam independentes. O grafo oferece pan, zoom, fit view, minimapa, busca, filtros, entidades desconectadas e destaque de vizinhança. A genealogia projeta relações familiares da mesma tabela.
+
+O narrador enxerga a verdade autorizada; jogadores recebem apenas nós e arestas permitidos pelo backend. A diferença não cria um segundo grafo físico.
+
+Maps, Timeline, calendário, uploads, fichas, VTT, realtime e IA continuam reservados para versões futuras.

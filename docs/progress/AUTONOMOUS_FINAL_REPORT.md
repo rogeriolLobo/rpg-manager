@@ -12,14 +12,14 @@ O RPG Manager estava em produção no commit `ae58814`, com Fases A e B implemen
 - identidade Huginn & Muninn e dark mode: concluídos;
 - V2.1 World Knowledge: concluída;
 - Wiki, Journal, busca global, convites e Player Portal: concluídos;
-- V2.2 Relations, Graph e Genealogy: em execução;
+- V2.2 Relations, Graph e Genealogy: implementação local concluída, publicação em andamento;
 - Timeline, Calendar, campos especializados e Bestiário: pendentes;
 - ADRs futuros: pendentes.
 
 ## Baseline de qualidade
 
-- 51 testes unitários;
-- 24 testes de integração;
+- 54 testes unitários;
+- 26 testes de integração;
 - 4 cenários E2E em desktop/mobile;
 - lint, typecheck e build aprovados;
 - CI remoto aprovado.
