@@ -335,7 +335,7 @@ describe("API real com D1", () => {
     expect(((await detailAfterCrossAccountUpdate.json()) as {members:Array<{playerName:string;active:number}>}).members[0]).toMatchObject({ playerName: "Adriana L.", active: 1 });
     const backup = await request('/export','GET',undefined,account.cookie);
     const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[]}};
-    expect(backupData.version).toBe(3);
+    expect(backupData.version).toBe(4);
     expect(backupData.data.groups).toHaveLength(1);
     expect(backupData.data.groupMembers).toHaveLength(1);
   });

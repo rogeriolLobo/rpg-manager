@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, WORLD_VISIBILITIES } from '../../domain/content/types';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 const optionalDate = z.union([z.iso.date(), z.literal(''), z.null()]).optional();
@@ -57,6 +58,7 @@ export const campaignInputSchema = z.strictObject({
   status: z.enum(['PLANNING', 'SESSION_ZERO', 'PREPARING', 'IN_PROGRESS', 'PAUSED', 'COMPLETED']),
   gameMaster: trimmed(100).default(''),
   playGroupId: z.string().trim().max(80).nullable().optional(),
+  adventureEntityId: z.string().trim().max(80).nullable().optional(),
   sessionZeroDate: optionalDate,
   firstSessionDate: optionalDate,
   frequency: z.enum(['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'BIMONTHLY', 'IRREGULAR']).nullable().optional(),
@@ -107,6 +109,41 @@ export const profileSchema = z.strictObject({
   displayName: z.string().trim().min(1).max(80),
 });
 
+export const worldInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  description: trimmed(10000).default(''),
+  defaultRpgId: z.string().trim().max(80).nullable().optional(),
+  visibility: z.enum(WORLD_VISIBILITIES),
+});
+
+export const worldMemberInputSchema = z.strictObject({
+  userId: z.string().trim().min(1).max(80),
+});
+
+export const adventureDetailsSchema = z.strictObject({
+  adventureType: z.enum(ADVENTURE_TYPES),
+  recommendedSessions: z.number().int().positive().max(999).nullable(),
+  notes: trimmed(10000).default(''),
+});
+
+export const vaultEntityInputSchema = z.strictObject({
+  entityType: z.enum(ENTITY_TYPES),
+  name: z.string().trim().min(1).max(160),
+  summary: trimmed(1000).default(''),
+  description: trimmed(20000).default(''),
+  visibility: z.enum(ENTITY_VISIBILITIES),
+  worldId: z.string().trim().max(80).nullable().optional(),
+  groupId: z.string().trim().max(80).nullable().optional(),
+  parentEntityId: z.string().trim().max(80).nullable().optional(),
+  adventure: adventureDetailsSchema.nullable(),
+});
+
+export const campaignEntityLinkSchema = z.strictObject({
+  usageType: z.enum(CAMPAIGN_ENTITY_USAGE_TYPES),
+});
+
 export type RpgInput = z.infer<typeof rpgInputSchema>;
 export type CampaignInput = z.infer<typeof campaignInputSchema>;
 export type SessionInput = z.infer<typeof sessionInputSchema>;
+export type WorldInput = z.infer<typeof worldInputSchema>;
+export type VaultEntityInput = z.infer<typeof vaultEntityInputSchema>;

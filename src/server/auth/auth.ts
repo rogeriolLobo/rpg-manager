@@ -627,9 +627,31 @@ export async function deleteAccount(c: AppContext): Promise<Response> {
     "ACCOUNT_DELETED",
     c.get("requestId"),
   );
+  const now = nowIso();
+  const tombstoneEmail = `deleted+${crypto.randomUUID()}@invalid.local`;
+  const tombstonePassword = await hashPassword(
+    randomToken(32),
+    c.env.PASSWORD_PEPPER,
+  );
   await c.env.DB.batch([
     event,
-    c.env.DB.prepare("DELETE FROM users WHERE id=?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM auth_sessions WHERE user_id=?").bind(user.id),
+    c.env.DB.prepare("DELETE FROM account_recovery_codes WHERE user_id=?").bind(
+      user.id,
+    ),
+    c.env.DB.prepare(
+      `UPDATE users SET email=?,email_normalized=?,display_name='Conta excluída',password_hash=?,
+        password_changed_at=?,disabled_at=?,deleted_at=?,updated_at=? WHERE id=?`,
+    ).bind(
+      tombstoneEmail,
+      tombstoneEmail,
+      tombstonePassword,
+      now,
+      now,
+      now,
+      now,
+      user.id,
+    ),
   ]);
   clearSessionCookies(c);
   return c.json({ success: true });

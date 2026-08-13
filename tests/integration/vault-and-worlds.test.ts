@@ -1,0 +1,180 @@
+import { env, exports } from 'cloudflare:workers';
+import { describe, expect, it } from 'vitest';
+import type { Env } from '../../src/server/types';
+
+const worker = exports as unknown as {
+  default: { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
+};
+const testEnv = env as unknown as Env;
+const origin = 'https://example.com';
+const password = 'esta e uma senha longa 2026';
+let requestSequence = 1;
+
+async function request(path: string, method = 'GET', body?: unknown, account?: Account) {
+  return worker.default.fetch(`${origin}/api/v1${path}`, {
+    method,
+    headers: {
+      'CF-Connecting-IP': `198.51.100.${requestSequence++ % 250}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(method !== 'GET' ? { Origin: origin } : {}),
+      ...(account ? { Cookie: account.cookie, 'X-CSRF-Token': account.csrf } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+interface Account { userId: string; cookie: string; csrf: string }
+
+async function register(name: string): Promise<Account> {
+  const response = await request('/auth/register', 'POST', {
+    email: `${name}@example.com`, displayName: name, password,
+  });
+  expect(response.status).toBe(201);
+  const cookies = response.headers.get('set-cookie') ?? '';
+  const session = cookies.match(/rpg_session=([^;,]+)/)?.[1];
+  const csrf = cookies.match(/rpg_csrf=([^;,]+)/)?.[1];
+  const body = await response.json() as { user: { id: string } };
+  if (!session || !csrf) throw new Error('Cookies de autenticação ausentes.');
+  return { userId: body.user.id, cookie: `rpg_session=${session}; rpg_csrf=${csrf}`, csrf };
+}
+
+const entity = (name: string, visibility = 'PRIVATE', extra: Record<string, unknown> = {}) => ({
+  entityType: 'NPC', name, summary: '', description: '', visibility,
+  worldId: null, groupId: null, parentEntityId: null, adventure: null, ...extra,
+});
+
+async function createRpg(account: Account) {
+  const response = await request('/rpgs', 'POST', {
+    title: 'Blue Rose', categoryId: 'fantasia', subgenreId: 'alta-fantasia', readingStatus: 'READING',
+    hasPlayed: false, wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', playGroupId: null,
+    plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '', notes: '', coverUrl: null,
+  }, account);
+  expect(response.status).toBe(201);
+  return (await response.json() as { item: { id: string } }).item.id;
+}
+
+async function createGroup(account: Account, members: Array<{ account: Account; isGameMaster: boolean }>) {
+  const response = await request('/groups', 'POST', { name: 'Mesa principal', notes: '' }, account);
+  expect(response.status).toBe(201);
+  const groupId = (await response.json() as { item: { id: string } }).item.id;
+  for (const member of members) {
+    const memberResponse = await request(`/groups/${groupId}/members`, 'POST', {
+      playerName: 'substituído pela conta', userId: member.account.userId, notes: '', active: true,
+      isGameMaster: member.isGameMaster,
+    }, account);
+    expect(memberResponse.status).toBe(201);
+  }
+  return groupId;
+}
+
+async function createCampaign(account: Account, rpgId: string, playGroupId: string) {
+  const response = await request('/campaigns', 'POST', {
+    rpgId, name: 'Campanha V2', status: 'IN_PROGRESS', gameMaster: '', playGroupId,
+    adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: 'WEEKLY',
+    nextSessionDate: null, sessionGoal: 8, legacyMembersText: '', legacyCharactersText: '', notes: '',
+  }, account);
+  expect(response.status).toBe(201);
+  return (await response.json() as { item: { id: string } }).item.id;
+}
+
+async function createEntity(account: Account, input: ReturnType<typeof entity>) {
+  const response = await request('/vault', 'POST', input, account);
+  expect(response.status).toBe(201);
+  return (await response.json() as { id: string }).id;
+}
+
+describe('Worlds, Vault e permissões V2', () => {
+  it('protege entidade privada, mutações IDOR, mass assignment e filtros', async () => {
+    const owner = await register('vault-owner');
+    const outsider = await register('vault-outsider');
+    const entityId = await createEntity(owner, entity('Segredo'));
+
+    expect((await request(`/vault/${entityId}`, 'GET', undefined, outsider)).status).toBe(404);
+    expect((await request(`/vault/${entityId}/archive`, 'POST', {}, outsider)).status).toBe(404);
+    expect((await request(`/vault/${entityId}/restore`, 'POST', {}, outsider)).status).toBe(404);
+    expect((await request(`/vault/${entityId}`, 'DELETE', undefined, outsider)).status).toBe(404);
+    expect((await request('/vault', 'POST', { ...entity('Injetada'), ownerUserId: outsider.userId }, owner)).status).toBe(422);
+    expect((await request('/vault?sort=name%20DESC%3BDELETE%20FROM%20users', 'GET', undefined, owner)).status).toBe(422);
+    expect((await request('/vault?type=NOT_REAL', 'GET', undefined, owner)).status).toBe(422);
+    expect((await request('/vault?search=%25%27%20OR%201%3D1--', 'GET', undefined, owner)).status).toBe(200);
+  });
+
+  it('aplica GROUP, CAMPAIGN, PLAYERS e GM_ONLY sem permitir impersonação', async () => {
+    const owner = await register('permission-owner');
+    const player = await register('permission-player');
+    const gameMaster = await register('permission-gm');
+    const outsider = await register('permission-outsider');
+    const groupId = await createGroup(owner, [
+      { account: player, isGameMaster: false },
+      { account: gameMaster, isGameMaster: true },
+    ]);
+    const campaignId = await createCampaign(owner, await createRpg(owner), groupId);
+
+    const groupEntityId = await createEntity(owner, entity('Do grupo', 'GROUP', { groupId }));
+    expect((await request(`/vault/${groupEntityId}`, 'GET', undefined, player)).status).toBe(200);
+    expect((await request(`/vault/${groupEntityId}`, 'GET', undefined, outsider)).status).toBe(404);
+
+    for (const [visibility, playerStatus, gmStatus] of [
+      ['CAMPAIGN', 200, 200], ['PLAYERS', 200, 200], ['GM_ONLY', 404, 200],
+    ] as const) {
+      const entityId = await createEntity(owner, entity(`${visibility} entity`, visibility));
+      expect((await request(`/campaigns/${campaignId}/entities/${entityId}`, 'POST', { usageType: 'REFERENCE' }, owner)).status).toBe(201);
+      expect((await request(`/vault/${entityId}`, 'GET', undefined, player)).status).toBe(playerStatus);
+      expect((await request(`/vault/${entityId}`, 'GET', undefined, gameMaster)).status).toBe(gmStatus);
+      expect((await request(`/vault/${entityId}`, 'GET', undefined, outsider)).status).toBe(404);
+      expect((await request(`/campaigns/${campaignId}/entities/${entityId}`, 'DELETE', undefined, outsider)).status).toBe(404);
+    }
+  });
+
+  it('preserva entidades ao arquivar World e ao concluir campanha, e bloqueia ciclos', async () => {
+    const owner = await register('history-owner');
+    const rpgId = await createRpg(owner);
+    const worldResponse = await request('/worlds', 'POST', {
+      name: 'Aldea', description: '', defaultRpgId: rpgId, visibility: 'PRIVATE',
+    }, owner);
+    expect(worldResponse.status).toBe(201);
+    const worldId = (await worldResponse.json() as { item: { id: string } }).item.id;
+    const parentId = await createEntity(owner, entity('Capital', 'PRIVATE', {
+      entityType: 'LOCATION', worldId,
+    }));
+    const childId = await createEntity(owner, entity('Taverna', 'PRIVATE', {
+      entityType: 'LOCATION', worldId, parentEntityId: parentId,
+    }));
+    expect((await request(`/vault/${parentId}`, 'PATCH', entity('Capital', 'PRIVATE', {
+      entityType: 'LOCATION', worldId, parentEntityId: childId,
+    }), owner)).status).toBe(422);
+
+    expect((await request(`/worlds/${worldId}/archive`, 'POST', {}, owner)).status).toBe(200);
+    expect((await request(`/vault/${childId}`, 'GET', undefined, owner)).status).toBe(200);
+    expect((await request(`/worlds/${worldId}`, 'DELETE', undefined, owner)).status).toBe(409);
+
+    const groupId = await createGroup(owner, []);
+    const campaignId = await createCampaign(owner, rpgId, groupId);
+    expect((await request(`/campaigns/${campaignId}/entities/${childId}`, 'POST', { usageType: 'ACTIVE' }, owner)).status).toBe(201);
+    const updateCampaign = await request(`/campaigns/${campaignId}`, 'PATCH', {
+      rpgId, name: 'Campanha V2', status: 'COMPLETED', gameMaster: '', playGroupId: groupId,
+      adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: 'WEEKLY',
+      nextSessionDate: null, sessionGoal: 8, legacyMembersText: '', legacyCharactersText: '', notes: '',
+    }, owner);
+    expect(updateCampaign.status).toBe(200);
+    expect((await request(`/vault/${childId}`, 'GET', undefined, owner)).status).toBe(200);
+    expect((await request(`/vault/${childId}`, 'DELETE', undefined, owner)).status).toBe(409);
+  });
+
+  it('anonimiza a conta e preserva o conteúdo histórico', async () => {
+    const owner = await register('deleted-owner');
+    const entityId = await createEntity(owner, entity('Legado'));
+    expect((await request('/auth/account', 'DELETE', {
+      currentPassword: password, confirmation: 'EXCLUIR MINHA CONTA',
+    }, owner)).status).toBe(200);
+
+    const user = await testEnv.DB.prepare('SELECT email,display_name,disabled_at,deleted_at FROM users WHERE id=?')
+      .bind(owner.userId).first<{ email: string; display_name: string; disabled_at: string | null; deleted_at: string | null }>();
+    expect(user?.email).toMatch(/^deleted\+.*@invalid\.local$/);
+    expect(user?.display_name).toBe('Conta excluída');
+    expect(user?.disabled_at).not.toBeNull();
+    expect(user?.deleted_at).not.toBeNull();
+    expect(await testEnv.DB.prepare('SELECT id FROM vault_entities WHERE id=?').bind(entityId).first()).not.toBeNull();
+    expect((await request('/auth/login', 'POST', { email: 'deleted-owner@example.com', password })).status).toBe(401);
+  });
+});
