@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { applySecurityHeaders } from "../../src/server/security/headers";
 import {
   generateRecoveryCodes,
@@ -57,5 +59,20 @@ describe("segurança", () => {
     const local = new Headers();
     applySecurityHeaders(local, false);
     expect(local.has("Strict-Transport-Security")).toBe(false);
+  });
+
+  it("mantém os headers dos assets estáticos alinhados ao Worker", () => {
+    const assetHeaders = readFileSync(
+      resolve(process.cwd(), "public/_headers"),
+      "utf8",
+    );
+    const headers = new Headers();
+    applySecurityHeaders(headers, true);
+
+    for (const [name, value] of headers.entries()) {
+      expect(assetHeaders.toLowerCase()).toContain(
+        `${name}: ${value}`.toLowerCase(),
+      );
+    }
   });
 });
