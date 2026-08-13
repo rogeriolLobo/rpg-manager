@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -161,6 +161,47 @@ export const loreDetailsSchema = z.strictObject({
   source: trimmed(1000).default(''),
 });
 
+export const characterDetailsSchema = z.strictObject({
+  playerUserId: z.string().trim().min(1).max(80).nullable(),
+  pronouns: trimmed(80).default(''),
+  concept: trimmed(1000).default(''),
+  status: trimmed(80).default(''),
+  notes: trimmed(10000).default(''),
+});
+
+export const npcDetailsSchema = z.strictObject({
+  role: trimmed(160).default(''), occupation: trimmed(160).default(''), motivation: trimmed(2000).default(''),
+  publicNotes: trimmed(10000).default(''), gmNotes: trimmed(10000).default(''),
+});
+
+export const creatureStatFieldSchema = z.strictObject({
+  key: z.string().trim().regex(/^[a-z][a-z0-9_]{0,39}$/),
+  label: z.string().trim().min(1).max(80),
+  type: z.enum(CREATURE_STAT_FIELD_TYPES),
+  required: z.boolean().default(false),
+});
+
+export const creatureStatTemplateInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  description: trimmed(2000).default(''),
+  fields: z.array(creatureStatFieldSchema).max(80).refine((fields) => new Set(fields.map((field) => field.key)).size === fields.length, 'As chaves dos campos devem ser únicas.'),
+});
+
+export const creatureDetailsSchema = z.strictObject({
+  classification: trimmed(160).default(''), habitat: trimmed(1000).default(''), behavior: trimmed(5000).default(''),
+  dangerNotes: trimmed(5000).default(''),
+  statBlock: z.strictObject({ templateId: z.string().trim().min(1).max(80), values: z.record(z.string(), z.union([z.string().max(5000), z.number().finite(), z.boolean()])) }).nullable(),
+});
+
+export const factionDetailsSchema = z.strictObject({
+  purpose: trimmed(2000).default(''), scope: trimmed(160).default(''), status: trimmed(80).default(''),
+  publicDescription: trimmed(10000).default(''), gmNotes: trimmed(10000).default(''),
+});
+
+export const itemDetailsSchema = z.strictObject({
+  itemType: trimmed(160).default(''), rarity: trimmed(80).default(''), publicDescription: trimmed(10000).default(''), gmNotes: trimmed(10000).default(''),
+});
+
 export const vaultEntityInputSchema = z.strictObject({
   entityType: z.enum(ENTITY_TYPES),
   name: z.string().trim().min(1).max(160),
@@ -172,6 +213,11 @@ export const vaultEntityInputSchema = z.strictObject({
   parentEntityId: z.string().trim().max(80).nullable().optional(),
   adventure: adventureDetailsSchema.nullable(),
   lore: loreDetailsSchema.nullable().default(null),
+  character: characterDetailsSchema.nullable().default(null),
+  npc: npcDetailsSchema.nullable().default(null),
+  creature: creatureDetailsSchema.nullable().default(null),
+  faction: factionDetailsSchema.nullable().default(null),
+  item: itemDetailsSchema.nullable().default(null),
 });
 
 export const wikiFolderInputSchema = z.strictObject({
@@ -251,3 +297,4 @@ export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
 export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
 export type EventTemporalInput = z.infer<typeof eventTemporalInputSchema>;
+export type CreatureStatTemplateInput = z.infer<typeof creatureStatTemplateInputSchema>;
