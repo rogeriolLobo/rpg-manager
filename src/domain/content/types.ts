@@ -20,6 +20,26 @@ export const WORLD_VISIBILITIES = ['PRIVATE', 'GROUP'] as const;
 export const WORLD_STATUSES = ['ACTIVE', 'ARCHIVED'] as const;
 export const WORLD_MEMBER_ROLES = ['OWNER', 'VIEWER'] as const;
 export const CAMPAIGN_ENTITY_USAGE_TYPES = ['REFERENCE', 'ACTIVE'] as const;
+export const RELATION_TYPES = [
+  'ALLY',
+  'ENEMY',
+  'RIVAL',
+  'FAMILY',
+  'PARENT',
+  'CHILD',
+  'SIBLING',
+  'PARTNER',
+  'ROMANCE',
+  'EMPLOYER',
+  'SUBORDINATE',
+  'MEMBER_OF',
+  'LEADER_OF',
+  'OWES',
+  'KNOWS',
+  'SECRET',
+  'CUSTOM',
+] as const;
+export const RELATION_DIRECTIONS = ['DIRECTED', 'BIDIRECTIONAL'] as const;
 
 export type VaultEntityType = typeof ENTITY_TYPES[number];
 export type EntityVisibility = typeof ENTITY_VISIBILITIES[number];
@@ -30,6 +50,8 @@ export type WorldVisibility = typeof WORLD_VISIBILITIES[number];
 export type WorldStatus = typeof WORLD_STATUSES[number];
 export type WorldMemberRole = typeof WORLD_MEMBER_ROLES[number];
 export type CampaignEntityUsageType = typeof CAMPAIGN_ENTITY_USAGE_TYPES[number];
+export type RelationType = typeof RELATION_TYPES[number];
+export type RelationDirection = typeof RELATION_DIRECTIONS[number];
 
 export interface AdventureDetailsInput {
   adventureType: AdventureType;

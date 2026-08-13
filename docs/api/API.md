@@ -53,6 +53,17 @@ Pastas, tags e aliases são metadados editoriais e nunca concedem acesso. O Port
 - `DELETE /campaigns/:campaignId/entities/:entityId` remove vínculo, exceto Adventure principal.
 - `GET /campaigns/:id` inclui `entities` e a Adventure principal, sem alterar campanhas V1.
 
+## Relations e Graph V2.2
+
+- `GET /relations/worlds/:worldId`: retorna nós e relações já filtrados no servidor. Aceita `search`, `type`, `archive` e `includeDisconnected`.
+- `POST /relations/worlds/:worldId`: owner conecta duas entidades ativas do mesmo World e proprietário.
+- `PATCH /relations/:relationId`: owner edita tipo, rótulo, descrição, direção, visibilidade e força.
+- `DELETE /relations/:relationId`: arquivamento não destrutivo da relação.
+- `POST /relations/:relationId/restore`: restaura quando não existe uma aresta ativa equivalente.
+- `GET /relations/worlds/:worldId/genealogy`: projeção autorizada de `PARENT`, `CHILD`, `SIBLING` e `PARTNER`.
+
+Relações bidirecionais têm as pontas canonizadas para impedir duplicidade invertida. `CUSTOM` exige rótulo. `PARENT`/`CHILD` são direcionadas; `SIBLING`/`PARTNER` são bidirecionais. A API bloqueia self-reference, cross-world, cross-user, duplicidade e pares parentais inconsistentes.
+
 ## Visibilidade
 
 O predicado de autorização é aplicado antes de `COUNT`, `LIMIT` e `OFFSET`. Assim, paginação e contagens não revelam entidades inacessíveis. O contrato completo está no [ADR-005](../architecture/ADR-005-content-permissions.md).

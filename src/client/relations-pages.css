@@ -1,0 +1,27 @@
+.relations-page { gap: 1rem; }
+.relation-view-tabs { display: flex; gap: .35rem; flex-wrap: wrap; }
+.relation-view-tabs button { display: inline-flex; align-items: center; gap: .45rem; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); border-radius: 999px; padding: .65rem 1rem; cursor: pointer; }
+.relation-view-tabs button.active { background: var(--brand-primary); border-color: var(--brand-primary); color: var(--text-on-brand); }
+.relation-filters { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(11rem, .4fr) minmax(9rem, .3fr) auto; align-items: end; gap: .8rem; }
+.relation-filters > label:not(.search-box) { display: grid; gap: .35rem; }
+.relation-filters .check-row { display: flex !important; align-items: center; min-height: 2.75rem; }
+.relation-editor { border-color: var(--brand-primary); box-shadow: 0 12px 40px color-mix(in srgb, var(--brand-primary) 14%, transparent); }
+.relation-graph { height: min(68vh, 740px); min-height: 480px; padding: 0; overflow: hidden; position: relative; }
+.relation-graph .react-flow { background: var(--surface); }
+.relation-graph .react-flow__node { width: 180px; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 7px 20px var(--shadow-color); padding: .8rem; font-family: inherit; }
+.relation-graph .react-flow__node.selected { border-color: var(--brand-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 25%, transparent); }
+.relation-graph .react-flow__edge-path { stroke: var(--brand-primary); stroke-width: 2; }
+.relation-graph .react-flow__edge-text { fill: var(--text-primary); font-size: 12px; }
+.relation-graph .react-flow__edge-textbg { fill: var(--surface-raised); }
+.relation-graph .react-flow__controls, .relation-graph .react-flow__minimap { background: var(--surface-raised); border: 1px solid var(--border); }
+.relation-graph .react-flow__controls-button { background: var(--surface-raised); color: var(--text-primary); border-color: var(--border); }
+.relation-node-dimmed, .relation-edge-dimmed { opacity: .2; }
+.graph-help { position: absolute; z-index: 5; top: .75rem; left: .75rem; display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: .65rem; background: color-mix(in srgb, var(--surface-raised) 92%, transparent); color: var(--text-muted); font-size: .85rem; }
+.relation-list .clean-list li { align-items: center; }
+
+@media (max-width: 800px) {
+  .relation-filters { grid-template-columns: 1fr; }
+  .relation-graph { min-height: 62vh; }
+  .graph-help { right: .75rem; flex-wrap: wrap; }
+  .relation-list .clean-list li { align-items: stretch; }
+}

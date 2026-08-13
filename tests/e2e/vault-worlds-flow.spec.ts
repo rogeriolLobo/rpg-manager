@@ -115,6 +115,30 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await lucienCard.getByRole('button',{name:'Salvar organização'}).click();
   await expect(page.getByText('Também: Conselheiro Rubro')).toBeVisible();
 
+  await navigateFromMenu('Mundos');
+  await page.getByRole('link',{name:/Aldea/u}).click();
+  await page.getByRole('navigation',{name:'Espaços do World'}).getByRole('link',{name:/Relações/u}).click();
+  await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
+  await page.getByRole('button',{name:'Nova relação'}).click();
+  await page.getByLabel('Origem').selectOption({label:'Lucien · NPC'});
+  await page.getByLabel('Destino').selectOption({label:'Taverna do Corvo · Local'});
+  await page.getByLabel('Tipo da relação').selectOption('ALLY');
+  await page.getByLabel('Visibilidade').selectOption('PRIVATE');
+  await page.getByRole('button',{name:'Salvar relação'}).click();
+  await page.getByRole('button',{name:'Lista'}).click();
+  const allyRelation=page.locator('.relation-list li').filter({hasText:'Lucien'}).filter({hasText:'Taverna do Corvo'});
+  await expect(allyRelation).toBeVisible();
+
+  await page.getByRole('button',{name:'Nova relação'}).click();
+  await page.getByLabel('Origem').selectOption({label:'Lucien · NPC'});
+  await page.getByLabel('Destino').selectOption({label:'Taverna do Corvo · Local'});
+  await page.getByLabel('Tipo da relação').selectOption('PARENT');
+  await expect(page.getByLabel('Direção')).toHaveValue('DIRECTED');
+  await page.getByRole('button',{name:'Salvar relação'}).click();
+  await page.getByRole('button',{name:'Genealogia'}).click();
+  await expect(page.locator('.react-flow')).toBeVisible();
+  await expect(page.getByText('Lucien · NPC')).toBeVisible();
+
   await navigateFromMenu('Diário');
   await page.getByRole('button',{name:'Nova página'}).click();
   await page.getByLabel('Título').fill('Próxima sessão');
