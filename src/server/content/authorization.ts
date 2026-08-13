@@ -36,11 +36,11 @@ export const entityAuthorizationColumns = (userIdPlaceholder = '?') => `
   EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id
     WHERE ce.entity_id=e.id AND cm.user_id=${userIdPlaceholder} AND cm.active=1 AND cm.is_game_master=1) is_campaign_game_master`;
 
-export const entityAuthorizationPredicate = () => `(e.owner_user_id=? OR (e.archived_at IS NULL AND (
-  (e.visibility='GROUP' AND EXISTS(SELECT 1 FROM play_group_members pgm WHERE pgm.group_id=e.group_id AND pgm.user_id=? AND pgm.active=1)) OR
-  (e.visibility='CAMPAIGN' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=e.id AND cm.user_id=?)) OR
-  (e.visibility='PLAYERS' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=e.id AND cm.user_id=? AND cm.active=1)) OR
-  (e.visibility='GM_ONLY' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=e.id AND cm.user_id=? AND cm.active=1 AND cm.is_game_master=1))
+export const entityAuthorizationPredicate = (alias = 'e') => `(${alias}.owner_user_id=? OR (${alias}.archived_at IS NULL AND (
+  (${alias}.visibility='GROUP' AND EXISTS(SELECT 1 FROM play_group_members pgm WHERE pgm.group_id=${alias}.group_id AND pgm.user_id=? AND pgm.active=1)) OR
+  (${alias}.visibility='CAMPAIGN' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=${alias}.id AND cm.user_id=?)) OR
+  (${alias}.visibility='PLAYERS' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=${alias}.id AND cm.user_id=? AND cm.active=1)) OR
+  (${alias}.visibility='GM_ONLY' AND EXISTS(SELECT 1 FROM campaign_entities ce JOIN campaign_members cm ON cm.campaign_id=ce.campaign_id WHERE ce.entity_id=${alias}.id AND cm.user_id=? AND cm.active=1 AND cm.is_game_master=1))
 )))`;
 
 export const entityAuthorizationValues = (userId: string): string[] => [userId,userId,userId,userId,userId];

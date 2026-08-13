@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -200,6 +200,17 @@ export const worldInviteInputSchema = z.strictObject({
   maxUses: z.number().int().min(1).max(100).default(1),
 });
 
+export const entityRelationInputSchema = z.strictObject({
+  sourceEntityId: z.string().trim().min(1).max(80),
+  targetEntityId: z.string().trim().min(1).max(80),
+  relationType: z.enum(RELATION_TYPES),
+  label: trimmed(160).default(''),
+  description: trimmed(4000).default(''),
+  direction: z.enum(RELATION_DIRECTIONS),
+  visibility: z.enum(ENTITY_VISIBILITIES),
+  strength: z.number().int().min(1).max(5).nullable().default(null),
+});
+
 export const campaignEntityLinkSchema = z.strictObject({
   usageType: z.enum(CAMPAIGN_ENTITY_USAGE_TYPES),
 });
@@ -209,3 +220,4 @@ export type CampaignInput = z.infer<typeof campaignInputSchema>;
 export type SessionInput = z.infer<typeof sessionInputSchema>;
 export type WorldInput = z.infer<typeof worldInputSchema>;
 export type VaultEntityInput = z.infer<typeof vaultEntityInputSchema>;
+export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
