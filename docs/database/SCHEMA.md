@@ -32,6 +32,9 @@
 - `world_eras`: períodos nomeados e ordenáveis dentro do World.
 - `world_calendars`: definição única e validada de meses, dias da semana, ciclos e feriados por World.
 - `event_temporal_details`: extensão 1:1 de EVENT com data textual, `sort_key`, precisão, era e data de calendário fictício.
+- `character_details`, `npc_details`, `creature_details`, `faction_details` e `item_details`: extensões 1:1 com campos universais por tipo.
+- `creature_stat_templates`: modelos tipados por World, sem atributos de sistema no schema central.
+- `creature_stat_blocks`: valores validados de uma criatura para um modelo.
 
 UUIDs aleatórios são gerados no Worker. A exclusão de conta apaga sessões e códigos, anonimiza a identidade e preserva o registro tombstone para manter RPGs, Worlds, entidades, campanhas e histórico. Checks limitam enums, estados e booleanos. `RESTRICT` protege World/Entity contra exclusão destrutiva; `CASCADE` remove somente relações subordinadas sem identidade própria. Relações usam FKs `RESTRICT`, não apagam entidades e possuem índice único parcial para impedir duplicatas ativas. Os índices cobrem sessão, catálogo, campanhas, Worlds, filtros do Vault, relações semânticas e vínculos de membership.
 

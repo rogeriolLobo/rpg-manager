@@ -25,7 +25,16 @@ Todas as rotas usam o prefixo `/api/v1`, sessão válida e CSRF nos métodos mut
 - `PATCH /preferences`: persiste `LIGHT`, `DARK` ou `SYSTEM` com CSRF e isolamento por usuário.
 - `DELETE /vault/:id`: bloqueia quando existem campanha principal, vínculo ou Location filha.
 
-O body de entidade aceita apenas `entityType`, `name`, `summary`, `description`, `visibility`, `worldId`, `groupId`, `parentEntityId`, `adventure` e `lore`. Adventure inclui premissa, ganchos, cenas-chave e recompensas; Lore inclui classificação, estado editorial e fonte. `ownerUserId`, roles, timestamps e metadados de segurança são rejeitados.
+O body de entidade aceita apenas `entityType`, campos comuns e extensões compatíveis (`adventure`, `lore`, `character`, `npc`, `creature`, `faction` e `item`). `ownerUserId`, roles, timestamps e metadados de segurança são rejeitados. Campos de outro tipo também são rejeitados.
+
+## Campos especializados e Bestiário
+
+- `GET /bestiary/worlds/:worldId/templates`: lista modelos para leitores autorizados do World.
+- `POST /bestiary/worlds/:worldId/templates`: owner cria modelo com campos tipados.
+- `PATCH /bestiary/templates/:id`: owner altera nome, descrição e campos compatíveis com blocos existentes.
+- `DELETE /bestiary/templates/:id`: owner remove somente modelo sem uso.
+
+`creature.statBlock` contém `templateId` e valores por chave. O servidor valida World, owner, campos obrigatórios e tipos. Respostas de NPC, Faction e Item omitem `gmNotes` quando o leitor não é owner nem narrador autorizado.
 
 ## World ativo e conhecimento V2.1
 

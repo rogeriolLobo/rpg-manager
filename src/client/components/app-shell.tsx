@@ -1,4 +1,4 @@
-import { Archive, BookOpen, CalendarDays, Castle, Gauge, GitFork, Globe2, LogOut, Menu, NotebookPen, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
+import { Archive, BookOpen, CalendarDays, Castle, Gauge, GitFork, Globe2, LogOut, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
@@ -14,6 +14,7 @@ export function AppShell() {
     [`/app/worlds/${activeWorld.id}/wiki`, BookOpen, 'Wiki'],
     [`/app/worlds/${activeWorld.id}/relations`, GitFork, 'Relações'],
     [`/app/worlds/${activeWorld.id}/timeline`, CalendarDays, 'Timeline'],
+    [`/app/worlds/${activeWorld.id}/bestiary`, PawPrint, 'Bestiário'],
     ...(activeWorld.isOwner ? [[`/app/worlds/${activeWorld.id}/journal`, NotebookPen, 'Diário'] as const] : []),
     [`/app/worlds/${activeWorld.id}/portal`, UserRound, 'Portal do jogador'],
     [`/app/campaigns?worldId=${activeWorld.id}`, Castle, 'Campanhas'],

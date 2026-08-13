@@ -4,7 +4,7 @@ Vault é a visão de todas as entidades que a conta possui ou pode acessar; não
 
 ## Tipos e extensões
 
-A base comum suporta Character, NPC, Creature, Location, Faction, Item, Lore, Event, Quest, Handout e Adventure. Somente Adventure usa extensão estruturada nesta versão (`adventure_details`). Location pode apontar para outra Location do mesmo World; a API rejeita pai de outro tipo, World divergente e ciclos.
+A base comum suporta Character, NPC, Creature, Location, Faction, Item, Lore, Event, Quest, Handout e Adventure. Character, NPC, Creature, Faction, Item, Lore e Adventure possuem extensões relacionais estruturadas. Location pode apontar para outra Location do mesmo World; a API rejeita pai de outro tipo, World divergente e ciclos.
 
 Para adicionar um tipo futuro: inclua o enum em migration append-only, atualize `ENTITY_TYPES`, validação/labels e testes. Crie extensão relacional somente quando houver campos realmente estruturados; não introduza EAV ou JSON arbitrário.
 
@@ -12,6 +12,10 @@ Para adicionar um tipo futuro: inclua o enum em migration append-only, atualize 
 
 Arquivar preserva vínculos e histórico, remove o conteúdo das listagens compartilhadas e mantém acesso do owner. Hard delete é permitido apenas sem campanha, Adventure principal ou filha Location. Encerrar/excluir campanha remove a relação da campanha, nunca a entidade do Vault.
 
-## Fora da V2.0
+## Bestiário
 
-Não foram implementados: ficha específica por sistema, stat blocks, grafo de relações, mapas, timeline, conteúdo público, colaboração de edição, R2/uploads, PDF, integração com planilhas, marketplace, discovery, realtime ou IA. Esses itens permanecem para V2.1+.
+Criaturas têm campos universais e podem receber um bloco de estatísticas definido por modelo do World. O núcleo não contém atributos de um RPG específico. Tags continuam compartilhadas com a Wiki.
+
+## Fora do escopo atual
+
+Não foram implementados mapas, conteúdo público, colaboração de edição, R2/uploads, PDF, marketplace, discovery, realtime ou IA.

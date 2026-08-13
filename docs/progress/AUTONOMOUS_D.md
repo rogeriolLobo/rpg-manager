@@ -19,7 +19,10 @@ Data: 2026-08-13
 - `0014_world_timeline_calendar.sql`;
 - aditiva, sem alteração de tabelas existentes;
 - aplicação local e `PRAGMA foreign_key_check`: aprovados;
-- aplicação remota: pendente do CI.
+- backup lógico remoto pré-migration: `rpg-manager-d1-pre-0014-20260813.sql`;
+- SHA-256 do backup: `5C47D71F3A0C7415BF0FA81135DFB49BC664516CC6C73659D21B7448C6778B67`;
+- aplicação remota e `PRAGMA foreign_key_check`: aprovados;
+- nenhuma migration pendente.
 
 ## Segurança
 
@@ -44,7 +47,14 @@ Data: 2026-08-13
 
 ## Deploy e smoke
 
-Pendentes do push, CI remoto, backup lógico e migration remota segura.
+- PR: `#5`;
+- merge na `main`: `7994cd9`;
+- CI da `main`: aprovado no run `31749871400`;
+- Worker publicado: `aebbf20d-9c11-496a-a1be-3681f9d39041`;
+- `/app` e assets: HTTP 200 com CSP e `nosniff`;
+- endpoint da Timeline sem autenticação: HTTP 401;
+- smoke autenticado: sessão preservada, dashboard carregado e dados existentes íntegros;
+- a conta usada no smoke não possui World, portanto nenhum dado fictício foi criado apenas para testar a interface.
 
 ## Limitações deliberadas
 
@@ -53,6 +63,6 @@ Pendentes do push, CI remoto, backup lógico e migration remota segura.
 - posições e escalas visuais não são persistidas;
 - não há NLP/IA para inferir cronologia.
 
-## Próximo passo
+## Resultado
 
-Após publicação segura, iniciar campos especializados e Bestiário sem hardcode de sistema.
+Fase D concluída e publicada. Próximo passo: campos especializados e Bestiário sem hardcode de sistema.
