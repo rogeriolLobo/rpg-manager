@@ -7,6 +7,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe('segurança das capas', () => {
   it('aceita apenas HTTPS público e os hosts de imagem autorizados', () => {
     expect(isAllowedCoverUrl('https://covers.openlibrary.org/b/isbn/123-L.jpg')).toBe(true);
+    expect(isAllowedCoverUrl('https://ia123456.us.archive.org/capa.jpg')).toBe(true);
+    expect(isAllowedCoverUrl('https://evilus.archive.org/capa.jpg')).toBe(false);
     expect(isAllowedCoverUrl('http://covers.openlibrary.org/capa.jpg')).toBe(false);
     expect(isAllowedCoverUrl('https://example.com/capa.jpg')).toBe(false);
     expect(isAllowedCoverUrl('data:image/png;base64,abc')).toBe(false);

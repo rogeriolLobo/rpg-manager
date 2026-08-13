@@ -2,12 +2,6 @@ export const COVER_IMAGE_HOSTS = [
   'archive.org',
   'cdn.vnda.com.br',
   'covers.openlibrary.org',
-  'ia600601.us.archive.org',
-  'ia800601.us.archive.org',
-  'ia801600.us.archive.org',
-  'ia801609.us.archive.org',
-  'ia802809.us.archive.org',
-  'ia902809.us.archive.org',
   'i0.wp.com',
   'jamboeditora.com.br',
   'loja.retropunk.com.br',
@@ -18,7 +12,12 @@ export const COVER_IMAGE_HOSTS = [
   'www.huginnemuninn.com.br',
 ] as const;
 
-export const COVER_IMAGE_ORIGINS = COVER_IMAGE_HOSTS.map((host) => `https://${host}`);
+const COVER_IMAGE_HOST_SUFFIXES = ['.us.archive.org'] as const;
+
+export const COVER_IMAGE_ORIGINS = [
+  ...COVER_IMAGE_HOSTS.map((host) => `https://${host}`),
+  ...COVER_IMAGE_HOST_SUFFIXES.map((suffix) => `https://*${suffix}`),
+];
 
 const allowedCoverHosts = new Set<string>(COVER_IMAGE_HOSTS);
 
@@ -56,5 +55,7 @@ export function isPublicHttpsUrl(value: string): boolean {
 
 export function isAllowedCoverUrl(value: string): boolean {
   const url = parsePublicHttpsUrl(value);
-  return Boolean(url && allowedCoverHosts.has(url.hostname.toLowerCase()));
+  if (!url) return false;
+  const hostname = url.hostname.toLowerCase();
+  return allowedCoverHosts.has(hostname) || COVER_IMAGE_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
 }
