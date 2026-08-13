@@ -14,7 +14,7 @@ O RPG Manager estava em produção no commit `ae58814`, com Fases A e B implemen
 - Wiki, Journal, busca global, convites e Player Portal: concluídos;
 - V2.2 Relations, Graph e Genealogy: concluída e publicada;
 - Timeline e Calendar: concluídas e publicadas;
-- campos especializados e Bestiário: implementação local concluída, publicação em andamento;
+- campos especializados e Bestiário: concluídos e publicados;
 - ADRs futuros: pendentes.
 
 ## Baseline de qualidade
@@ -28,8 +28,8 @@ O RPG Manager estava em produção no commit `ae58814`, com Fases A e B implemen
 ## Produção
 
 - URL: `https://rpg-manager.editorahuginnemuninn.workers.dev/app`;
-- Worker: `aebbf20d-9c11-496a-a1be-3681f9d39041`;
-- smoke público e autenticado concluído até a Fase D;
+- Worker: `995f4d9b-e269-4a64-aa32-31b657d428db`;
+- smoke público e autenticado concluído até a Fase E;
 - D1 remoto íntegro e sem migrations pendentes.
 
 ## Garantias operacionais
