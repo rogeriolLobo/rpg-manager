@@ -17,6 +17,11 @@
 - `rpgs.play_group_id` e `campaigns.play_group_id`: vínculo opcional sem remover os textos legados.
 - `campaign_members.group_member_id`: origem rastreável do membro copiado de um grupo.
 - `play_group_members.user_id` / `campaign_members.user_id`: identidade cadastrada opcional com nome histórico preservado após exclusão.
+- `worlds` / `world_members`: cenários reutilizáveis, owner, viewers explícitos e arquivamento não destrutivo.
+- `vault_entities`: base comum para os onze tipos de conteúdo, com World/grupo/Location pai opcionais e visibilidade centralizada.
+- `adventure_details`: extensão 1:1 exclusiva de entidades `ADVENTURE`.
+- `campaign_entities`: vínculo N:N reutilizável entre campanhas e conteúdo do Vault.
+- `campaigns.adventure_entity_id`: Adventure principal opcional; campanhas V1 permanecem válidas com `NULL`.
 
 UUIDs aleatórios são gerados no Worker. Exclusão de conta remove os dados privados por cascata deliberada; taxonomia é restringida. Checks limitam enums e booleanos. Os índices cobrem sessão por token/expiração, catálogo por usuário/filtros, campanhas por usuário e sessões por campanha/data.
 
