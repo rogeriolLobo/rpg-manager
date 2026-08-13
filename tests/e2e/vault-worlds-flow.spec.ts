@@ -31,8 +31,9 @@ test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
   await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
 
   await page.getByRole('link',{name:'Adicionar entidade'}).click();
+  await expect(page.getByLabel('World').locator('option:checked')).toHaveText('Aldea');
   const npcName=page.getByLabel('Nome');
-  await npcName.fill('Lucien');
+  await npcName.pressSequentially('Lucien');
   await expect(npcName).toHaveValue('Lucien');
   await page.getByLabel('Resumo').fill('Conselheiro misterioso.');
   await expect(npcName).toHaveValue('Lucien');
