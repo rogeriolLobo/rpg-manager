@@ -44,7 +44,9 @@ async function ownedCampaign(c: Context<{ Bindings: Env; Variables: AppVariables
 }
 
 campaignRoutes.get('/', async (c) => {
-  const rows = await c.env.DB.prepare(`${SELECT} WHERE c.user_id=? ORDER BY CASE c.status WHEN 'IN_PROGRESS' THEN 1 WHEN 'PREPARING' THEN 2 ELSE 3 END,c.updated_at DESC`).bind(c.get('user').id).all();
+  const worldId = c.req.query('worldId');
+  const worldFilter = worldId ? ' AND EXISTS(SELECT 1 FROM campaign_entities filter_ce JOIN vault_entities filter_e ON filter_e.id=filter_ce.entity_id WHERE filter_ce.campaign_id=c.id AND filter_e.world_id=?)' : '';
+  const rows = await c.env.DB.prepare(`${SELECT} WHERE c.user_id=?${worldFilter} ORDER BY CASE c.status WHEN 'IN_PROGRESS' THEN 1 WHEN 'PREPARING' THEN 2 ELSE 3 END,c.updated_at DESC`).bind(c.get('user').id, ...(worldId ? [worldId] : [])).all();
   return c.json({ items: (rows.results as unknown as CampaignRow[]).map(present) });
 });
 campaignRoutes.post('/', async (c) => {

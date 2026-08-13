@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
-  test.setTimeout(60_000);
+test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async ({page})=>{
+  test.setTimeout(90_000);
   const openNavigation=async()=>{if((page.viewportSize()?.width??1000)<=850){await page.getByRole('button',{name:'Abrir menu'}).click();await expect(page.locator('.sidebar')).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');}};
   const navigateFromMenu=async(name:string)=>{await openNavigation();await page.getByRole('link',{name,exact:true}).click();};
   const email=`vault-e2e-${Date.now()}-${test.info().project.name}@example.com`;
@@ -58,6 +58,7 @@ test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
   await page.getByLabel('World').selectOption({label:'Aldea'});
   await page.getByLabel('Formato').selectOption('ONE_SHOT');
   await page.getByLabel('Sessões recomendadas').fill('1');
+  await page.getByLabel('Premissa').fill('O sino da taverna anuncia um presságio.');
   await page.getByRole('button',{name:'Salvar entidade'}).click();
   await expect(page.getByRole('heading',{name:'A Noite do Corvo'})).toBeVisible();
 
@@ -93,6 +94,38 @@ test('fluxo V2 de World, Vault, Adventure e campanha', async ({page})=>{
   await page.getByRole('link',{name:/Lucien/u}).click();
   await page.getByRole('button',{name:'Restaurar',exact:true}).click();
   await expect(page.getByText('Esta entidade está arquivada')).toHaveCount(0);
+
+  await navigateFromMenu('Wiki');
+  await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
+  const folderForm=page.locator('form').filter({has:page.getByLabel('Nova pasta')});
+  await folderForm.getByLabel('Nova pasta').fill('Personagens');
+  await folderForm.getByRole('button',{name:'Criar'}).click();
+  const tagForm=page.locator('form').filter({has:page.getByLabel('Nova tag')});
+  await tagForm.getByLabel('Nova tag').fill('Corte');
+  await tagForm.getByRole('button',{name:'Criar'}).click();
+  const lucienCard=page.locator('article.entity-card').filter({hasText:'Lucien'});
+  await lucienCard.getByText('Organizar').click();
+  await lucienCard.getByLabel('Pasta').selectOption({label:'Personagens'});
+  await lucienCard.getByLabel('Corte').check();
+  await lucienCard.getByLabel('Aliases').fill('Conselheiro Rubro');
+  await lucienCard.getByRole('button',{name:'Salvar organização'}).click();
+  await expect(page.getByText('Também: Conselheiro Rubro')).toBeVisible();
+
+  await navigateFromMenu('Diário');
+  await page.getByRole('button',{name:'Nova página'}).click();
+  await page.getByLabel('Título').fill('Próxima sessão');
+  await page.getByLabel('Conteúdo').fill('Preparar a audiência secreta da corte.');
+  await page.getByRole('button',{name:'Salvar página'}).click();
+  await expect(page.getByRole('button',{name:/Próxima sessão/u})).toBeVisible();
+
+  await openNavigation();
+  await page.getByRole('button',{name:'Abrir paleta de comandos'}).click();
+  const palette=page.getByRole('dialog',{name:'Busca global e comandos'});
+  await palette.getByRole('textbox').fill('Conselheiro Rubro');
+  await palette.getByRole('button',{name:/Lucien/u}).click();
+  await expect(page.getByRole('heading',{name:'Lucien'})).toBeVisible();
+  await navigateFromMenu('Portal do jogador');
+  await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
 
   const csrfCookie=(await page.context().cookies()).find((cookie)=>cookie.name==='rpg_csrf');
   expect(csrfCookie).toBeDefined();

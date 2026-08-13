@@ -1,10 +1,14 @@
-import type { AdventureDetailsInput, VaultEntityType } from './types';
+import type { AdventureDetailsInput, LoreDetailsInput, VaultEntityType } from './types';
 
 export function validateAdventureDetails(entityType: VaultEntityType, details: AdventureDetailsInput | null): boolean {
   if (entityType !== 'ADVENTURE') return details === null;
   if (!details) return false;
   return details.recommendedSessions === null
     || (Number.isInteger(details.recommendedSessions) && details.recommendedSessions > 0 && details.recommendedSessions <= 999);
+}
+
+export function validateLoreDetails(entityType: VaultEntityType, details: LoreDetailsInput | null): boolean {
+  return entityType === 'LORE' || details === null;
 }
 
 export interface LocationParentCandidate {

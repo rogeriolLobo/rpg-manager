@@ -64,12 +64,13 @@ interface PlayGroup { id:string; name:string; gameMasterName?:string|null }
 interface CampaignEntity { id:string;entityType:string;name:string;summary:string;visibility:string;usageType:string }
 interface AdventureOption { id:string;name:string }
 export function CampaignsPage() {
+  const [search] = useSearchParams(); const worldId = search.get('worldId');
   const [items, setItems] = useState<Campaign[]>();
   useEffect(() => {
-    void api<{ items: Campaign[] }>("/campaigns").then((result) =>
+    void api<{ items: Campaign[] }>(`/campaigns${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`).then((result) =>
       setItems(result.items),
     );
-  }, []);
+  }, [worldId]);
   return (
     <div className="page">
       <PageHeader
@@ -77,7 +78,7 @@ export function CampaignsPage() {
         title="Planejador de mesas"
         description="Da Sessão Zero ao último capítulo, com a próxima ação sempre à vista."
         action={
-          <Link className="primary-button link-button" to="/app/campaigns/new">
+          <Link className="primary-button link-button" to={`/app/campaigns/new${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`}>
             <Plus size={18} />
             Nova campanha
           </Link>
@@ -90,7 +91,7 @@ export function CampaignsPage() {
           title="Nenhuma campanha planejada"
           text="Escolha um RPG da estante e reúna o grupo."
           action="Criar campanha"
-          to="/app/campaigns/new"
+          to={`/app/campaigns/new${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`}
         />
       ) : (
         <div className="campaign-grid">
@@ -157,6 +158,7 @@ export function CampaignFormPage() {
   const [rpgs, setRpgs] = useState<Rpg[]>([]);
   const [groups, setGroups] = useState<PlayGroup[]>([]);
   const [adventures, setAdventures] = useState<AdventureOption[]>([]);
+  const worldId = search.get('worldId');
   const [form, setForm] = useState<Record<string, string>>({
     ...blank,
     rpgId: search.get("rpgId") ?? "",
@@ -164,7 +166,7 @@ export function CampaignFormPage() {
   });
   const [error, setError] = useState("");
   useEffect(() => {
-    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>("/vault?type=ADVENTURE&pageSize=50&sort=name")]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);});
+    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);});
     if (id)
       void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) =>
         setForm({
@@ -184,7 +186,7 @@ export function CampaignFormPage() {
           notes: item.notes,
         }),
       );
-  }, [id]);
+  }, [id,worldId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
   const submit = async (event: FormEvent) => {

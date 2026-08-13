@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -125,6 +125,15 @@ export const themePreferenceSchema = z.strictObject({
   theme: z.enum(['LIGHT', 'DARK', 'SYSTEM']),
 });
 
+export const userPreferenceInputSchema = z.strictObject({
+  theme: z.enum(['LIGHT', 'DARK', 'SYSTEM']).optional(),
+  activeWorldId: z.string().trim().max(80).nullable().optional(),
+}).refine((input) => input.theme !== undefined || input.activeWorldId !== undefined, 'Informe ao menos uma preferência.');
+
+export const activeWorldPreferenceSchema = z.strictObject({
+  activeWorldId: z.string().trim().max(80).nullable(),
+});
+
 export const worldInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(160),
   description: trimmed(10000).default(''),
@@ -140,6 +149,16 @@ export const adventureDetailsSchema = z.strictObject({
   adventureType: z.enum(ADVENTURE_TYPES),
   recommendedSessions: z.number().int().positive().max(999).nullable(),
   notes: trimmed(10000).default(''),
+  premise: trimmed(5000).default(''),
+  hooks: trimmed(10000).default(''),
+  keyScenes: trimmed(20000).default(''),
+  rewards: trimmed(10000).default(''),
+});
+
+export const loreDetailsSchema = z.strictObject({
+  loreType: z.enum(LORE_TYPES),
+  canonStatus: z.enum(LORE_CANON_STATUSES),
+  source: trimmed(1000).default(''),
 });
 
 export const vaultEntityInputSchema = z.strictObject({
@@ -152,6 +171,33 @@ export const vaultEntityInputSchema = z.strictObject({
   groupId: z.string().trim().max(80).nullable().optional(),
   parentEntityId: z.string().trim().max(80).nullable().optional(),
   adventure: adventureDetailsSchema.nullable(),
+  lore: loreDetailsSchema.nullable().default(null),
+});
+
+export const wikiFolderInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  parentFolderId: z.string().trim().max(80).nullable().default(null),
+});
+
+export const worldTagInputSchema = z.strictObject({ name: z.string().trim().min(1).max(60) });
+
+export const wikiEntityOrganizationSchema = z.strictObject({
+  folderId: z.string().trim().max(80).nullable(),
+  tagIds: z.array(z.string().trim().min(1).max(80)).max(50),
+  aliases: z.array(z.string().trim().min(1).max(160)).max(30),
+});
+
+export const journalFolderInputSchema = wikiFolderInputSchema;
+
+export const journalPageInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  content: trimmed(100000).default(''),
+  folderId: z.string().trim().max(80).nullable().default(null),
+});
+
+export const worldInviteInputSchema = z.strictObject({
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+  maxUses: z.number().int().min(1).max(100).default(1),
 });
 
 export const campaignEntityLinkSchema = z.strictObject({

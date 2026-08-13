@@ -14,6 +14,8 @@ export const ENTITY_TYPES = [
 
 export const ENTITY_VISIBILITIES = ['PRIVATE', 'GROUP', 'CAMPAIGN', 'PLAYERS', 'GM_ONLY'] as const;
 export const ADVENTURE_TYPES = ['ONE_SHOT', 'SHORT_CAMPAIGN', 'LONG_CAMPAIGN', 'SANDBOX', 'MODULE', 'CUSTOM'] as const;
+export const LORE_TYPES = ['HISTORY', 'RELIGION', 'CULTURE', 'LEGEND', 'PROPHECY', 'SECRET', 'CUSTOM'] as const;
+export const LORE_CANON_STATUSES = ['DRAFT', 'CANON', 'RUMOR'] as const;
 export const WORLD_VISIBILITIES = ['PRIVATE', 'GROUP'] as const;
 export const WORLD_STATUSES = ['ACTIVE', 'ARCHIVED'] as const;
 export const WORLD_MEMBER_ROLES = ['OWNER', 'VIEWER'] as const;
@@ -22,6 +24,8 @@ export const CAMPAIGN_ENTITY_USAGE_TYPES = ['REFERENCE', 'ACTIVE'] as const;
 export type VaultEntityType = typeof ENTITY_TYPES[number];
 export type EntityVisibility = typeof ENTITY_VISIBILITIES[number];
 export type AdventureType = typeof ADVENTURE_TYPES[number];
+export type LoreType = typeof LORE_TYPES[number];
+export type LoreCanonStatus = typeof LORE_CANON_STATUSES[number];
 export type WorldVisibility = typeof WORLD_VISIBILITIES[number];
 export type WorldStatus = typeof WORLD_STATUSES[number];
 export type WorldMemberRole = typeof WORLD_MEMBER_ROLES[number];
@@ -31,4 +35,14 @@ export interface AdventureDetailsInput {
   adventureType: AdventureType;
   recommendedSessions: number | null;
   notes: string;
+  premise?: string;
+  hooks?: string;
+  keyScenes?: string;
+  rewards?: string;
+}
+
+export interface LoreDetailsInput {
+  loreType: LoreType;
+  canonStatus: LoreCanonStatus;
+  source: string;
 }
