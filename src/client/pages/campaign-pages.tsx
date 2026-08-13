@@ -32,6 +32,8 @@ interface Campaign {
   sessionGoal: number | null;
   playGroupId: string | null;
   playGroupName: string | null;
+  adventureEntityId: string | null;
+  adventureName: string | null;
   legacyMembersText: string;
   legacyCharactersText: string;
   notes: string;
@@ -59,6 +61,8 @@ interface GameSession {
   nextHooks: string;
 }
 interface PlayGroup { id:string; name:string; gameMasterName?:string|null }
+interface CampaignEntity { id:string;entityType:string;name:string;summary:string;visibility:string;usageType:string }
+interface AdventureOption { id:string;name:string }
 export function CampaignsPage() {
   const [items, setItems] = useState<Campaign[]>();
   useEffect(() => {
@@ -141,6 +145,7 @@ const blank = {
   nextSessionDate: "",
   sessionGoal: "",
   playGroupId: "",
+  adventureEntityId: "",
   legacyMembersText: "",
   legacyCharactersText: "",
   notes: "",
@@ -151,13 +156,14 @@ export function CampaignFormPage() {
   const navigate = useNavigate();
   const [rpgs, setRpgs] = useState<Rpg[]>([]);
   const [groups, setGroups] = useState<PlayGroup[]>([]);
+  const [adventures, setAdventures] = useState<AdventureOption[]>([]);
   const [form, setForm] = useState<Record<string, string>>({
     ...blank,
     rpgId: search.get("rpgId") ?? "",
   });
   const [error, setError] = useState("");
   useEffect(() => {
-    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups")]).then(([rpgResult,groupResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);});
+    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>("/vault?type=ADVENTURE&pageSize=50&sort=name")]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);});
     if (id)
       void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) =>
         setForm({
@@ -171,6 +177,7 @@ export function CampaignFormPage() {
           nextSessionDate: item.nextSessionDate ?? "",
           sessionGoal: item.sessionGoal?.toString() ?? "",
           playGroupId: item.playGroupId ?? "",
+          adventureEntityId: item.adventureEntityId ?? "",
           legacyMembersText: item.legacyMembersText,
           legacyCharactersText: item.legacyCharactersText,
           notes: item.notes,
@@ -189,6 +196,7 @@ export function CampaignFormPage() {
       nextSessionDate: form.nextSessionDate || null,
       sessionGoal: form.sessionGoal ? Number(form.sessionGoal) : null,
       playGroupId: form.playGroupId || null,
+      adventureEntityId: form.adventureEntityId || null,
     };
     try {
       const result = id
@@ -311,6 +319,13 @@ export function CampaignFormPage() {
           </select>
         </label>
         <label>
+          Adventure principal
+          <select value={form.adventureEntityId} onChange={(e) => update("adventureEntityId", e.target.value)}>
+            <option value="">Nenhuma</option>
+            {adventures.map((adventure)=><option value={adventure.id} key={adventure.id}>{adventure.name}</option>)}
+          </select>
+        </label>
+        <label>
           Grupo legado (se ambíguo)
           <input
             value={form.legacyMembersText}
@@ -354,13 +369,14 @@ export function CampaignDetailPage() {
     item: Campaign;
     members: Member[];
     sessions: GameSession[];
+    entities: CampaignEntity[];
   }>();
   const load = () =>
-    api<{ item: Campaign; members: Member[]; sessions: GameSession[] }>(
+    api<{ item: Campaign; members: Member[]; sessions: GameSession[]; entities:CampaignEntity[] }>(
       `/campaigns/${id}`,
     ).then(setData);
   useEffect(() => {
-    void api<{ item: Campaign; members: Member[]; sessions: GameSession[] }>(
+    void api<{ item: Campaign; members: Member[]; sessions: GameSession[];entities:CampaignEntity[] }>(
       `/campaigns/${id}`,
     ).then(setData);
   }, [id]);
@@ -422,6 +438,7 @@ export function CampaignDetailPage() {
           ["Frequência", data.item.frequency ? displayLabel(data.item.frequency) : "Não definida"],
           ["Grupo", data.item.playGroupName ?? "Não definido"],
           ["Narrador", data.item.gameMaster || "Não definido"],
+          ["Adventure", data.item.adventureName || "Não definida"],
         ].map(([label, value]) => (
           <article key={label}>
             <span>{label}</span>
@@ -490,6 +507,10 @@ export function CampaignDetailPage() {
           </p>
         </section>
       </div>
+      <section className="panel campaign-links">
+        <div className="section-heading"><div><h2>Entidades do Vault</h2><p className="section-note">Referências e conteúdo ativo vinculados a esta campanha.</p></div><Link to="/app/vault">Abrir Vault</Link></div>
+        {data.entities.length?<div className="entity-list">{data.entities.map((entity)=><Link key={entity.id} to={`/app/vault/${entity.id}`}><span className="entity-type">{displayLabel(entity.entityType)}</span><div><strong>{entity.name}</strong><p>{entity.summary||`${displayLabel(entity.usageType)} · ${displayLabel(entity.visibility)}`}</p></div></Link>)}</div>:<p>Nenhuma entidade vinculada.</p>}
+      </section>
       <section className="panel">
         <div className="section-heading">
           <h2>Histórico de sessões</h2>

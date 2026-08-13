@@ -6,5 +6,6 @@ import { AuthProvider } from './auth/auth-context';
 import './styles.css';
 import './layout-fixes.css';
 import './group-pages.css';
+import './vault-pages.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><AuthProvider><App/></AuthProvider></BrowserRouter></StrictMode>);

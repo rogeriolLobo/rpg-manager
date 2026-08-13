@@ -1,10 +1,10 @@
-import { BookOpen, Castle, Gauge, LogOut, Menu, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
+import { Archive, BookOpen, Castle, Gauge, Globe2, LogOut, Menu, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
 
 const links = [
-  ['/app',Gauge,'Visão geral'],['/app/library',BookOpen,'Biblioteca'],['/app/groups',UsersRound,'Grupos'],['/app/campaigns',Castle,'Campanhas'],
+  ['/app',Gauge,'Visão geral'],['/app/library',BookOpen,'Biblioteca'],['/app/groups',UsersRound,'Grupos'],['/app/worlds',Globe2,'Mundos'],['/app/vault',Archive,'Vault'],['/app/campaigns',Castle,'Campanhas'],
   ['/app/settings',Settings,'Configurações'],['/app/security',Shield,'Segurança'],['/app/profile',UserRound,'Perfil'],
 ] as const;
 export function AppShell() {

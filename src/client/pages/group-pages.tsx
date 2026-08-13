@@ -1,8 +1,9 @@
-import { Plus, Save, Search, Shield, Trash2, UserPlus } from 'lucide-react';
+import { Plus, Save, Shield, Trash2, UserPlus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
 import { Empty, Loading, PageHeader } from './dashboard-page';
+import { RegisteredUserSearch, type DirectoryUser } from '../components/registered-user-search';
 
 interface PlayGroup {
   id: string;
@@ -22,8 +23,6 @@ interface PlayGroupMember {
   linkedUserId: string | null;
   isGameMaster: number;
 }
-
-interface DirectoryUser { id: string; displayName: string }
 
 export function GroupsPage() {
   const [items, setItems] = useState<PlayGroup[]>();
@@ -48,12 +47,6 @@ export function GroupDetailPage() {
   const add=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();setError('');const element=event.currentTarget;const form=new FormData(element);try{await postJson(`/groups/${id}/members`,{playerName:form.get('playerName'),userId:null,notes:form.get('notes'),active:true,isGameMaster:form.get('isGameMaster')==='on'});element.reset();await load();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
   const addRegisteredUser=async(user:DirectoryUser,isGameMaster:boolean)=>{setError('');try{await postJson(`/groups/${id}/members`,{playerName:user.displayName,userId:user.id,notes:'',active:true,isGameMaster});await load();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
   return <div className="page"><PageHeader eyebrow="Grupo de jogo" title={data.item.name} description={data.item.notes||'Sem observações.'} action={<Link className="secondary-button link-button" to={`/app/groups/${id}/edit`}>Editar grupo</Link>}/><section className="panel narrator-summary"><Shield/><div><small>Narrador principal</small><strong>{data.item.gameMasterName||'Ainda não definido'}</strong></div></section><section className="panel"><h2>Adicionar conta cadastrada</h2><p className="section-note">Busque pelo nome público ou pelo e-mail completo que a pessoa informou. O e-mail nunca aparece nos resultados.</p><RegisteredUserSearch onAdd={addRegisteredUser}/>{error&&<p className="form-error">{error}</p>}</section><section className="panel"><h2>Adicionar convidado por nome</h2><form className="form-grid" onSubmit={add}><label>Nome do jogador<input name="playerName" required maxLength={100}/></label><label>Observações<input name="notes" maxLength={2000}/></label><label className="checkbox span-2"><input type="checkbox" name="isGameMaster"/>Definir como narrador principal</label><div className="form-actions span-2"><button className="secondary-button"><UserPlus size={17}/>Adicionar convidado</button></div></form></section><section className="panel"><h2>Jogadores</h2>{data.members.length?<div className="group-members">{data.members.map((member)=><GroupMemberEditor key={member.id} groupId={id!} member={member} onUpdated={load}/>)}</div>:<p>Nenhum jogador cadastrado.</p>}</section><button className="danger-button" onClick={async()=>{if(confirm(`Excluir o grupo “${data.item.name}”? Os RPGs e campanhas serão preservados sem o vínculo.`)){await deleteApi(`/groups/${id}`);navigate('/app/groups');}}}><Trash2 size={17}/>Excluir grupo</button></div>;
-}
-
-function RegisteredUserSearch({onAdd}:{onAdd:(user:DirectoryUser,isGameMaster:boolean)=>Promise<void>}) {
-  const [query,setQuery]=useState(''); const [items,setItems]=useState<DirectoryUser[]>([]); const [searched,setSearched]=useState(false); const [error,setError]=useState('');
-  const search=async(event:FormEvent)=>{event.preventDefault();setError('');try{const result=await api<{items:DirectoryUser[]}>(`/directory/users?q=${encodeURIComponent(query)}`);setItems(result.items);setSearched(true);}catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível buscar as contas.');}};
-  return <div className="directory-search"><form className="inline-form" onSubmit={search}><label>Nome público ou e-mail exato<input value={query} onChange={(event)=>setQuery(event.target.value)} minLength={3} maxLength={254} placeholder="Nome ou e-mail completo" required/></label><button className="secondary-button"><Search size={17}/>Buscar</button></form>{error&&<p className="form-error">{error}</p>}{searched&&(items.length?<ul className="directory-results">{items.map((user)=><li key={user.id}><strong>{user.displayName}</strong><div className="button-row"><button type="button" className="ghost-button" onClick={()=>void onAdd(user,false)}>Adicionar jogador</button><button type="button" className="secondary-button" onClick={()=>void onAdd(user,true)}><Shield size={16}/>Adicionar como narrador</button></div></li>)}</ul>:<p>Nenhuma conta encontrada.</p>)}</div>;
 }
 
 function GroupMemberEditor({groupId,member,onUpdated}:{groupId:string;member:PlayGroupMember;onUpdated:()=>Promise<void>}) {
