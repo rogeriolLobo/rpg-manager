@@ -51,7 +51,9 @@ rpgRoutes.get('/metadata', async (c) => {
   const [categories, subgenres, groups] = await c.env.DB.batch([
     c.env.DB.prepare('SELECT id,name FROM categories ORDER BY sort_order,name'),
     c.env.DB.prepare('SELECT id,category_id categoryId,name FROM subgenres ORDER BY name'),
-    c.env.DB.prepare('SELECT id,name FROM play_groups WHERE user_id=? ORDER BY name COLLATE NOCASE').bind(c.get('user').id),
+    c.env.DB.prepare(`SELECT g.id,g.name,(SELECT COALESCE(u.display_name,m.player_name) FROM play_group_members m
+      LEFT JOIN users u ON u.id=m.user_id WHERE m.group_id=g.id AND m.is_game_master=1 LIMIT 1) gameMasterName
+      FROM play_groups g WHERE g.user_id=? ORDER BY g.name COLLATE NOCASE`).bind(c.get('user').id),
   ]);
   return c.json({ categories: categories.results, subgenres: subgenres.results, groups: groups.results });
 });

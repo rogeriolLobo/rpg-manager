@@ -38,6 +38,11 @@
       "name": "AUTH_SENSITIVE_RATE_LIMITER",
       "namespace_id": "12082604",
       "simple": { "limit": 5, "period": 60 }
+    },
+    {
+      "name": "DIRECTORY_RATE_LIMITER",
+      "namespace_id": "12082605",
+      "simple": { "limit": 30, "period": 60 }
     }
   ],
   "observability": { "enabled": true }

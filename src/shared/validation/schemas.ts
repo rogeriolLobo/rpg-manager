@@ -79,10 +79,19 @@ export const playGroupInputSchema = z.strictObject({
   notes: trimmed(5000).default(''),
 });
 
-export const playGroupMemberInputSchema = z.strictObject({
+export const playGroupMemberCreateSchema = z.strictObject({
+  playerName: z.string().trim().min(1).max(100),
+  userId: z.string().trim().max(80).nullable().optional(),
+  notes: trimmed(2000).default(''),
+  active: z.boolean().default(true),
+  isGameMaster: z.boolean().default(false),
+});
+
+export const playGroupMemberUpdateSchema = z.strictObject({
   playerName: z.string().trim().min(1).max(100),
   notes: trimmed(2000).default(''),
   active: z.boolean().default(true),
+  isGameMaster: z.boolean().default(false),
 });
 
 export const sessionInputSchema = z.strictObject({

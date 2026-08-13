@@ -9,7 +9,7 @@
   border-top: 1px solid #eadfce;
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.5fr) auto auto auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.5fr) auto auto auto auto;
   padding-top: 0.65rem;
 }
 
@@ -32,17 +32,34 @@
   margin: 0;
 }
 
+.narrator-summary {
+  align-items: center;
+  display: flex;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.narrator-summary svg { color: var(--gold); }
+.narrator-summary small, .narrator-summary strong { display: block; }
+.narrator-summary small { color: var(--muted); }
+
+.directory-search { margin-top: 1rem; }
+.directory-results { list-style: none; margin: 1rem 0 0; padding: 0; }
+.directory-results li { align-items: center; border-top: 1px solid #eadfce; display: flex; gap: 1rem; justify-content: space-between; padding: 0.75rem 0; }
+.narrator-check { color: var(--wine-dark); }
+
 @media (max-width: 850px) {
   .member-editor {
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto auto auto;
   }
 
   .campaign-member-editor {
     grid-template-columns: 1fr auto auto;
   }
 
-  .member-editor > input,
-  .campaign-member-editor > input {
+  .member-editor > label:not(.checkbox),
+  .campaign-member-editor > input,
+  .campaign-member-editor > label:not(.checkbox) {
     grid-column: 1 / -1;
   }
 }

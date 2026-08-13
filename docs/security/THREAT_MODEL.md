@@ -9,6 +9,7 @@ Ativos: credenciais, sessões, recovery codes, catálogo, campanhas, notas e bac
 | Roubo/replay de sessão | token CSPRNG, hash no D1, cookie HttpOnly/Secure/SameSite, expiração/revogação | testes de sessão revogada/expirada |
 | Credential stuffing e brute force | rate limit Cloudflare por origem + contador por identificador com bloqueio progressivo + Turnstile | respostas 429 e mensagens genéricas |
 | Enumeração de usuário | mensagens e tempos aproximados genéricos em login/recovery | testes de respostas equivalentes |
+| Descoberta abusiva de perfis | diretório somente autenticado, busca mínima de 3 caracteres, e-mail somente como correspondência exata e nunca retornado, 8 resultados e rate limit por conta | testes do contrato de resposta e limite |
 | CSRF | mesma origem, SameSite=Lax, validação estrita de Origin e token double-submit ligado à sessão | testes sem Origin/token |
 | XSS | React escaping, notas como texto, sem `dangerouslySetInnerHTML`, CSP | payload persistido continua texto |
 | SQL Injection | prepared statements D1 e allowlists de ordenação | payloads de regressão |
@@ -23,4 +24,4 @@ Ativos: credenciais, sessões, recovery codes, catálogo, campanhas, notas e bac
 
 ## Suposições e riscos residuais
 
-TLS e proteção de rede são fornecidos pela Cloudflare. O plano Free tem limites rígidos e pode negar serviço quando a cota acabar. Conta sem verificação de e-mail é uma limitação consciente da V1 gratuita; recovery codes provam posse do segredo de recuperação, não posse contínua do endereço de e-mail. Comprometimento simultâneo de D1 e do Secret reduz a proteção do pepper.
+TLS e proteção de rede são fornecidos pela Cloudflare. O plano Free tem limites rígidos e pode negar serviço quando a cota acabar. Conta sem verificação de e-mail é uma limitação consciente da V1 gratuita; recovery codes provam posse do segredo de recuperação, não posse contínua do endereço de e-mail. Comprometimento simultâneo de D1 e do Secret reduz a proteção do pepper. O diretório permite que uma conta autenticada infira a existência de um nome público; a V1 aceita esse risco residual para viabilizar convites, sem expor o e-mail.

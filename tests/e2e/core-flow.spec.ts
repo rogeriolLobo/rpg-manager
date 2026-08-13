@@ -32,8 +32,12 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("link", { name: "Novo grupo" }).click();
   await page.getByLabel("Nome do grupo").fill("Mesa E2E");
   await page.getByRole("button", { name: "Salvar grupo" }).click();
+  await page.getByLabel("Nome público ou e-mail exato").fill(email);
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await page.getByRole("button", { name: "Adicionar como narrador" }).click();
+  await expect(page.getByText("Aventureiro E2E").first()).toBeVisible();
   await page.getByLabel("Nome do jogador").fill("Marcelo");
-  await page.getByRole("button", { name: "Adicionar jogador" }).click();
+  await page.getByRole("button", { name: "Adicionar convidado" }).click();
   await expect(page.getByLabel("Nome de Marcelo")).toBeVisible();
   await openNavigation();
   await page.getByRole("link", { name: "Biblioteca" }).click();
@@ -53,8 +57,8 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
   await page.getByLabel("Nome da campanha").fill("A Coroa de E2E");
-  await page.getByLabel("Mestre").fill("Rogério");
   await page.getByLabel("Grupo de jogo").selectOption({label:"Mesa E2E"});
+  await expect(page.getByLabel("Narrador")).toHaveValue("Aventureiro E2E");
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(
     page.getByRole("heading", { name: "A Coroa de E2E" }),

@@ -46,6 +46,8 @@ interface Member {
   characterName: string;
   notes: string;
   active: number;
+  linkedUserId?: string | null;
+  isGameMaster?: number;
 }
 interface GameSession {
   id: string;
@@ -56,7 +58,7 @@ interface GameSession {
   gmNotes: string;
   nextHooks: string;
 }
-interface PlayGroup { id:string; name:string }
+interface PlayGroup { id:string; name:string; gameMasterName?:string|null }
 export function CampaignsPage() {
   const [items, setItems] = useState<Campaign[]>();
   useEffect(() => {
@@ -244,7 +246,7 @@ export function CampaignFormPage() {
           </select>
         </label>
         <label>
-          Mestre
+          Narrador
           <input
             value={form.gameMaster}
             onChange={(e) => update("gameMaster", e.target.value)}
@@ -300,7 +302,10 @@ export function CampaignFormPage() {
         </label>
         <label>
           Grupo de jogo
-          <select value={form.playGroupId} onChange={(e) => update("playGroupId", e.target.value)}>
+          <select value={form.playGroupId} onChange={(e) => {
+            const group=groups.find((item)=>item.id===e.target.value);
+            setForm((current)=>({...current,playGroupId:e.target.value,gameMaster:current.gameMaster||group?.gameMasterName||''}));
+          }}>
             <option value="">Nenhum grupo</option>
             {groups.map((group)=><option value={group.id} key={group.id}>{group.name}</option>)}
           </select>
@@ -416,6 +421,7 @@ export function CampaignDetailPage() {
           ],
           ["Frequência", data.item.frequency ? displayLabel(data.item.frequency) : "Não definida"],
           ["Grupo", data.item.playGroupName ?? "Não definido"],
+          ["Narrador", data.item.gameMaster || "Não definido"],
         ].map(([label, value]) => (
           <article key={label}>
             <span>{label}</span>
@@ -522,7 +528,7 @@ export function CampaignDetailPage() {
 function CampaignMemberEditor({campaignId,member,onUpdated}:{campaignId:string;member:Member;onUpdated:()=>Promise<void>}) {
   const [form,setForm]=useState({playerName:member.playerName,characterName:member.characterName,notes:member.notes,active:Boolean(member.active)}); const [error,setError]=useState('');
   const save=async()=>{setError('');try{await patchJson(`/campaigns/${campaignId}/members/${member.id}`,form);await onUpdated();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
-  return <div className="campaign-member-editor"><input aria-label={`Jogador ${member.playerName}`} value={form.playerName} onChange={(event)=>setForm({...form,playerName:event.target.value})}/><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/><input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
+  return <div className="campaign-member-editor"><label>{member.isGameMaster?'Narrador':'Jogador'}{member.linkedUserId&&<small>Conta cadastrada</small>}<input aria-label={`Jogador ${member.playerName}`} value={form.playerName} disabled={Boolean(member.linkedUserId)} onChange={(event)=>setForm({...form,playerName:event.target.value})}/></label><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/><input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button type="button" className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button type="button" className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
 }
 
 export function SessionFormPage() {

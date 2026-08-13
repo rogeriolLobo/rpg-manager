@@ -24,10 +24,16 @@ async function groupMemberStatements(c: Context<{ Bindings: Env; Variables: AppV
   if (!groupId) return [];
   const group = await c.env.DB.prepare('SELECT id FROM play_groups WHERE id=? AND user_id=?').bind(groupId, c.get('user').id).first();
   if (!group) throw new ApiError(422, 'INVALID_PLAY_GROUP', 'Grupo de jogo inválido.');
-  const members = await c.env.DB.prepare('SELECT id,player_name,notes FROM play_group_members WHERE group_id=? AND active=1 ORDER BY player_name').bind(groupId).all<{id:string;player_name:string;notes:string}>();
+  const members = await c.env.DB.prepare('SELECT id,player_name,user_id,notes,is_game_master FROM play_group_members WHERE group_id=? AND active=1 ORDER BY player_name').bind(groupId).all<{id:string;player_name:string;user_id:string|null;notes:string;is_game_master:number}>();
   return members.results.map((member) => c.env.DB.prepare(`INSERT OR IGNORE INTO campaign_members
-    (id,campaign_id,group_member_id,player_name,character_name,notes,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(), campaignId, member.id, member.player_name, '', member.notes, 1, now, now));
+    (id,campaign_id,group_member_id,user_id,player_name,character_name,notes,active,is_game_master,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(), campaignId, member.id, member.user_id, member.player_name, '', member.notes, 1, member.is_game_master, now, now));
+}
+async function gameMasterName(c: Context<{ Bindings: Env; Variables: AppVariables }>, groupId: string | null | undefined, fallback: string): Promise<string> {
+  if (fallback.trim() || !groupId) return fallback;
+  const member = await c.env.DB.prepare(`SELECT COALESCE(u.display_name,m.player_name) name FROM play_group_members m
+    LEFT JOIN users u ON u.id=m.user_id WHERE m.group_id=? AND m.is_game_master=1 LIMIT 1`).bind(groupId).first<{name:string}>();
+  return member?.name ?? fallback;
 }
 async function ownedCampaign(c: Context<{ Bindings: Env; Variables: AppVariables }>, id: string): Promise<CampaignRow> {
   const row = await c.env.DB.prepare(`${SELECT} WHERE c.id=? AND c.user_id=?`).bind(id, c.get('user').id).first<CampaignRow>();
@@ -44,27 +50,28 @@ campaignRoutes.post('/', async (c) => {
   if (!rpg) throw new ApiError(422, 'INVALID_RPG', 'RPG inválido.');
   const id = crypto.randomUUID(); const now = nowIso();
   const memberStatements = await groupMemberStatements(c, input.playGroupId, id, now);
+  const resolvedGameMaster = await gameMasterName(c,input.playGroupId,input.gameMaster);
   await c.env.DB.batch([c.env.DB.prepare(`INSERT INTO campaigns (id,user_id,rpg_id,name,status,game_master,session_zero_date,first_session_date,frequency,next_session_date,session_goal,play_group_id,legacy_members_text,legacy_characters_text,notes,created_at,updated_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
       cleanNullable(input.nextSessionDate),input.sessionGoal ?? null,cleanNullable(input.playGroupId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,now,input.status==='COMPLETED'?now:null),...memberStatements]);
   return c.json({ item: present(await ownedCampaign(c,id)) },201);
 });
 campaignRoutes.get('/:id', async (c) => {
   const row=await ownedCampaign(c,c.req.param('id')); const [members,sessions]=await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id,group_member_id groupMemberId,player_name playerName,character_name characterName,notes,active,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY active DESC,player_name').bind(row.id),
+    c.env.DB.prepare('SELECT id,group_member_id groupMemberId,user_id linkedUserId,player_name playerName,character_name characterName,notes,active,is_game_master isGameMaster,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY is_game_master DESC,active DESC,player_name').bind(row.id),
     c.env.DB.prepare('SELECT id,session_number sessionNumber,title,played_at playedAt,summary,gm_notes gmNotes,next_hooks nextHooks,created_at createdAt,updated_at updatedAt FROM campaign_sessions WHERE campaign_id=? ORDER BY session_number DESC').bind(row.id),
   ]); return c.json({item:present(row),members:members.results,sessions:sessions.results});
 });
 campaignRoutes.patch('/:id',async(c)=>{const input=await readJson(c,campaignInputSchema);const user=c.get('user');
   const rpg=await c.env.DB.prepare('SELECT id FROM rpgs WHERE id=? AND user_id=?').bind(input.rpgId,user.id).first();if(!rpg)throw new ApiError(422,'INVALID_RPG','RPG inválido.');
-  const now=nowIso();const memberStatements=await groupMemberStatements(c,input.playGroupId,c.req.param('id'),now);const [result]=await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,play_group_id=?,legacy_members_text=?,legacy_characters_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
-    .bind(input.rpgId,input.name,input.status,input.gameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,cleanNullable(input.playGroupId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id),...memberStatements]);
+  const now=nowIso();const memberStatements=await groupMemberStatements(c,input.playGroupId,c.req.param('id'),now);const resolvedGameMaster=await gameMasterName(c,input.playGroupId,input.gameMaster);const [result]=await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,play_group_id=?,legacy_members_text=?,legacy_characters_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
+    .bind(input.rpgId,input.name,input.status,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,cleanNullable(input.playGroupId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id),...memberStatements]);
   if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.json({item:present(await ownedCampaign(c,c.req.param('id')))});});
 campaignRoutes.delete('/:id',async(c)=>{const result=await c.env.DB.prepare('DELETE FROM campaigns WHERE id=? AND user_id=?').bind(c.req.param('id'),c.get('user').id).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.body(null,204);});
 
 campaignRoutes.post('/:id/members',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);const id=crypto.randomUUID(),now=nowIso();
   await c.env.DB.prepare('INSERT INTO campaign_members (id,campaign_id,player_name,character_name,notes,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id,campaign.id,input.playerName,input.characterName,input.notes,Number(input.active),now,now).run();return c.json({id},201);});
-campaignRoutes.patch('/:id/members/:memberId',async(c)=>{await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);const result=await c.env.DB.prepare(`UPDATE campaign_members SET player_name=?,character_name=?,notes=?,active=?,updated_at=? WHERE id=? AND campaign_id=?`).bind(input.playerName,input.characterName,input.notes,Number(input.active),nowIso(),c.req.param('memberId'),c.req.param('id')).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');return c.json({success:true});});
+campaignRoutes.patch('/:id/members/:memberId',async(c)=>{await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);const member=await c.env.DB.prepare(`SELECT cm.user_id userId,COALESCE(u.display_name,cm.player_name) playerName FROM campaign_members cm LEFT JOIN users u ON u.id=cm.user_id WHERE cm.id=? AND cm.campaign_id=?`).bind(c.req.param('memberId'),c.req.param('id')).first<{userId:string|null;playerName:string}>();if(!member)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');const playerName=member.userId?member.playerName:input.playerName;await c.env.DB.prepare(`UPDATE campaign_members SET player_name=?,character_name=?,notes=?,active=?,updated_at=? WHERE id=? AND campaign_id=?`).bind(playerName,input.characterName,input.notes,Number(input.active),nowIso(),c.req.param('memberId'),c.req.param('id')).run();return c.json({success:true});});
 campaignRoutes.delete('/:id/members/:memberId',async(c)=>{await ownedCampaign(c,c.req.param('id'));const result=await c.env.DB.prepare('DELETE FROM campaign_members WHERE id=? AND campaign_id=?').bind(c.req.param('memberId'),c.req.param('id')).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');return c.body(null,204);});
 
 campaignRoutes.post('/:id/sessions',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,sessionInputSchema);const now=nowIso();

@@ -8,6 +8,7 @@ import { dashboardRoutes } from './routes/dashboard';
 import { rpgRoutes } from './routes/rpgs';
 import { transferRoutes } from './routes/transfer';
 import { groupRoutes } from './routes/groups';
+import { directoryRoutes } from './routes/directory';
 import type { AppVariables, Env } from './types';
 import { profileSchema } from '../shared/validation/schemas';
 import { readJson } from './http';
@@ -39,7 +40,12 @@ app.delete('/api/v1/auth/account', deleteAccount);
 app.get('/api/v1/profile', requireAuth, (c) => c.json({ user: c.get('user') }));
 app.patch('/api/v1/profile', requireAuth, requireCsrf, async (c) => {
   const input = await readJson(c, profileSchema); const user = c.get('user');
-  await c.env.DB.prepare('UPDATE users SET display_name=?,updated_at=? WHERE id=?').bind(input.displayName, new Date().toISOString(), user.id).run();
+  const now = new Date().toISOString();
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE users SET display_name=?,updated_at=? WHERE id=?').bind(input.displayName, now, user.id),
+    c.env.DB.prepare('UPDATE play_group_members SET player_name=?,updated_at=? WHERE user_id=?').bind(input.displayName, now, user.id),
+    c.env.DB.prepare('UPDATE campaign_members SET player_name=?,updated_at=? WHERE user_id=?').bind(input.displayName, now, user.id),
+  ]);
   return c.json({ user: { ...user, displayName: input.displayName } });
 });
 app.use('/api/v1/rpgs/*', requireAuth, requireCsrf);
@@ -51,6 +57,8 @@ app.route('/api/v1/campaigns', campaignRoutes);
 app.use('/api/v1/groups/*', requireAuth, requireCsrf);
 app.use('/api/v1/groups', requireAuth, requireCsrf);
 app.route('/api/v1/groups', groupRoutes);
+app.use('/api/v1/directory/*', requireAuth, requireCsrf);
+app.route('/api/v1/directory', directoryRoutes);
 app.use('/api/v1/dashboard', requireAuth, requireCsrf);
 app.route('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/*', requireAuth, requireCsrf);

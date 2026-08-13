@@ -36,7 +36,7 @@ export interface Rpg {
 interface Metadata {
   categories: Array<{ id: string; name: string }>;
   subgenres: Array<{ id: string; categoryId: string; name: string }>;
-  groups: Array<{ id: string; name: string }>;
+  groups: Array<{ id: string; name: string; gameMasterName?: string | null }>;
 }
 export function LibraryPage() {
   const [params, setParams] = useSearchParams();
@@ -445,7 +445,10 @@ export function RpgFormPage() {
         </label>
         <label>
           Grupo de jogo
-          <select value={String(form.playGroupId)} onChange={(e) => update("playGroupId", e.target.value)}>
+          <select value={String(form.playGroupId)} onChange={(e) => {
+            const group=metadata?.groups.find((item)=>item.id===e.target.value);
+            setForm((current)=>({...current,playGroupId:e.target.value,gameMaster:String(current.gameMaster)||group?.gameMasterName||''}));
+          }}>
             <option value="">Nenhum grupo cadastrado</option>
             {metadata?.groups.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
           </select>
@@ -459,7 +462,7 @@ export function RpgFormPage() {
           />
         </label>
         <label>
-          Mestre
+          Narrador
           <input
             value={String(form.gameMaster)}
             onChange={(e) => update("gameMaster", e.target.value)}
@@ -584,7 +587,7 @@ export function RpgDetailPage() {
               <dd>{item.playGroupName || item.playGroupNotes || "Não definido"}</dd>
             </div>
             <div>
-              <dt>Mestre</dt>
+              <dt>Narrador</dt>
               <dd>{item.gameMaster || "Não definido"}</dd>
             </div>
             <div>

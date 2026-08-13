@@ -41,8 +41,8 @@ async function register(email: string) {
     password: "esta e uma senha longa 2026",
   });
   expect(response.status).toBe(201);
-  const body = (await response.json()) as { recoveryCodes: string[] };
-  return { ...authCookies(response), recoveryCodes: body.recoveryCodes };
+  const body = (await response.json()) as { user:{id:string;displayName:string};recoveryCodes: string[] };
+  return { ...authCookies(response), user:body.user, recoveryCodes: body.recoveryCodes };
 }
 const rpg = {
   title: "Blue Rose",
@@ -335,9 +335,52 @@ describe("API real com D1", () => {
     expect(((await detailAfterCrossAccountUpdate.json()) as {members:Array<{playerName:string;active:number}>}).members[0]).toMatchObject({ playerName: "Adriana L.", active: 1 });
     const backup = await request('/export','GET',undefined,account.cookie);
     const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[]}};
-    expect(backupData.version).toBe(2);
+    expect(backupData.version).toBe(3);
     expect(backupData.data.groups).toHaveLength(1);
     expect(backupData.data.groupMembers).toHaveLength(1);
+  });
+  it("oferece taxonomia abrangente e busca contas sem expor e-mail", async () => {
+    const owner = await register("directory-owner@example.com");
+    const narrator = await register("narrator-public@example.com");
+    const metadata = await request('/rpgs/metadata','GET',undefined,owner.cookie);
+    const taxonomy = (await metadata.json()) as {categories:Array<{name:string}>;subgenres:Array<{name:string}>};
+    expect(taxonomy.categories).toHaveLength(18);
+    expect(taxonomy.subgenres).toHaveLength(113);
+    expect(taxonomy.categories.map((item)=>item.name)).toEqual(expect.arrayContaining(['Ação e Aventura','Histórico','Social e Político']));
+    expect(taxonomy.subgenres.map((item)=>item.name)).toEqual(expect.arrayContaining(['Fantasia Arturiana','Horror Gótico','Viagem no Tempo e Dimensões']));
+    expect((await request('/directory/users?q=na','GET',undefined,owner.cookie)).status).toBe(422);
+    const search = await request('/directory/users?q=narrator','GET',undefined,owner.cookie);
+    expect(search.status).toBe(200);
+    const found = ((await search.json()) as {items:Array<Record<string,unknown>>}).items;
+    expect(found).toContainEqual({id:narrator.user.id,displayName:'narrator-public'});
+    expect(found[0]).not.toHaveProperty('email');
+    const exactEmailSearch = await request('/directory/users?q=narrator-public@example.com','GET',undefined,owner.cookie);
+    expect(((await exactEmailSearch.json()) as {items:unknown[]}).items).toEqual([{id:narrator.user.id,displayName:'narrator-public'}]);
+  });
+  it("vincula contas ao grupo, mantém um narrador e aplica o narrador à campanha", async () => {
+    const owner = await register("linked-owner@example.com");
+    const firstNarrator = await register("first-narrator@example.com");
+    const secondNarrator = await register("second-narrator@example.com");
+    const groupResponse = await request('/groups','POST',{name:'Grupo vinculado',notes:''},owner.cookie,owner.csrf);
+    const groupId = ((await groupResponse.json()) as {item:{id:string}}).item.id;
+    expect((await request(`/groups/${groupId}/members`,'POST',{playerName:'Nome forjado',userId:firstNarrator.user.id,notes:'',active:true,isGameMaster:true},owner.cookie,owner.csrf)).status).toBe(201);
+    expect((await request(`/groups/${groupId}/members`,'POST',{playerName:'Outro nome forjado',userId:secondNarrator.user.id,notes:'',active:true,isGameMaster:true},owner.cookie,owner.csrf)).status).toBe(201);
+    const group = await request(`/groups/${groupId}`,'GET',undefined,owner.cookie);
+    const groupData = (await group.json()) as {item:{gameMasterName:string};members:Array<{playerName:string;linkedUserId:string;isGameMaster:number}>};
+    expect(groupData.item.gameMasterName).toBe('second-narrator');
+    expect(groupData.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({playerName:'first-narrator',linkedUserId:firstNarrator.user.id,isGameMaster:0}),
+      expect.objectContaining({playerName:'second-narrator',linkedUserId:secondNarrator.user.id,isGameMaster:1}),
+    ]));
+    const createdRpg = await request('/rpgs','POST',{...rpg,title:'RPG do grupo',playGroupId:groupId,gameMaster:''},owner.cookie,owner.csrf);
+    const rpgId = ((await createdRpg.json()) as {item:{id:string}}).item.id;
+    const createdCampaign = await request('/campaigns','POST',{...campaign,name:'Campanha vinculada',rpgId,playGroupId:groupId,gameMaster:'',legacyCharactersText:''},owner.cookie,owner.csrf);
+    expect(createdCampaign.status).toBe(201);
+    const campaignItem = ((await createdCampaign.json()) as {item:{id:string;gameMaster:string}}).item;
+    expect(campaignItem.gameMaster).toBe('second-narrator');
+    const campaignDetail = await request(`/campaigns/${campaignItem.id}`,'GET',undefined,owner.cookie);
+    const campaignMembers = ((await campaignDetail.json()) as {members:Array<{linkedUserId:string;isGameMaster:number}>}).members;
+    expect(campaignMembers).toEqual(expect.arrayContaining([expect.objectContaining({linkedUserId:secondNarrator.user.id,isGameMaster:1})]));
   });
   it("importa data planejada do catálogo e preserva a campanha legada", async () => {
     const account = await register("imports@example.com");
