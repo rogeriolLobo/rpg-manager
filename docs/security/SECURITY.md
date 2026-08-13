@@ -31,6 +31,10 @@ Criação e edição validam owner, World e ambas as pontas. IDs de outro usuár
 
 Timeline reutiliza o predicado permission-aware dos EVENTs antes de responder. Era e calendário não concedem acesso por si próprios. Somente o owner cria eras, configura o calendário e altera datas históricas; o servidor valida que EVENT, era e calendário pertencem ao mesmo World. Relações mostradas ao lado de eventos vêm da API de relações já filtrada, nunca de inferência textual.
 
+## Campos especializados
+
+Notas de narrador de NPC, Faction e Item não dependem de ocultação visual. A apresentação da entidade só serializa `gmNotes` para owner ou membro ativo marcado como narrador em campanha vinculada. Player, membro de grupo e viewer do World não recebem a propriedade. Modelos de criatura são mutáveis apenas pelo owner e não concedem acesso à entidade.
+
 `style-src 'unsafe-inline'` permanece na V1 para os estilos de progresso calculados no React. Scripts inline continuam bloqueados. A remoção exige migrar larguras dinâmicas para classes/atributos previamente enumerados.
 
 ## Reporte

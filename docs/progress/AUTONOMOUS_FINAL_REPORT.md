@@ -14,7 +14,7 @@ O RPG Manager estava em produção no commit `ae58814`, com Fases A e B implemen
 - Wiki, Journal, busca global, convites e Player Portal: concluídos;
 - V2.2 Relations, Graph e Genealogy: concluída e publicada;
 - Timeline e Calendar: concluídas e publicadas;
-- campos especializados e Bestiário: pendentes;
+- campos especializados e Bestiário: implementação local concluída, publicação em andamento;
 - ADRs futuros: pendentes.
 
 ## Baseline de qualidade
