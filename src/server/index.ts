@@ -11,6 +11,7 @@ import { groupRoutes } from './routes/groups';
 import { directoryRoutes } from './routes/directory';
 import { worldRoutes } from './routes/worlds';
 import { vaultRoutes } from './routes/vault';
+import { preferenceRoutes } from './routes/preferences';
 import type { AppVariables, Env } from './types';
 import { profileSchema } from '../shared/validation/schemas';
 import { readJson } from './http';
@@ -50,6 +51,8 @@ app.patch('/api/v1/profile', requireAuth, requireCsrf, async (c) => {
   ]);
   return c.json({ user: { ...user, displayName: input.displayName } });
 });
+app.use('/api/v1/preferences', requireAuth, requireCsrf);
+app.route('/api/v1/preferences', preferenceRoutes);
 app.use('/api/v1/rpgs/*', requireAuth, requireCsrf);
 app.use('/api/v1/rpgs', requireAuth, requireCsrf);
 app.route('/api/v1/rpgs', rpgRoutes);

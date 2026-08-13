@@ -72,6 +72,20 @@ const campaign = {
   notes: "Campanha isolada por proprietário.",
 };
 describe("API real com D1", () => {
+  it('persiste preferência de tema por conta e rejeita valores inválidos', async () => {
+    const first = await register('theme-first@example.com');
+    const second = await register('theme-second@example.com');
+    const initial = await request('/preferences', 'GET', undefined, first.cookie);
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toEqual({theme:'SYSTEM'});
+    const updated = await request('/preferences', 'PATCH', {theme:'DARK'}, first.cookie, first.csrf);
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toEqual({theme:'DARK'});
+    expect(await (await request('/preferences', 'GET', undefined, first.cookie)).json()).toEqual({theme:'DARK'});
+    expect(await (await request('/preferences', 'GET', undefined, second.cookie)).json()).toEqual({theme:'SYSTEM'});
+    expect((await request('/preferences', 'PATCH', {theme:'SEPIA'}, first.cookie, first.csrf)).status).toBe(422);
+  });
+
   it("registra, autentica, persiste hash e recupera com código de uso único", async () => {
     const account = await register("auth@example.com");
     const session = await request(
@@ -334,10 +348,11 @@ describe("API real com D1", () => {
     const detailAfterCrossAccountUpdate = await request(`/campaigns/${campaignId}`, "GET", undefined, account.cookie);
     expect(((await detailAfterCrossAccountUpdate.json()) as {members:Array<{playerName:string;active:number}>}).members[0]).toMatchObject({ playerName: "Adriana L.", active: 1 });
     const backup = await request('/export','GET',undefined,account.cookie);
-    const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[]}};
-    expect(backupData.version).toBe(4);
+    const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[];preferences:Array<{theme:string}>}};
+    expect(backupData.version).toBe(5);
     expect(backupData.data.groups).toHaveLength(1);
     expect(backupData.data.groupMembers).toHaveLength(1);
+    expect(backupData.data.preferences).toEqual([expect.objectContaining({theme:'SYSTEM'})]);
   });
   it("oferece taxonomia abrangente e busca contas sem expor e-mail", async () => {
     const owner = await register("directory-owner@example.com");

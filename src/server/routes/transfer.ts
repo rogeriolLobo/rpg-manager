@@ -189,5 +189,5 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     c.env.DB.prepare('SELECT a.* FROM adventure_details a JOIN vault_entities e ON e.id=a.entity_id WHERE e.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT ce.* FROM campaign_entities ce JOIN campaigns c ON c.id=ce.campaign_id WHERE c.user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),version:4,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results}});
+  return c.json({exportedAt:nowIso(),version:5,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results}});
 });

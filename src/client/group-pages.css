@@ -6,10 +6,13 @@
 
 .member-editor {
   align-items: center;
-  border-top: 1px solid #eadfce;
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.5fr) auto auto auto auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(
+      180px,
+      1.5fr
+    ) auto auto auto auto;
   padding-top: 0.65rem;
 }
 
@@ -20,10 +23,13 @@
 
 .campaign-member-editor {
   align-items: center;
-  border-top: 1px solid #eadfce;
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(160px, 1.4fr) auto auto auto;
+  grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(
+      160px,
+      1.4fr
+    ) auto auto auto;
   padding-top: 0.65rem;
 }
 
@@ -39,15 +45,39 @@
   margin-bottom: 1rem;
 }
 
-.narrator-summary svg { color: var(--gold); }
-.narrator-summary small, .narrator-summary strong { display: block; }
-.narrator-summary small { color: var(--muted); }
-.group-campaigns { margin-bottom: 1rem; }
+.narrator-summary svg {
+  color: var(--brand-accent);
+}
+.narrator-summary small,
+.narrator-summary strong {
+  display: block;
+}
+.narrator-summary small {
+  color: var(--text-muted);
+}
+.group-campaigns {
+  margin-bottom: 1rem;
+}
 
-.directory-search { margin-top: 1rem; }
-.directory-results { list-style: none; margin: 1rem 0 0; padding: 0; }
-.directory-results li { align-items: center; border-top: 1px solid #eadfce; display: flex; gap: 1rem; justify-content: space-between; padding: 0.75rem 0; }
-.narrator-check { color: var(--wine-dark); }
+.directory-search {
+  margin-top: 1rem;
+}
+.directory-results {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+.directory-results li {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+.narrator-check {
+  color: var(--text-heading);
+}
 
 @media (max-width: 850px) {
   .member-editor {

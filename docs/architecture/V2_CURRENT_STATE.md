@@ -115,7 +115,7 @@ Não há fixtures compartilhadas. Para a suíte V2, helpers de integração reut
 3. Campanhas são visíveis somente ao proprietário, embora possuam membros com contas. A V2 usará esses membros exclusivamente para autorizar conteúdo Vault vinculado; não abrirá toda a UI histórica da campanha para participantes sem requisito explícito.
 4. `game_master` é snapshot textual e `campaign_members.is_game_master` é o vínculo autenticado confiável. Permissões GM usarão o segundo, nunca o texto.
 5. Exclusão de conta é hard delete com cascatas. Isso conflita com preservação histórica; será convertida em anonimização/soft delete, revogando credenciais e mantendo as FKs.
-6. O backup JSON está na versão 3 e cobre V1. A V2 exigirá versão 4 com Worlds, memberships, Vault, detalhes de Adventure e vínculos.
+6. O backup JSON V4 passou a cobrir Worlds, memberships, Vault, detalhes de Adventure e vínculos. A infraestrutura de tema elevou o contrato para V5, incluindo `user_preferences.theme`.
 7. O PRD admite adiar hierarquia de Location. Ela é segura no modelo atual e será implementada com `parent_entity_id`, FK restritiva e validação de ciclo.
 
 ## Decisões para a V2.0
@@ -195,7 +195,7 @@ Com o modelo V1, `CAMPAIGN` inclui membros vinculados mesmo inativos; `PLAYERS` 
 - rotas `/worlds` e `/vault` com busca, filtros, paginação e allowlist de sort;
 - membership de World via diretório existente;
 - archive/restore e delete restrito;
-- anonimização de conta e backup JSON V4;
+- anonimização de conta e backup JSON V5;
 - testes de integração por nível de visibilidade e IDOR.
 
 ### Fase 4 — Worlds UI

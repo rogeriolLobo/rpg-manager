@@ -121,6 +121,10 @@ export const profileSchema = z.strictObject({
   displayName: z.string().trim().min(1).max(80),
 });
 
+export const themePreferenceSchema = z.strictObject({
+  theme: z.enum(['LIGHT', 'DARK', 'SYSTEM']),
+});
+
 export const worldInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(160),
   description: trimmed(10000).default(''),

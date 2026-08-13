@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  const attachThemeScreenshot = async (name: string) => {
+    if (test.info().project.name !== "chromium") return;
+
+    await test.info().attach(name, {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+  };
   const openNavigation = async () => {
     if ((page.viewportSize()?.width ?? 1000) <= 850) {
       await page.getByRole("button", { name: "Abrir menu" }).click();
@@ -11,7 +20,13 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
     }
   };
   const email = `e2e-${Date.now()}@example.com`;
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/login");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await attachThemeScreenshot("login-dark");
   await page.goto("/register");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await attachThemeScreenshot("registro-dark");
   await page.getByLabel("Como quer ser chamado?").fill("Aventureiro E2E");
   await page.getByLabel("E-mail").fill(email);
   await page
@@ -27,6 +42,27 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(page.locator(".recovery-codes code")).toHaveCount(10);
   await page.getByRole("link", { name: "Já guardei, continuar" }).click();
   await expect(page).toHaveURL(/\/app$/u);
+  await openNavigation();
+  await page.getByRole("link", { name: "Configurações" }).click();
+  await expect(page.getByRole("radio", { name: /Sistema/u })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("radio", { name: /Escuro/u }).check();
+  await page.reload();
+  await expect(page.getByRole("radio", { name: /Escuro/u })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await attachThemeScreenshot("configuracoes-dark");
+  await page.getByRole("radio", { name: /Claro/u }).check();
+  await page.reload();
+  await expect(page.getByRole("radio", { name: /Claro/u })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await attachThemeScreenshot("configuracoes-light");
+  await page.getByRole("radio", { name: /Sistema/u }).check();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.reload();
+  await expect(page.getByRole("radio", { name: /Sistema/u })).toBeChecked();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await openNavigation();
   await page.getByRole("link", { name: "Grupos" }).click();
   await page.getByRole("link", { name: "Novo grupo" }).click();
@@ -47,17 +83,18 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByLabel("Subgênero").selectOption("alta-fantasia");
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
-  await page.getByLabel("Grupo de jogo").selectOption({label:"Mesa E2E"});
+  await page.getByLabel("Grupo de jogo").selectOption({ label: "Mesa E2E" });
   await page.getByLabel("Quero jogar").check();
   await page.getByLabel("Grupo / jogadores").fill("Adriana, Marcelo");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(
     page.getByRole("heading", { name: "Blue Rose E2E" }),
   ).toBeVisible();
+  await attachThemeScreenshot("biblioteca-light");
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
   await page.getByLabel("Nome da campanha").fill("A Coroa de E2E");
-  await page.getByLabel("Grupo de jogo").selectOption({label:"Mesa E2E"});
+  await page.getByLabel("Grupo de jogo").selectOption({ label: "Mesa E2E" });
   await expect(page.getByLabel("Narrador")).toHaveValue("Aventureiro E2E");
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(
@@ -69,7 +106,9 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(page.getByLabel("Grupo de jogo")).toHaveValue(/.+/u);
   await page.goBack();
   await page.getByRole("link", { name: "A Coroa de E2E", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "A Coroa de E2E" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "A Coroa de E2E" }),
+  ).toBeVisible();
   await expect(page.getByLabel("Jogador Marcelo")).toBeVisible();
   await page.getByLabel("Nome do jogador").fill("Adriana");
   await page.getByLabel("Nome do personagem").fill("Lina");
@@ -89,8 +128,35 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(
     page.getByRole("heading", { name: "Painel do aventureiro" }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Blue Rose E2E" }).first()).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Blue Rose E2E" }).first(),
+  ).toBeVisible();
+  await attachThemeScreenshot("dashboard-light");
+  await openNavigation();
+  await page.getByRole("link", { name: "Configurações" }).click();
+  await page.getByRole("radio", { name: /Escuro/u }).check();
+  await openNavigation();
+  await page.getByRole("link", { name: "Visão geral" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(
+    page.getByRole("heading", { name: "Painel do aventureiro" }),
+  ).toBeVisible();
+  await attachThemeScreenshot("dashboard-dark");
+  await openNavigation();
+  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Seu catálogo de RPGs" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Blue Rose E2E" }).first(),
+  ).toBeVisible();
+  await attachThemeScreenshot("biblioteca-dark");
+  await openNavigation();
+  await page.getByRole("link", { name: "Configurações" }).click();
+  await page.getByRole("radio", { name: /Claro/u }).check();
   await openNavigation();
   await page.getByRole("button", { name: "Sair" }).click();
   await expect(page).toHaveURL(/\/login$/u);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await attachThemeScreenshot("login-light");
 });

@@ -1,9 +1,11 @@
-import { Download, FileJson, FileSpreadsheet, Trash2 } from "lucide-react";
+import { Download, FileJson, FileSpreadsheet, Monitor, Moon, Palette, Sun, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
 import { useAuth } from "../auth/auth-context";
 import { PageHeader } from "./dashboard-page";
+import { useTheme } from "../theme/ThemeProvider";
+import type { ThemePreference } from "../theme/theme";
 
 function download(path: string) {
   window.location.assign(`/api/v1${path}`);
@@ -13,9 +15,10 @@ export function SettingsPage() {
     <div className="page">
       <PageHeader
         eyebrow="Configurações"
-        title="Dados e portabilidade"
-        description="Importe a planilha com prévia ou leve uma cópia completa dos seus dados."
+        title="Aparência, dados e portabilidade"
+        description="Escolha como a biblioteca aparece, importe sua planilha ou leve uma cópia dos seus dados."
       />
+      <AppearanceSettings />
       <div className="settings-grid">
         <section className="panel setting-card">
           <FileSpreadsheet />
@@ -56,6 +59,34 @@ export function SettingsPage() {
       </div>
     </div>
   );
+}
+
+const themeOptions: Array<{ value:ThemePreference; label:string; description:string; icon:typeof Sun }> = [
+  { value:'LIGHT', label:'Claro', description:'Papel, creme e vinho para leitura durante o dia.', icon:Sun },
+  { value:'DARK', label:'Escuro', description:'Uma biblioteca quente e sombria para a noite.', icon:Moon },
+  { value:'SYSTEM', label:'Sistema', description:'Acompanha automaticamente o tema do dispositivo.', icon:Monitor },
+];
+
+function AppearanceSettings() {
+  const { preference, resolvedTheme, saving, setPreference } = useTheme();
+  const [error, setError] = useState('');
+  const changeTheme = async (nextPreference:ThemePreference) => {
+    setError('');
+    try { await setPreference(nextPreference); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Não foi possível salvar o tema.'); }
+  };
+  return <section className="panel appearance-settings" aria-labelledby="appearance-heading">
+    <div className="section-heading"><div><Palette/><h2 id="appearance-heading">Aparência</h2><p className="section-note">A preferência fica nesta conta e também é aplicada antes da tela carregar.</p></div><span className="theme-resolution">Tema atual: {resolvedTheme === 'dark' ? 'escuro' : 'claro'}</span></div>
+    <fieldset className="theme-selector" disabled={saving}>
+      <legend>Tema</legend>
+      {themeOptions.map(({value,label,description,icon:Icon})=><label className={`theme-option ${preference===value?'selected':''}`} key={value}>
+        <input type="radio" name="theme" value={value} checked={preference===value} onChange={()=>void changeTheme(value)}/>
+        <Icon aria-hidden="true"/>
+        <span><strong>{label}</strong><small>{description}</small></span>
+      </label>)}
+    </fieldset>
+    {error&&<p className="form-error" role="alert">{error}</p>}
+  </section>;
 }
 function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
   type PreviewItem = {
