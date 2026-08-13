@@ -43,3 +43,9 @@ Data: 2026-08-13
 ## Resultado
 
 Preparação arquitetural concluída. Implementação das funcionalidades futuras permanece condicionada aos gates e decisões descritos nos ADRs.
+
+## Publicação
+
+- PR: `#7`;
+- CI da PR: aprovado no run `31752739054`;
+- sem migration e sem deploy: contratos não são importados pelo runtime e os hashes do bundle permaneceram iguais aos da Fase E.

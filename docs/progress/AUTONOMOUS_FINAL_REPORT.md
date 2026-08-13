@@ -68,7 +68,7 @@ O RPG Manager iniciou esta execução em produção no commit `ae58814`. Importa
 - quatro E2E cobrindo desktop Chromium e Pixel 7;
 - regressões explícitas de IDOR/BOLA, cross-world, `GM_ONLY`, `gmNotes`, mass assignment, CSRF e permissões;
 - lint, typecheck e build aprovados;
-- CI de todas as PRs e da `main` aprovado até a Fase E; CI da Fase F será registrado no checkpoint após publicação documental.
+- CI de todas as PRs aprovado até a Fase F; CI da `main` aprovado até a Fase E e repetido após o merge final.
 
 ## Produção
 
