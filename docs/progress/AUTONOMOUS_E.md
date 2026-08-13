@@ -18,7 +18,11 @@ Data: 2026-08-13
 - `0015_specialized_entities_bestiary.sql`;
 - aditiva e sem alteração de dados existentes;
 - oito tabelas novas, todas subordinadas a entidades ou Worlds existentes;
-- aplicação local e `PRAGMA foreign_key_check`: aprovados.
+- aplicação local e `PRAGMA foreign_key_check`: aprovados;
+- backup lógico remoto pré-migration: `rpg-manager-d1-pre-0015-20260813.sql`;
+- SHA-256 do backup: `A467A27A50E48731561AAFF38289C777E366ABD09F0676662F599D97ECCE7149`;
+- aplicação remota e `PRAGMA foreign_key_check`: aprovados;
+- nenhuma migration pendente.
 
 ## Segurança
 
@@ -43,8 +47,15 @@ Data: 2026-08-13
 
 ## Deploy e smoke
 
-Pendentes do push, CI remoto, backup lógico e migration remota segura.
+- PR: `#6`;
+- merge na `main`: `c3f2b7f`;
+- CI da PR e CI da `main` (`31752267813`): aprovados;
+- Worker publicado: `995f4d9b-e269-4a64-aa32-31b657d428db`;
+- `/app` e novo bundle: HTTP 200 com CSP e `nosniff`;
+- APIs de Vault e Bestiário sem autenticação: HTTP 401;
+- smoke autenticado: sessão e dashboard carregados, 27 RPGs existentes preservados;
+- nenhum World ou conteúdo fictício foi criado em produção para o smoke.
 
-## Próximo passo
+## Resultado
 
-Após publicação segura, registrar as decisões arquiteturais da Fase F sem implementar funcionalidades futuras.
+Fase E concluída e publicada. Próximo passo: registrar as decisões arquiteturais da Fase F sem ativar infraestrutura remota.
