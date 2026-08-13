@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../../src/server/types';
+import { ENTITY_TYPES } from '../../src/domain/content/types';
 
 const worker = exports as unknown as {
   default: { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
@@ -97,6 +98,45 @@ describe('Worlds, Vault e permissões V2', () => {
     expect((await request('/vault?sort=name%20DESC%3BDELETE%20FROM%20users', 'GET', undefined, owner)).status).toBe(422);
     expect((await request('/vault?type=NOT_REAL', 'GET', undefined, owner)).status).toBe(422);
     expect((await request('/vault?search=%25%27%20OR%201%3D1--', 'GET', undefined, owner)).status).toBe(200);
+  });
+
+  it('aceita os onze tipos V2 sem antecipar fichas ou tabelas específicas', async () => {
+    const owner = await register('all-types-owner');
+    for (const entityType of ENTITY_TYPES) {
+      const input = entity(`Entidade ${entityType}`, 'PRIVATE', {
+        entityType,
+        adventure: entityType === 'ADVENTURE'
+          ? { adventureType: 'ONE_SHOT', recommendedSessions: 1, notes: '' }
+          : null,
+      });
+      await createEntity(owner, input);
+    }
+    const list = await request('/vault?pageSize=50', 'GET', undefined, owner);
+    expect(list.status).toBe(200);
+    expect((await list.json() as { items: unknown[] }).items).toHaveLength(ENTITY_TYPES.length);
+  });
+
+  it('bloqueia IDOR de World, worldId alheio e vínculo cross-user', async () => {
+    const owner = await register('world-owner');
+    const outsider = await register('world-attacker');
+    const worldResponse = await request('/worlds', 'POST', {
+      name: 'World privado', description: '', defaultRpgId: null, visibility: 'PRIVATE',
+    }, owner);
+    const worldId = (await worldResponse.json() as { item: { id: string } }).item.id;
+    expect((await request(`/worlds/${worldId}`, 'GET', undefined, outsider)).status).toBe(404);
+    expect((await request(`/worlds/${worldId}`, 'PATCH', {
+      name: 'Invadido', description: '', defaultRpgId: null, visibility: 'PRIVATE',
+    }, outsider)).status).toBe(404);
+    expect((await request(`/worlds/${worldId}/archive`, 'POST', {}, outsider)).status).toBe(404);
+    expect((await request(`/worlds/${worldId}`, 'DELETE', undefined, outsider)).status).toBe(404);
+    expect((await request('/vault', 'POST', entity('World manipulado', 'PRIVATE', { worldId }), outsider)).status).toBe(422);
+    expect((await request('/vault', 'POST', entity('Enum inválido', 'PUBLIC'), outsider)).status).toBe(422);
+    expect((await request('/vault', 'POST', entity('Payload grande', 'PRIVATE', { description: 'x'.repeat(20_001) }), outsider)).status).toBe(422);
+
+    const ownerEntityId = await createEntity(owner, entity('Não vinculável'));
+    const outsiderCampaignId = await createCampaign(outsider, await createRpg(outsider), await createGroup(outsider, []));
+    expect((await request(`/campaigns/${outsiderCampaignId}/entities/${ownerEntityId}`, 'POST', { usageType: 'ACTIVE' }, outsider)).status).toBe(404);
+    expect((await request(`/worlds/${worldId}/members`, 'POST', { userId: outsider.userId, role: 'OWNER' }, owner)).status).toBe(422);
   });
 
   it('aplica GROUP, CAMPAIGN, PLAYERS e GM_ONLY sem permitir impersonação', async () => {
