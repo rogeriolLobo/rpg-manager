@@ -53,7 +53,7 @@ async function validateGroup(c: Context<{ Bindings: Env; Variables: AppVariables
 async function validateCoverImage(coverUrl: string | null | undefined): Promise<void> {
   if (!coverUrl) return;
   const result = await validateRemoteCoverImage(coverUrl);
-  if (!result.ok) throw new ApiError(422, 'INVALID_COVER_IMAGE', result.message);
+  if (!result.ok) throw new ApiError(422, 'INVALID_COVER_IMAGE', result.message, { coverUrl: [result.message] });
 }
 
 rpgRoutes.get('/metadata', async (c) => {

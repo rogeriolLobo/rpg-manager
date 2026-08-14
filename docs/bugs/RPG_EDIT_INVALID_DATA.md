@@ -80,6 +80,15 @@ precisa buscá-la de novo nem revalidar seu host a cada `save` sem mudança.
 Uma URL nova (potencial vetor de SSRF) continua sendo integralmente
 validada.
 
+Ao validar o smoke autenticado, foi encontrada uma lacuna adicional:
+`validateCoverImage` (rejeição de capa nova fora da allowlist/SSRF) lançava
+um `ApiError` **sem** o campo `fields`, então o frontend só mostrava a
+mensagem genérica no topo, não o erro junto ao campo `URL da capa`. Corrigido
+passando `{ coverUrl: [result.message] }` como `fields` nesse `ApiError`,
+alinhando esse caminho de erro (validado na rota) com o caminho de erro do
+schema Zod (que já populava `fields` via `parsed.error.flatten().fieldErrors`).
+Teste de integração atualizado para cobrir isso.
+
 ### Compatibilidade
 
 - O importador de CSV ([`transfer.ts`](../../src/server/routes/transfer.ts))

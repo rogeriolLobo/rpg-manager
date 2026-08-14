@@ -530,7 +530,11 @@ describe("API real com D1", () => {
     // Uma capa NOVA fora da allowlist continua sendo rejeitada: a proteção contra SSRF permanece ativa.
     const rejected = await request(`/rpgs/${rpgId}`, "PATCH", { ...unchangedPayload, coverUrl: "https://attacker-controlled.example.com/x.jpg" }, account.cookie, account.csrf);
     expect(rejected.status).toBe(422);
-    expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe("INVALID_COVER_IMAGE");
+    const rejectedBody = (await rejected.json()) as { error: { code: string; fields?: Record<string, string[]> } };
+    expect(rejectedBody.error.code).toBe("INVALID_COVER_IMAGE");
+    // O erro de capa (validado na rota, não no schema Zod) precisa carregar "fields" para que o
+    // frontend consiga destacar o campo coverUrl, e não só exibir a mensagem genérica no topo.
+    expect(rejectedBody.error.fields?.coverUrl?.[0]).toBeTruthy();
   });
   it("rejeita payload excessivo e devolve cabeçalhos defensivos", async () => {
     const account = await register("headers@example.com");
