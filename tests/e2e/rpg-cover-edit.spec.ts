@@ -47,9 +47,10 @@ test("edição de RPG: sem alteração salva, sem vazar dados entre RPGs, capa n
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Beta Capa" })).toBeVisible();
 
-  // Trocar para uma capa nova fora da política atual: deve ser rejeitada com erro no campo.
+  // Trocar para uma capa insegura (IP loopback): deve ser rejeitada com erro no campo — não é
+  // sobre "host autorizado" (não existe mais allowlist), é sobre a URL não ser segura.
   await page.goto(`${betaUrl}/edit`);
-  await page.getByLabel("URL da capa (opcional)").fill("https://exemplo-nao-autorizado.example.com/x.jpg");
+  await page.getByLabel("URL da capa (opcional)").fill("https://127.0.0.1/x.jpg");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByText("Revise os campos destacados.")).toBeVisible();
   const coverFieldError = page.locator("label", { hasText: "URL da capa" }).locator(".field-error");
@@ -72,8 +73,8 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
   await page.getByRole("link", { name: "Já guardei, continuar" }).click();
   await expect(page).toHaveURL(/\/app$/u);
 
-  // RPG "legado": criado sem capa, depois recebe via D1 uma capa real fora da allowlist
-  // atual — exatamente o caso relatado no smoke manual (devir.com.br).
+  // RPG "legado": criado sem capa, depois recebe via D1 a URL real relatada no smoke manual
+  // (devir.com.br) — simula um registro cuja capa já está persistida antes desta edição.
   await page.goto("/app/library/new");
   await page.getByLabel("Título").fill("RPG Legado Devir");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
@@ -82,7 +83,7 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
   const legacyCoverUrl = "https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png";
   updateLocalCoverUrl(legacyId, legacyCoverUrl);
 
-  // RPG com capa JÁ permitida pela política atual.
+  // Segundo RPG com outra capa qualquer já persistida.
   await page.goto("/app/library/new");
   await page.getByLabel("Título").fill("RPG Capa Permitida");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
@@ -106,8 +107,8 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
   await expect(page.getByLabel("URL da capa (opcional)")).toHaveValue(legacyCoverUrl);
   await expect(page.getByLabel("Quero jogar")).toBeChecked();
 
-  // DoD 3: trocar para URL NOVA proibida → rejeitar, erro junto ao campo.
-  await page.getByLabel("URL da capa (opcional)").fill("https://outro-proibido.example.com/x.jpg");
+  // DoD 3: trocar para URL NOVA insegura (IP loopback) → rejeitar, erro junto ao campo.
+  await page.getByLabel("URL da capa (opcional)").fill("https://127.0.0.1/x.jpg");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByText("Revise os campos destacados.")).toBeVisible();
   await expect(page.locator("label", { hasText: "URL da capa" }).locator(".field-error")).toBeVisible();
@@ -120,7 +121,7 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
   await page.goto(`/app/library/${legacyId}/edit`);
   await expect(page.getByLabel("URL da capa (opcional)")).toHaveValue("");
 
-  // DoD 5: RPG com capa JÁ permitida, editar sem alterar nada → sucesso.
+  // DoD 5: outro RPG com capa já persistida, editar sem alterar nada → sucesso.
   await page.goto(`/app/library/${allowedId}/edit`);
   await expect(page.getByLabel("URL da capa (opcional)")).toHaveValue(allowedCoverUrl);
   await page.getByRole("button", { name: "Salvar RPG" }).click();

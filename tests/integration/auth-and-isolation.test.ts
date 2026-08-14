@@ -547,28 +547,26 @@ describe("API real com D1", () => {
     expect(changedItem.wantsToPlay).toBe(true);
     expect(changedItem.coverUrl).toBe(legacyCoverUrl);
 
-    // Uma capa NOVA fora da allowlist continua sendo rejeitada: a proteção contra SSRF permanece ativa.
-    const rejected = await request(`/rpgs/${rpgId}`, "PATCH", { ...unchangedPayload, coverUrl: "https://attacker-controlled.example.com/x.jpg" }, account.cookie, account.csrf);
+    // Uma capa NOVA insegura (IP loopback, não é sobre "host autorizado") continua rejeitada.
+    const rejected = await request(`/rpgs/${rpgId}`, "PATCH", { ...unchangedPayload, coverUrl: "https://127.0.0.1/x.jpg" }, account.cookie, account.csrf);
     expect(rejected.status).toBe(422);
     const rejectedBody = (await rejected.json()) as { error: { code: string; fields?: Record<string, string[]> } };
-    expect(rejectedBody.error.code).toBe("INVALID_COVER_IMAGE");
-    // O erro de capa (validado na rota, não no schema Zod) precisa carregar "fields" para que o
-    // frontend consiga destacar o campo coverUrl, e não só exibir a mensagem genérica no topo.
+    expect(rejectedBody.error.code).toBe("VALIDATION_ERROR");
+    // O erro precisa carregar "fields" para que o frontend destaque o campo coverUrl, e não só
+    // exiba a mensagem genérica no topo.
     expect(rejectedBody.error.fields?.coverUrl?.[0]).toBeTruthy();
   });
-  it("aplica CASO A/B/C de coverUrl com fixture real (devir.com.br): create rejeita, edit sem alteração preserva, novo host permitido troca, remoção funciona", async () => {
+  it("coverUrl (LIB-001): qualquer HTTPS público é aceito — servidor nunca busca a URL, só o navegador", async () => {
+    // A capa é usada só como <img src> pelo navegador; o servidor não faz fetch dela, então não
+    // existe allowlist de hosts (não escala para um catálogo mundial de editoras). A única
+    // política é sintática: HTTPS público, sem IP privado/loopback, sem protocolo perigoso.
     const account = await register("devir-cover@example.com");
     const devirCoverUrl = "https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png";
 
-    // CASO A (CREATE): mesmo sendo um domínio real conhecido, fora da allowlist é sempre rejeitado.
-    const createRejected = await request("/rpgs", "POST", { ...rpg, title: "Nao Deve Existir Devir", coverUrl: devirCoverUrl }, account.cookie, account.csrf);
-    expect(createRejected.status).toBe(422);
-    expect(((await createRejected.json()) as { error: { code: string } }).error.code).toBe("INVALID_COVER_IMAGE");
-
-    // Cria sem capa e força, via D1, uma capa legada da Devir (simula import/registro antigo).
-    const created = await request("/rpgs", "POST", { ...rpg, title: "RPG com Capa Devir", coverUrl: null }, account.cookie, account.csrf);
-    const devirRpgId = ((await created.json()) as { item: { id: string } }).item.id;
-    await testEnv.DB.prepare("UPDATE rpgs SET cover_url=? WHERE id=?").bind(devirCoverUrl, devirRpgId).run();
+    // CREATE com um host real "desconhecido" (não estava em nenhuma allowlist antiga) → aceito.
+    const created = await request("/rpgs", "POST", { ...rpg, title: "RPG com Capa Devir", coverUrl: devirCoverUrl }, account.cookie, account.csrf);
+    expect(created.status).toBe(201);
+    const devirRpgId = ((await created.json()) as { item: { id: string; coverUrl: string } }).item.id;
 
     const item = ((await (await request(`/rpgs/${devirRpgId}`, "GET", undefined, account.cookie)).json()) as { item: Record<string, unknown> }).item;
     const base = {
@@ -578,29 +576,25 @@ describe("API real com D1", () => {
       notes: item.notes, isbn: item.isbn, coverSourceUrl: item.coverSourceUrl, coverSourceNote: item.coverSourceNote,
     };
 
-    // CASO C: sem alteração -> preserva, sem exigir fetch/allowlist.
+    // Editar sem alterar a capa -> preserva.
     const unchanged = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: devirCoverUrl }, account.cookie, account.csrf);
     expect(unchanged.status).toBe(200);
     expect(((await unchanged.json()) as { item: { coverUrl: string } }).item.coverUrl).toBe(devirCoverUrl);
 
-    // CASO C variante: valor final submetido volta a ser igual ao persistido (editar e reverter
-    // manualmente) — não pode depender de uma flag "dirty", só do valor final.
-    const reverted = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: devirCoverUrl }, account.cookie, account.csrf);
-    expect(reverted.status).toBe(200);
+    // Trocar para outro host HTTPS público qualquer (nunca esteve em nenhuma allowlist) -> aceito.
+    const newHostUrl = "https://covers.openlibrary.org/b/isbn/9780765326355-L.jpg";
+    const changed = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: newHostUrl }, account.cookie, account.csrf);
+    expect(changed.status).toBe(200);
+    expect(((await changed.json()) as { item: { coverUrl: string } }).item.coverUrl).toBe(newHostUrl);
 
-    // CASO B: trocar para um host novo PROIBIDO -> rejeitado, capa antiga preservada intacta.
-    const rejected = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: "https://outro-proibido.example.com/x.jpg" }, account.cookie, account.csrf);
-    expect(rejected.status).toBe(422);
+    // URL insegura (IP loopback/privado, protocolo perigoso, sem HTTPS) continua rejeitada —
+    // isso não é sobre host "autorizado", é sobre a forma da URL ser segura.
+    for (const unsafe of ["http://exemplo.com/x.jpg", "https://127.0.0.1/x.jpg", "https://192.168.1.10/x.jpg", "javascript:alert(1)", "data:image/png;base64,abc"]) {
+      const rejected = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: unsafe }, account.cookie, account.csrf);
+      expect(rejected.status).toBe(422);
+    }
     const afterRejected = await testEnv.DB.prepare("SELECT cover_url FROM rpgs WHERE id=?").bind(devirRpgId).first<{ cover_url: string }>();
-    expect(afterRejected?.cover_url).toBe(devirCoverUrl);
-
-    // CASO B: trocar para um host novo PERMITIDO -> aceito, passa a valer o novo valor.
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("image", { status: 200, headers: { "Content-Type": "image/jpeg" } })));
-    const allowedHost = "https://covers.openlibrary.org/b/isbn/9780765326355-L.jpg";
-    const changedToAllowed = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: allowedHost }, account.cookie, account.csrf);
-    expect(changedToAllowed.status).toBe(200);
-    expect(((await changedToAllowed.json()) as { item: { coverUrl: string } }).item.coverUrl).toBe(allowedHost);
-    vi.unstubAllGlobals();
+    expect(afterRejected?.cover_url).toBe(newHostUrl);
 
     // Remoção da capa: deve funcionar e normalizar para null (não é tratada como URL inválida).
     const removed = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: null }, account.cookie, account.csrf);

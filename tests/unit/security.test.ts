@@ -38,7 +38,7 @@ describe("segurança", () => {
     expect(codes.every((code) => code.startsWith("RGM-"))).toBe(true);
     expect(await hashSecret(codes[0], "pepper")).not.toContain(codes[0]);
   });
-  it("aplica CSP por allowlist e HSTS somente em produção", () => {
+  it("aplica CSP e HSTS somente em produção", () => {
     const headers = new Headers();
     applySecurityHeaders(headers, true);
     const csp = headers.get("Content-Security-Policy") ?? "";
@@ -47,12 +47,11 @@ describe("segurança", () => {
       "script-src 'self' https://challenges.cloudflare.com",
     );
     expect(csp).not.toContain("script-src 'unsafe-inline'");
-    expect(csp).toContain("https://covers.openlibrary.org");
-    expect(csp).toContain("https://cdn11.bigcommerce.com");
-    expect(csp).toContain("https://freeleaguepublishing.com");
-    expect(csp).toContain("https://greenroninstore.com");
-    expect(csp).toContain("https://pictures.abebooks.com");
-    expect(csp).not.toContain("img-src 'self' data: https:;");
+    // img-src permite qualquer host HTTPS (LIB-001: capas de RPG vêm de um catálogo mundial de
+    // editoras/lojas, o navegador carrega <img> diretamente, o servidor nunca busca essas URLs
+    // — não escala manter uma allowlist fixa de domínios). script-src/style-src continuam
+    // restritos: só a CSP de imagens foi ampliada.
+    expect(csp).toContain("img-src 'self' data: https:;");
     expect(headers.get("Strict-Transport-Security")).toContain(
       "max-age=31536000",
     );

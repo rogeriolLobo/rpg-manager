@@ -1,10 +1,11 @@
-import { COVER_IMAGE_ORIGINS } from '../../shared/security/cover-url';
-
 const CSP = [
   "default-src 'self'",
   "script-src 'self' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: ${COVER_IMAGE_ORIGINS.join(' ')}`,
+  // Capas de RPG podem vir de qualquer host HTTPS (ver shared/security/cover-url.ts) —
+  // o navegador carrega <img> diretamente, o servidor nunca busca essas URLs, então uma
+  // allowlist de hosts aqui não escala para um catálogo mundial de editoras/lojas.
+  "img-src 'self' data: https:",
   "font-src 'self'",
   "connect-src 'self' https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com",

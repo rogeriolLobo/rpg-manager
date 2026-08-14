@@ -21,19 +21,19 @@ describe('validação de entrada',()=>{it('rejeita senha curta e campo arbitrár
     expect(rpgInputSchema.safeParse({ ...baseRpg, plannedPlayDate: '2026-08-14' }).success).toBe(true);
   });
 
-  it('aceita coverUrl legado fora da allowlist de hosts (regressão: capa do Google Shopping travava a edição)', () => {
-    // A allowlist de hosts (isAllowedCoverUrl) é aplicada na rota, não no schema — permite
-    // reeditar RPGs importados/legados sem forçar re-validação/SSRF de uma capa não alterada.
+  it('aceita coverUrl de qualquer host HTTPS público (regressão: capa do Google Shopping travava a edição)', () => {
+    // coverUrl é usada só pelo navegador como <img src>; o servidor não busca essa URL, então
+    // não existe allowlist de hosts (LIB-001) — só validação sintática (isPublicHttpsUrl).
     const result = rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'https://encrypted-tbn2.gstatic.com/shopping?q=tbn:abc123' });
     expect(result.success).toBe(true);
   });
 
-  it('aceita a forma de coverUrl legado da Devir (regressão do segundo achado do smoke manual)', () => {
+  it('aceita a URL real da Devir (regressão do segundo achado do smoke manual)', () => {
     const result = rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png' });
     expect(result.success).toBe(true);
   });
 
-  it('rejeita coverUrl com protocolo perigoso ou host privado mesmo fora da allowlist estrita', () => {
+  it('rejeita coverUrl com protocolo perigoso ou host privado — não é sobre "host autorizado", é sobre a URL ser segura', () => {
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'javascript:alert(1)' }).success).toBe(false);
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'data:image/png;base64,abc' }).success).toBe(false);
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'ftp://example.com/capa.jpg' }).success).toBe(false);

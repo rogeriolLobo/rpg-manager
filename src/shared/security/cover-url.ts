@@ -1,30 +1,12 @@
-export const COVER_IMAGE_HOSTS = [
-  'archive.org',
-  'cdn11.bigcommerce.com',
-  'cdn.vnda.com.br',
-  'covers.openlibrary.org',
-  'freeleaguepublishing.com',
-  'greenroninstore.com',
-  'i0.wp.com',
-  'jamboeditora.com.br',
-  'loja.retropunk.com.br',
-  'luznegra.com.br',
-  'modiphius.net',
-  'pictures.abebooks.com',
-  'vtm.paradoxwikis.com',
-  'www.jamboeditora.com.br',
-  'www.huginnemuninn.com.br',
-] as const;
-
-const COVER_IMAGE_HOST_SUFFIXES = ['.us.archive.org'] as const;
-
-export const COVER_IMAGE_ORIGINS = [
-  ...COVER_IMAGE_HOSTS.map((host) => `https://${host}`),
-  ...COVER_IMAGE_HOST_SUFFIXES.map((suffix) => `https://*${suffix}`),
-];
-
-const allowedCoverHosts = new Set<string>(COVER_IMAGE_HOSTS);
-
+// Política de coverUrl: o valor é usado SOMENTE pelo navegador como <img src>
+// (com fallback em onError — ver CoverImage em library-pages.tsx) — o servidor
+// nunca busca essa URL. Por isso a única validação necessária aqui é sintática/
+// de protocolo/anti-SSRF-por-IP-literal, sem allowlist fixa de hosts: uma
+// allowlist de editoras não escala para um catálogo mundial de RPGs (LIB-001).
+//
+// Se, no futuro, algum fluxo passar a exigir que o SERVIDOR busque uma URL
+// remota (ex.: reprocessar uma imagem enviada por URL), essa rota deve aplicar
+// sua própria validação dedicada — não reutilizar esta função para isso.
 function hasUnsafeHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/gu, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
@@ -55,11 +37,4 @@ export function parsePublicHttpsUrl(value: string): URL | null {
 
 export function isPublicHttpsUrl(value: string): boolean {
   return parsePublicHttpsUrl(value) !== null;
-}
-
-export function isAllowedCoverUrl(value: string): boolean {
-  const url = parsePublicHttpsUrl(value);
-  if (!url) return false;
-  const hostname = url.hostname.toLowerCase();
-  return allowedCoverHosts.has(hostname) || COVER_IMAGE_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
 }
