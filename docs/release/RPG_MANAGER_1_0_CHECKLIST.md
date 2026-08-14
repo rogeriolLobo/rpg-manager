@@ -37,13 +37,12 @@ Baseado na auditoria real de 2026-08-14
 - [x] Player Portal (isolamento GM_ONLY confirmado por teste existente)
 
 ## PLATFORM
-- [x] Navigation invariants — **não auditado por esta sessão**: existe
-      trabalho em andamento, não commitado por esta sessão, especificamente
-      dedicado a isso (`docs/product/UX_INVARIANTS.md`,
+- [x] Navigation invariants — commitado e publicado nesta sessão
+      (`docs/product/UX_INVARIANTS.md`,
       `tests/e2e/navigation-invariants.spec.ts`,
-      `tests/unit/navigation-invariants.test.ts`) — fora do escopo desta
-      execução por instrução explícita do responsável do produto
-      ("não mexer em navegação").
+      `tests/unit/navigation-invariants.test.ts`; ver
+      `docs/release/PRODUCTION_DEPLOY_INCIDENT.md` para o incidente de
+      deploy ausente que motivou a publicação).
 - [x] Light
 - [x] Dark
 - [x] System
