@@ -9,30 +9,51 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## P0-001 — Edição de RPG com capa legada
 
 - **Priority:** P0
-- **Status:** `DONE` (código), `MANUAL_SMOKE_REQUIRED` (clique
-  autenticado real, bloqueado por Turnstile/CAPTCHA — não contornado)
+- **Status:** `DONE` (código, causa raiz arquitetural eliminada — ver
+  LIB-001), `MANUAL_SMOKE_REQUIRED` (clique autenticado real, bloqueado
+  por Turnstile/CAPTCHA — não contornado)
 - **Dependencies:** nenhuma
 - **Definition of Done:**
   - [x] Editar RPG com capa histórica sem alterar → sucesso
   - [x] Alterar campo não relacionado → sucesso, capa preservada
-  - [x] Trocar para URL nova proibida → rejeitada, erro no campo
+  - [x] Trocar para URL nova insegura → rejeitada, erro no campo
   - [x] Remover capa → sucesso
-  - [x] RPG com capa já permitida, sem alteração → sucesso
-  - [x] Todos os 5 cenários acima verificados via TEST FIRST no
-        formulário React real (não só API), com a URL real
-        `devir.com.br` do relato de produção
-  - [x] Nenhuma nova allowlist de host adicionada só para contornar
-  - [x] Proteção SSRF preservada para URLs realmente novas
+  - [x] RPG com capa já aceita, sem alteração → sucesso
+  - [x] CREATE com capa de qualquer host HTTPS → sucesso (LIB-001:
+        causa raiz eliminada, não só contornada no PATCH)
+  - [x] Todos os cenários verificados via TEST FIRST no formulário
+        React real (não só API), com a URL real `devir.com.br` do
+        relato de produção
+  - [x] Nenhuma allowlist de host — política é sintática (LIB-001)
+  - [x] Proteção SSRF preservada (IP privado/loopback, protocolo
+        perigoso continuam rejeitados)
   - [x] lint, typecheck, unit, integration, E2E (desktop+mobile), build
   - [x] CI verde
-  - [x] Deploy — Version `baa022ab-5e11-4c37-93c7-112d9a8b452f`
+  - [x] Deploy — Version `77696b49-0204-47c9-92da-1cebea49c4d7`
   - [x] `GET /api/v1/version` confirma HEAD == origin/main == build ==
-        produção (`d23ba05`)
+        produção (`ec51077`)
   - [ ] Smoke autenticado por clique real — `MANUAL_SMOKE_REQUIRED`
-        (checklist em `docs/bugs/RPG_EDIT_INVALID_DATA.md`)
-- **Commit:** `d5b0d70`, `ebff759`, `eedc96a`, `d23ba05` (ver
-  `docs/bugs/RPG_EDIT_INVALID_DATA.md` para a cadeia completa)
-- **Production version:** `baa022ab-5e11-4c37-93c7-112d9a8b452f`
+        (checklist em `docs/library/LIBRARY_DEFINITION_OF_DONE.md`)
+- **Commit:** `d5b0d70`, `ebff759`, `eedc96a`, `d23ba05`, `ec51077` (ver
+  `docs/bugs/RPG_EDIT_INVALID_DATA.md` e `docs/library/COVER_STORAGE.md`)
+- **Production version:** `77696b49-0204-47c9-92da-1cebea49c4d7`
+
+## LIB-001 — Biblioteca: vertical slice completo
+
+- **Priority:** P0 (bug de coverUrl) → P2 (restante do vertical slice)
+- **Status:** `IN_PROGRESS` — bug funcional `DONE`, arquitetura futura
+  (upload/KV, metadata providers, split System→Publication→User State)
+  `NOT_STARTED` (desenhada, não implementada — ver
+  `docs/library/`)
+- **Dependencies:** nenhuma
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Commit:** `ec51077` (bug de coverUrl); restante sem commit ainda
+- **Production version:** `77696b49-0204-47c9-92da-1cebea49c4d7`
+- **Docs:** `docs/library/LIBRARY_CURRENT_STATE.md`,
+  `docs/library/LIBRARY_ARCHITECTURE.md`,
+  `docs/library/COVER_STORAGE.md`,
+  `docs/library/METADATA_PROVIDERS.md`,
+  `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
 
 ## P0-002 — Falhas em GitHub Actions
 
@@ -76,6 +97,11 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `NOT_STARTED` |
 | F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `NOT_STARTED` |
 | F-006 | Teste de integração dedicado para Global Search | P2 | `NOT_STARTED` |
+| F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `NOT_STARTED` |
+| F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `NOT_STARTED` |
+| F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `NOT_STARTED` |
+| F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `NOT_STARTED` |
+| F-011 | Archive de RPG (hoje só existe delete físico) | P3 | `NOT_STARTED` |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):
 VTT, Sheets (motor completo), Social/Amizades.
