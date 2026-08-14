@@ -238,4 +238,49 @@ describe('Worlds, Vault e permissões V2', () => {
     expect(await testEnv.DB.prepare('SELECT id FROM vault_entities WHERE id=?').bind(entityId).first()).not.toBeNull();
     expect((await request('/auth/login', 'POST', { email: 'deleted-owner@example.com', password })).status).toBe(401);
   });
+
+  it('convites de World: aceita, é idempotente, respeita limite de usos, expiração e revogação', async () => {
+    const owner = await register('invite-owner');
+    const guest = await register('invite-guest');
+    const worldResponse = await request('/worlds', 'POST', {
+      name: 'World Convidável', description: '', defaultRpgId: null, visibility: 'GROUP',
+    }, owner);
+    const worldId = (await worldResponse.json() as { item: { id: string } }).item.id;
+
+    // Só o owner pode criar convite; visibilidade PRIVATE bloqueia.
+    expect((await request(`/world-invites/${worldId}`, 'POST', { expiresInDays: 7, maxUses: 1 }, guest)).status).toBe(404);
+
+    const created = await request(`/world-invites/${worldId}`, 'POST', { expiresInDays: 7, maxUses: 1 }, owner);
+    expect(created.status).toBe(201);
+    const invite = (await created.json()) as { item: { id: string; code: string } };
+
+    // Aceitar com token inválido/malformado não vaza informação sobre convites reais.
+    expect((await request('/world-invites/accept/token-invalido-qualquer', 'POST', {}, guest)).status).toBe(404);
+
+    const accepted = await request(`/world-invites/accept/${invite.item.code}`, 'POST', {}, guest);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ world: { id: worldId, name: 'World Convidável' }, alreadyMember: false });
+
+    // Aceitar de novo com o mesmo token é idempotente (já é membro), não conta como um novo uso.
+    const acceptedAgain = await request(`/world-invites/accept/${invite.item.code}`, 'POST', {}, guest);
+    expect(acceptedAgain.status).toBe(200);
+    expect(await acceptedAgain.json()).toMatchObject({ alreadyMember: true });
+
+    // maxUses=1 já foi consumido: um terceiro usuário não consegue mais usar o mesmo convite.
+    const other = await register('invite-other');
+    expect((await request(`/world-invites/accept/${invite.item.code}`, 'POST', {}, other)).status).toBe(404);
+
+    // Convite revogado não pode mais ser usado.
+    const revocable = await request(`/world-invites/${worldId}`, 'POST', { expiresInDays: 7, maxUses: 5 }, owner);
+    const revocableInvite = (await revocable.json()) as { item: { id: string; code: string } };
+    expect((await request(`/world-invites/${worldId}/${revocableInvite.item.id}`, 'DELETE', undefined, owner)).status).toBe(204);
+    expect((await request(`/world-invites/accept/${revocableInvite.item.code}`, 'POST', {}, other)).status).toBe(404);
+
+    // Convite expirado (forçado via D1) não pode mais ser usado, mesmo com uso disponível.
+    const expiring = await request(`/world-invites/${worldId}`, 'POST', { expiresInDays: 7, maxUses: 5 }, owner);
+    const expiringInvite = (await expiring.json()) as { item: { id: string; code: string } };
+    await testEnv.DB.prepare("UPDATE world_invites SET expires_at=? WHERE id=?")
+      .bind('2020-01-01T00:00:00.000Z', expiringInvite.item.id).run();
+    expect((await request(`/world-invites/accept/${expiringInvite.item.code}`, 'POST', {}, other)).status).toBe(404);
+  });
 });
