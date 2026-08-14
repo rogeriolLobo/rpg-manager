@@ -1,7 +1,9 @@
 .sidebar > div:first-child { min-height: 0; overflow-y: auto; }
 .world-selector { display: grid; gap: .35rem; margin: 1rem 0 .7rem; color: var(--sidebar-text-muted); font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .world-selector select { width: 100%; border-color: var(--sidebar-border); background: var(--sidebar-hover); color: var(--sidebar-text); }
-.secondary-nav { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--sidebar-border); }
+.secondary-nav, .nav-section { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--sidebar-border); }
+.nav-section-label { display: block; padding: .35rem .8rem .25rem; color: var(--sidebar-text-muted); font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+
 .command-trigger { display: flex; width: 100%; align-items: center; gap: .5rem; margin-bottom: .7rem; padding: .65rem .75rem; border: 1px solid var(--sidebar-border); border-radius: .6rem; background: transparent; color: var(--sidebar-text-muted); cursor: pointer; }
 .command-trigger kbd { margin-left: auto; padding: .12rem .35rem; border: 1px solid var(--sidebar-border); border-radius: .25rem; font: inherit; font-size: .68rem; }
 .command-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: start center; padding-top: min(16vh, 9rem); background: var(--overlay); }
