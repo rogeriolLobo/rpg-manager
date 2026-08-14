@@ -1,5 +1,10 @@
 # Bug: "Dados inválidos." ao editar RPG existente
 
+**Status: DONE** (código verificado em produção via `/api/v1/version`,
+TEST FIRST no nível de formulário real com fixture `devir.com.br`;
+smoke autenticado por clique continua `MANUAL_SMOKE_REQUIRED` por
+CAPTCHA — ver seção final).
+
 ## Sintoma
 
 Ao abrir um RPG existente na Biblioteca e salvar (com ou sem alterações), o
@@ -364,3 +369,51 @@ em `src/shared/security/cover-url.ts`) permanece inalterada.
 - Smoke autenticado via clique real continua bloqueado por Turnstile
   (mesma limitação documentada na seção anterior); permanece pendente
   como passo manual do usuário.
+
+## Encerramento (P0-001)
+
+Um novo relato de smoke manual em produção reproduziu a mesma mensagem
+para o RPG com `coverUrl` histórica da Devir. Investigação:
+
+- Confirmado via `SELECT` direto no D1 de produção: `devir.com.br` não
+  está persistida em nenhum RPG hoje (mesma conclusão de antes).
+- Confirmado via inspeção do bundle publicado (`index-BFmwpDW0.js`,
+  buscado diretamente da URL de produção): contém `rpg-form-fields`
+  (fieldset de loading), `__new__` (key do remount) e "Revise os campos
+  destacados." — ou seja, **o fix já estava ao vivo em produção** no
+  momento do relato.
+- Conclusão mais provável: o smoke relatado foi feito antes do deploy
+  `c24e0180` (18:56) ou com uma aba/cache de navegador ainda executando
+  o JS anterior ao fix.
+
+Para eliminar qualquer dúvida remanescente, foi adicionado
+`tests/e2e/rpg-cover-edit.spec.ts` cobrindo os 5 cenários exigidos
+**pelo formulário React real** (não pela API), injetando a URL real
+`devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png`
+via D1 local:
+
+1. capa histórica, editar sem alterar, salvar → sucesso.
+2. alterar só "Quero jogar" → sucesso, capa preservada.
+3. trocar para URL nova proibida → rejeitada, erro no campo.
+4. remover capa → sucesso.
+5. capa já permitida, editar sem alterar → sucesso.
+
+**TEST FIRST confirmado por reprodução real:** o teste foi executado
+contra os arquivos no estado do commit `6f4b75b` (anterior a qualquer
+fix desta sessão) e falhou exatamente no cenário 1, replicando o
+sintoma relatado. Restaurados os arquivos corrigidos, os 5 cenários
+passam em desktop e mobile, local e no CI remoto.
+
+Commit: `d23ba05`. CI: verde. Deploy: Version
+`baa022ab-5e11-4c37-93c7-112d9a8b452f`, confirmado via
+`GET /api/v1/version` retornando `{"commit":"d23ba05",...}` — HEAD
+local, origin/main, build e produção idênticos.
+
+**MANUAL_SMOKE_REQUIRED** (única pendência real, por CAPTCHA):
+
+1. Login manual em produção.
+2. Abrir um RPG com capa histórica → Editar → não alterar nada → Salvar
+   → deve funcionar.
+3. Reabrir → alterar "Quero jogar" → Salvar → capa deve continuar igual.
+4. Trocar a capa para uma URL claramente não autorizada → deve rejeitar
+   com erro junto ao campo "URL da capa".
