@@ -349,3 +349,18 @@ real e o teste falhar na asserção do erro de campo).
 **Confirmação explícita:** `devir.com.br` **não** foi adicionada à
 allowlist de hosts em nenhum momento. A allowlist (`COVER_IMAGE_HOSTS`
 em `src/shared/security/cover-url.ts`) permanece inalterada.
+
+### Commit, CI e deploy deste segundo achado
+
+- Commit `eedc96a` — `fix(library): stop stale RPG form state from
+  leaking coverUrl across edits`.
+- CI: 100% verde na primeira tentativa (lint, typecheck, unit,
+  integration, build, E2E desktop+mobile, incluindo o novo
+  `rpg-cover-edit.spec.ts`).
+- Deploy: Version ID `c24e0180-a14e-4145-b041-7b30a8148585`.
+- Smoke read-only no D1 de produção após o deploy: 30 RPGs, 27 com capa
+  — inalterado, nenhuma escrita feita. `devir.com.br` continua ausente
+  do banco (nunca foi persistida).
+- Smoke autenticado via clique real continua bloqueado por Turnstile
+  (mesma limitação documentada na seção anterior); permanece pendente
+  como passo manual do usuário.
