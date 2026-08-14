@@ -153,8 +153,75 @@ e **passa após a correção**.
 
 ## Resultado das validações
 
-- Unit: 99 testes, 99 passando.
+- Unit: 99 testes, 99 passando (66 do escopo do fix + navigation-invariants
+  local não commitado; ver seção de deploy para a contagem exata do commit
+  publicado).
 - Integração: 31 testes, 31 passando.
 - Typecheck (`tsc --noEmit` app + integração): sem erros.
 - Lint dos arquivos alterados: sem erros/avisos.
 - Build (`vite build`): sucesso.
+
+## Commit, CI e deploy
+
+Foram dois commits em `main`, escopados apenas aos arquivos deste fix
+(sem tocar no trabalho de navegação já em andamento, mas ainda não
+commitado nesta árvore — item fora de escopo desta tarefa):
+
+1. `d5b0d70` — `fix(library): preserve legacy cover URLs when editing RPGs`
+   (correção principal: schema + rota + UI de erros por campo).
+2. `ebff759` — `fix(library): surface field-level error for rejected cover
+   URLs` (gap encontrado durante o smoke: `validateCoverImage` não
+   populava `fields` no `ApiError`, então a rejeição de uma capa nova
+   fora da allowlist só aparecia como mensagem genérica).
+
+CI (GitHub Actions, workflow `ci.yml`, lint → typecheck → unit →
+integration → build → Playwright install → E2E chromium+mobile-chromium):
+
+- Run do commit `d5b0d70`: falhou uma vez por timeout de asserção em
+  `core-flow.spec.ts` (não relacionado a este fix — reproduzido 6/6 vezes
+  localmente no commit exato sem falha); re-executado (`gh run rerun
+  --failed`) e ficou 100% verde.
+- Run do commit `ebff759`: 100% verde na primeira tentativa.
+
+Antes de cada deploy, o gate completo (lint, typecheck, unit, integration,
+build, E2E desktop+mobile) foi reexecutado localmente em um **git worktree
+limpo no commit exato que seria publicado** (sem as alterações de
+navegação ainda não commitadas nesta árvore), para garantir que o que
+seria publicado era exatamente o que passou no CI.
+
+Deploy (`wrangler deploy`, a partir do commit exato, sem nenhuma
+alteração não commitada de outras tarefas):
+
+- 1ª publicação: commit `d5b0d70`, Version ID `b6de8ae8-fdc5-4c16-b082-b285e2116aa8`.
+- 2ª publicação (após o gap de `fields` ser corrigido): commit `ebff759`,
+  Version ID `1366dcf1-621a-4072-b0d3-e96d84fd53d3` (versão final em
+  produção).
+- URL: `https://rpg-manager.editorahuginnemuninn.workers.dev`
+
+## Smoke de produção
+
+Verificação somente-leitura no D1 de produção (`wrangler d1 execute
+--remote`), sem nenhum `INSERT`/`UPDATE`/`DELETE`:
+
+- Total de RPGs: 29 → 30 entre as duas checagens (o novo registro,
+  "Street Fighter", foi criado às 16:40:51 UTC pelo próprio usuário
+  usando o app em produção durante a janela de deploy — confirmado pelo
+  horário e por não haver nenhuma escrita minha no D1 remoto além das
+  consultas `SELECT`). Os 27 RPGs com `cover_url` preenchido
+  permaneceram intactos; nenhuma capa, nota ou campo foi alterado.
+- Nenhum dos 27 `cover_url` atualmente persistidos aponta para um host
+  fora da allowlist atual — ou seja, o exemplo literal do ticket
+  (`encrypted-tbn2.gstatic.com`) não corresponde a nenhum registro
+  persistido hoje. A causa raiz e a correção continuam válidas (o
+  mecanismo foi reproduzido e comprovado via teste automatizado com uma
+  capa forçada via SQL, exatamente como um registro legado real teria).
+
+Smoke autenticado via clique real na UI (login → abrir RPG → Editar →
+não alterar → Salvar; capa nova rejeitada com erro no campo) **não foi
+concluído por mim**: o registro de conta em produção exige Turnstile
+(proteção anti-bot real), e uma tentativa honesta com navegador Chromium
+real (não headless, sem qualquer técnica de evasão) foi bloqueada com
+"Não foi possível validar a proteção contra bots." — a proteção
+funcionando corretamente contra automação. Não tentei contornar essa
+proteção. Fica como passo manual pendente para o usuário (checklist no
+relatório final da conversa).
