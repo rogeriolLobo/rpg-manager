@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
-import { isAllowedCoverUrl, isPublicHttpsUrl } from '../security/cover-url';
+import { isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 const optionalDate = z.union([z.iso.date(), z.literal(''), z.null()]).optional();
@@ -51,7 +51,7 @@ export const rpgInputSchema = z.strictObject({
   gameMaster: trimmed(100).default(''),
   notes: trimmed(10000).default(''),
   coverUrl: z.union([
-    z.string().trim().max(1000).refine(isAllowedCoverUrl, 'Use uma URL HTTPS de um domínio de capas autorizado.'),
+    z.string().trim().max(1000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
     z.literal(''),
     z.null(),
   ]).optional(),

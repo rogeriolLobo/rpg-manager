@@ -630,6 +630,11 @@ legend {
   padding: 0.65rem;
   border-radius: 0.5rem;
 }
+.field-error {
+  color: var(--danger);
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+}
 .success-message {
   color: var(--success);
   background: var(--success-background);

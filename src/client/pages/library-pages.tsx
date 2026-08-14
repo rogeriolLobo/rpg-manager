@@ -6,7 +6,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { api, deleteApi, patchJson, postJson } from "../api/client";
+import { api, ClientApiError, deleteApi, patchJson, postJson } from "../api/client";
 import { Badge, Empty, Loading, PageHeader } from "./dashboard-page";
 import { displayLabel } from "../labels";
 
@@ -298,6 +298,7 @@ export function RpgFormPage() {
   const [metadata, setMetadata] = useState<Metadata>();
   const [form, setForm] = useState<Record<string, string | boolean>>(initial);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   useEffect(() => {
     void api<Metadata>("/rpgs/metadata").then(setMetadata);
     if (id)
@@ -334,6 +335,7 @@ export function RpgFormPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    setFieldErrors({});
     const payload = {
       title: String(form.title),
       categoryId: form.categoryId || null,
@@ -359,9 +361,15 @@ export function RpgFormPage() {
         : await postJson<{ item: Rpg }>("/rpgs", payload);
       navigate(`/app/library/${result.item.id}`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Falha inesperada.");
+      if (reason instanceof ClientApiError && reason.fields) {
+        setFieldErrors(reason.fields);
+        setError("Revise os campos destacados.");
+      } else {
+        setError(reason instanceof Error ? reason.message : "Falha inesperada.");
+      }
     }
   };
+  const fieldError = (name: string) => fieldErrors[name]?.[0];
   return (
     <div className="page narrow">
       <PageHeader
@@ -378,6 +386,7 @@ export function RpgFormPage() {
             maxLength={160}
             required
           />
+          {fieldError("title") && <span className="field-error">{fieldError("title")}</span>}
         </label>
         <label>
           Categoria
@@ -453,6 +462,7 @@ export function RpgFormPage() {
             value={String(form.plannedPlayDate)}
             onChange={(e) => update("plannedPlayDate", e.target.value)}
           />
+          {fieldError("plannedPlayDate") && <span className="field-error">{fieldError("plannedPlayDate")}</span>}
         </label>
         <label className="checkbox">
           <input
@@ -503,18 +513,22 @@ export function RpgFormPage() {
             value={String(form.coverUrl)}
             onChange={(e) => update("coverUrl", e.target.value)}
           />
+          {fieldError("coverUrl") && <span className="field-error">{fieldError("coverUrl")}</span>}
         </label>
         <label>
           ISBN (opcional)
           <input value={String(form.isbn)} onChange={(e) => update("isbn", e.target.value)} maxLength={32} />
+          {fieldError("isbn") && <span className="field-error">{fieldError("isbn")}</span>}
         </label>
         <label>
           Fonte da capa (opcional)
           <input type="url" value={String(form.coverSourceUrl)} onChange={(e) => update("coverSourceUrl", e.target.value)} maxLength={1000} />
+          {fieldError("coverSourceUrl") && <span className="field-error">{fieldError("coverSourceUrl")}</span>}
         </label>
         <label className="span-2">
           Nota da capa (opcional)
           <input value={String(form.coverSourceNote)} onChange={(e) => update("coverSourceNote", e.target.value)} maxLength={1000} />
+          {fieldError("coverSourceNote") && <span className="field-error">{fieldError("coverSourceNote")}</span>}
         </label>
         <label className="span-2">
           Notas

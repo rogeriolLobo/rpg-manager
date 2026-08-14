@@ -494,6 +494,44 @@ describe("API real com D1", () => {
     expect(covers.get(((await alien.json()) as {item:{id:string}}).item.id)).toBeNull();
     vi.unstubAllGlobals();
   });
+  it("permite editar RPG legado sem alterar capa fora da allowlist atual de hosts (regressão: 'Dados inválidos')", async () => {
+    const account = await register("legacy-cover@example.com");
+    const created = await request("/rpgs", "POST", { ...rpg, title: "RPG Legado", coverUrl: null }, account.cookie, account.csrf);
+    expect(created.status).toBe(201);
+    const rpgId = ((await created.json()) as { item: { id: string } }).item.id;
+    // Simula um registro legado/importado cuja capa aponta para um host que não está na allowlist atual.
+    const legacyCoverUrl = "https://encrypted-tbn2.gstatic.com/shopping?q=tbn:ANd9GcSlegacythumb";
+    await testEnv.DB.prepare("UPDATE rpgs SET cover_url=? WHERE id=?").bind(legacyCoverUrl, rpgId).run();
+
+    // READ MODEL: exatamente o que o frontend usa para preencher o formulário de edição.
+    const got = await request(`/rpgs/${rpgId}`, "GET", undefined, account.cookie);
+    expect(got.status).toBe(200);
+    const item = ((await got.json()) as { item: Record<string, unknown> }).item;
+    expect(item.coverUrl).toBe(legacyCoverUrl);
+
+    // UPDATE MODEL: salvar sem alterar nada precisa funcionar (mesmo payload que a UI monta a partir do GET).
+    const unchangedPayload = {
+      title: item.title, categoryId: item.categoryId, subgenreId: item.subgenreId, readingStatus: item.readingStatus,
+      hasPlayed: item.hasPlayed, wantsToPlay: item.wantsToPlay, priority: item.priority, playGroupNotes: item.playGroupNotes,
+      playGroupId: item.playGroupId, plannedPlayDate: item.plannedPlayDate, tableStatus: item.tableStatus, gameMaster: item.gameMaster,
+      notes: item.notes, coverUrl: item.coverUrl, isbn: item.isbn, coverSourceUrl: item.coverSourceUrl, coverSourceNote: item.coverSourceNote,
+    };
+    const saved = await request(`/rpgs/${rpgId}`, "PATCH", unchangedPayload, account.cookie, account.csrf);
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { item: { coverUrl: string | null } }).item.coverUrl).toBe(legacyCoverUrl);
+
+    // Alterar "Quero jogar" e salvar precisa persistir, preservando a capa legada intacta.
+    const changed = await request(`/rpgs/${rpgId}`, "PATCH", { ...unchangedPayload, wantsToPlay: true }, account.cookie, account.csrf);
+    expect(changed.status).toBe(200);
+    const changedItem = ((await changed.json()) as { item: { wantsToPlay: boolean; coverUrl: string | null } }).item;
+    expect(changedItem.wantsToPlay).toBe(true);
+    expect(changedItem.coverUrl).toBe(legacyCoverUrl);
+
+    // Uma capa NOVA fora da allowlist continua sendo rejeitada: a proteção contra SSRF permanece ativa.
+    const rejected = await request(`/rpgs/${rpgId}`, "PATCH", { ...unchangedPayload, coverUrl: "https://attacker-controlled.example.com/x.jpg" }, account.cookie, account.csrf);
+    expect(rejected.status).toBe(422);
+    expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe("INVALID_COVER_IMAGE");
+  });
   it("rejeita payload excessivo e devolve cabeçalhos defensivos", async () => {
     const account = await register("headers@example.com");
     const oversized = await worker.default.fetch(`${origin}/api/v1/rpgs`, {
