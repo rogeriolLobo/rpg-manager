@@ -7,7 +7,7 @@
     "dev": "vite dev --host 127.0.0.1 --port 5173",
     "build": "vite build",
     "preview": "npm run build && vite preview",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "node scripts/generate-build-info.mjs && npm run build && wrangler deploy",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.integration.json --noEmit",
     "test": "vitest run --coverage",

@@ -1,4 +1,4 @@
-import { Download, FileJson, FileSpreadsheet, Monitor, Moon, Palette, Sun, Trash2 } from "lucide-react";
+import { Download, FileJson, FileSpreadsheet, Info, Monitor, Moon, Palette, Sun, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
@@ -56,8 +56,29 @@ export function SettingsPage() {
             Baixar CSV
           </button>
         </section>
+        <AboutSettings />
       </div>
     </div>
+  );
+}
+
+function AboutSettings() {
+  const [info, setInfo] = useState<{ commit: string; build: string }>();
+  useEffect(() => {
+    void api<{ commit: string; build: string }>("/version").then(setInfo);
+  }, []);
+  return (
+    <section className="panel setting-card">
+      <Info />
+      <h2>Sobre</h2>
+      <p>RPG Manager · Versão 1.0.0</p>
+      {info && (
+        <p className="section-note">
+          Build {info.commit}
+          {info.build !== "unknown" && ` · ${new Date(info.build).toLocaleString("pt-BR")}`}
+        </p>
+      )}
+    </section>
   );
 }
 

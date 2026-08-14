@@ -22,6 +22,7 @@ import { bestiaryRoutes } from './routes/bestiary';
 import type { AppVariables, Env } from './types';
 import { profileSchema } from '../shared/validation/schemas';
 import { readJson } from './http';
+import { BUILD_COMMIT, BUILD_TIME } from './build-info';
 
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -35,6 +36,10 @@ app.use('*', async (c, next) => {
 });
 app.use('/api/*', requireTrustedOrigin);
 app.get('/api/v1/health', (c) => c.json({ status: 'ok' }));
+// Metadados não sensíveis para confirmar em runtime que a produção está de fato
+// executando o commit esperado — sem isso, um deploy "esquecido" (código pronto
+// mas nunca publicado) fica invisível até alguém notar visualmente na UI.
+app.get('/api/v1/version', (c) => c.json({ commit: BUILD_COMMIT, build: BUILD_TIME, environment: c.env.ENVIRONMENT }));
 app.post('/api/v1/auth/register', register);
 app.post('/api/v1/auth/login', login);
 app.post('/api/v1/auth/recover', recover);

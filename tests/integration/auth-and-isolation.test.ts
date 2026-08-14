@@ -630,6 +630,16 @@ describe("API real com D1", () => {
       "max-age=31536000",
     );
   });
+  it("expõe /version sem autenticação e sem dados sensíveis", async () => {
+    const response = await request("/version");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { commit: string; build: string; environment: string };
+    expect(typeof body.commit).toBe("string");
+    expect(typeof body.build).toBe("string");
+    expect(typeof body.environment).toBe("string");
+    const raw = JSON.stringify(body);
+    expect(raw).not.toMatch(/secret|token|password|pepper/iu);
+  });
   it("aplica bloqueio progressivo por conta após falhas de login", async () => {
     await register("rate-limit@example.com");
     for (let attempt = 0; attempt < 3; attempt += 1) {
