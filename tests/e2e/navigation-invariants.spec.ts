@@ -82,7 +82,7 @@ test('navegação global sem world ativo, deep links e tema', async ({ page }) =
 
   // ── 4: Deep links — /app/worlds ──
   await page.goto('/app/worlds');
-  await expect(page.getByRole('heading')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Seus mundos' })).toBeVisible();
 
   // ── 5: Theme switch doesn't alter navigation ──
   await openNavigation();
