@@ -225,3 +225,127 @@ real (não headless, sem qualquer técnica de evasão) foi bloqueada com
 funcionando corretamente contra automação. Não tentei contornar essa
 proteção. Fica como passo manual pendente para o usuário (checklist no
 relatório final da conversa).
+
+## Segundo achado do smoke manual — client-side legacy URL "vazando" entre RPGs
+
+O usuário rodou o smoke manual pedido e reproduziu, em produção, a
+mensagem "A URL da capa deve usar HTTPS e um domínio de imagens
+autorizado." ao editar um RPG que ele descreveu como já tendo
+`coverUrl = https://devir.com.br/...` persistida.
+
+**Origem exata da mensagem:** `src/server/security/cover-images.ts:12`,
+dentro de `validateRemoteCoverImage`, chamada por `validateCoverImage` em
+`src/server/routes/rpgs.ts`. É sempre o backend quem produz essa string —
+não existe validação de allowlist de hosts no frontend nem duplicada em
+outro lugar.
+
+**Investigação:** consulta somente-leitura ao D1 de produção
+(`SELECT ... WHERE cover_url LIKE '%devir%'` e listagem completa dos 27
+`cover_url` não nulos) não encontrou nenhum registro com domínio
+`devir.com.br` — nem nenhum host fora da allowlist atual. A regra
+CASO A/B/C (schema + `shouldRevalidateCoverUrl` em
+`src/server/routes/rpgs.ts`) estava correta e permanece correta; o valor
+citado pelo usuário nunca chegou a ser persistido (o `PATCH` foi
+rejeitado, exatamente como o desenho pretende para uma capa **nova** fora
+da allowlist).
+
+**Causa raiz real, confirmada lendo o código:** `RpgFormPage`
+(`src/client/pages/library-pages.tsx`) carregava os dados do RPG num
+`useEffect` que dependia de `[id]`, mas:
+
+1. não resetava `form` ao trocar de `id` (nem ao ir de "Editar" para
+   "Novo RPG", nem entre editar RPGs diferentes);
+2. não tinha guard de cancelamento — uma resposta antiga e lenta do
+   `GET /rpgs/:id` podia resolver **depois** de o usuário já ter navegado
+   para outro RPG, sobrescrevendo o formulário certo com dados errados.
+
+Ou seja: era possível o formulário mostrar (e o usuário acreditar estar
+"já persistido") um valor de `coverUrl` que na verdade veio de uma tela
+anterior — nunca gravado para aquele RPG específico. O checklist de smoke
+que fornecemos ao usuário orienta explicitamente testar "trocar a URL da
+capa para um host não autorizado" logo depois de outras edições, cenário
+em que esse vazamento de estado é fácil de acontecer sem o usuário
+perceber.
+
+### Por que os testes anteriores não pegaram isso
+
+- Os testes unitários e de integração anteriores exercitavam a **API**
+  diretamente (`request(...)`), nunca o formulário React de verdade —
+  não havia como capturar um bug de estado do componente.
+- O E2E existente (`core-flow.spec.ts`) cria um RPG novo uma única vez e
+  nunca reabre o formulário de edição de dois RPGs diferentes em
+  sequência — não exercitava a troca de contexto que expõe o bug.
+- Nenhuma fixture usava um host histórico como `devir.com.br` já
+  persistido para um RPG que o smoke reabriria depois de editar outro.
+
+### Correção
+
+**Frontend** (`src/client/pages/library-pages.tsx`):
+
+- `RpgFormPage` agora é só um wrapper fino que lê `id` de `useParams()` e
+  renderiza `<RpgFormFields key={id ?? "__new__"} id={id} />`. A `key`
+  força o React a **desmontar e remontar** o formulário sempre que o RPG
+  (ou o modo editar/novo) muda — o padrão idiomático do React para "reset
+  completo de estado quando um identificador muda", em vez de resetar
+  manualmente dentro de um efeito.
+- `RpgFormFields` mantém um guard `active` no `useEffect` (cancela a
+  atualização de estado se o componente for desmontado antes da resposta
+  chegar) e inicializa `loading` via `useState(Boolean(id))`.
+- Novo `<fieldset className="rpg-form-fields" disabled={loading}>`
+  envolvendo todos os campos: enquanto os dados reais do RPG ainda não
+  chegaram, os campos ficam bloqueados — isso fecha uma janela de corrida
+  que o próprio guard `active` sozinho não cobria (o usuário digitar algo
+  antes do `GET` resolver, e a resposta do `GET` sobrescrever o que foi
+  digitado). CSS `display: contents` no fieldset preserva o layout de
+  grid existente.
+
+**Backend** (`src/server/routes/rpgs.ts`): a regra de comparação CASO
+A/B/C foi extraída para uma função pura e testável,
+`shouldRevalidateCoverUrl` (`src/domain/rpg/cover-policy.ts`), usada no
+`PATCH`. Nenhuma mudança de comportamento — só tornou a regra
+explicitamente nomeada e testável isoladamente.
+
+**Importer** (`src/server/routes/transfer.ts`): auditoria encontrou uma
+inconsistência real (não relacionada ao formulário, mas ao mesmo domínio
+de regra): a checagem de allowlist (`isAllowedCoverUrl`) rodava para
+**qualquer** linha do CSV com `coverUrl`, mesmo quando o RPG já existia
+com capa própria e a linha seria classificada `IGNORADO` (capa
+preservada, nunca escrita). Isso significa que reexportar o catálogo
+atual para CSV e reimportar podia reprovar linhas cuja capa nem seria
+alterada. Corrigido: a checagem de allowlist só roda quando a capa do CSV
+realmente seria usada para gravar um valor novo (RPG novo, ou RPG
+existente ainda sem capa) — mesma condição que já protegia a verificação
+remota (fetch) alguns parágrafos abaixo no mesmo arquivo.
+
+### Testes novos
+
+- `tests/unit/cover-policy.test.ts`: 9 casos cobrindo `CASO A/B/C`
+  isoladamente (sem alteração, mesmo valor, editado-e-revertido,
+  removida, trocada para host proibido, trocada para host permitido,
+  CREATE com/sem capa), usando `devir.com.br` como fixture real.
+- `tests/unit/validation.test.ts`: caso adicional confirmando que o
+  schema aceita a forma de URL da Devir (shape apenas, não allowlist).
+- `tests/integration/auth-and-isolation.test.ts`: novo teste
+  `"aplica CASO A/B/C de coverUrl com fixture real (devir.com.br)"`
+  cobrindo CREATE rejeitado, edição sem alteração, edição revertida,
+  troca para host proibido (capa antiga preservada), troca para host
+  permitido (aceita), remoção da capa (normaliza para `null`); e novo
+  teste `"importer não reprova CSV com capa legada já preservada"`
+  reproduzindo e corrigindo o gap do importer.
+- `tests/e2e/rpg-cover-edit.spec.ts`: fluxo completo pela UI real —
+  cria dois RPGs, edita o primeiro sem salvar, navega direto para o
+  segundo e confirma que nenhum dado do primeiro vazou; edita o segundo
+  sem alterar nada e salva com sucesso; troca a capa para um host
+  proibido e confirma o erro exibido junto ao campo "URL da capa".
+
+Confirmado que o teste do importer **falha no código anterior**
+(`ERRO` em vez de `IGNORADO`) e passa após a correção (verificado via
+`git stash` temporário, igual ao procedimento do achado anterior). O
+teste E2E, antes da correção do `RpgFormPage`, reproduziu o vazamento de
+estado (a capa proibida digitada era descartada silenciosamente pela
+resposta tardia do `GET`, fazendo o `PATCH` ser enviado sem alteração
+real e o teste falhar na asserção do erro de campo).
+
+**Confirmação explícita:** `devir.com.br` **não** foi adicionada à
+allowlist de hosts em nenhum momento. A allowlist (`COVER_IMAGE_HOSTS`
+em `src/shared/security/cover-url.ts`) permanece inalterada.

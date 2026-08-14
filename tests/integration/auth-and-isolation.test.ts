@@ -494,6 +494,26 @@ describe("API real com D1", () => {
     expect(covers.get(((await alien.json()) as {item:{id:string}}).item.id)).toBeNull();
     vi.unstubAllGlobals();
   });
+  it("importer não reprova CSV com capa legada já preservada, mesmo fora da allowlist atual", async () => {
+    const account = await register('import-legacy-cover@example.com');
+    const created = await request('/rpgs', 'POST', { ...rpg, title: 'RPG Legado Import' }, account.cookie, account.csrf);
+    const importRpgId = ((await created.json()) as { item: { id: string } }).item.id;
+    const legacyCoverUrl = 'https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png';
+    await testEnv.DB.prepare('UPDATE rpgs SET cover_url=? WHERE id=?').bind(legacyCoverUrl, importRpgId).run();
+
+    // Simula reexportar/reimportar o catálogo: a mesma capa legada (fora da allowlist atual)
+    // volta no CSV para uma linha cujo RPG já existe e já tem capa própria — deve ser
+    // apenas preservada (IGNORADO), sem reprovar o CSV por uma capa que nem será escrita.
+    const csv = [
+      'Sistema / Jogo,Categoria,Subgênero,Status da leitura,Capa URL',
+      `RPG Legado Import,Fantasia,Alta Fantasia,Lendo,${legacyCoverUrl}`,
+    ].join('\n');
+    const response = await request('/import/preview', 'POST', { csv }, account.cookie, account.csrf);
+    expect(response.status).toBe(200);
+    const preview = await response.json() as { items: Array<{ classification: string; message: string }> };
+    expect(preview.items[0].classification).toBe('IGNORADO');
+    expect(preview.items[0].message).not.toContain('CAPA INVÁLIDA');
+  });
   it("permite editar RPG legado sem alterar capa fora da allowlist atual de hosts (regressão: 'Dados inválidos')", async () => {
     const account = await register("legacy-cover@example.com");
     const created = await request("/rpgs", "POST", { ...rpg, title: "RPG Legado", coverUrl: null }, account.cookie, account.csrf);
@@ -535,6 +555,57 @@ describe("API real com D1", () => {
     // O erro de capa (validado na rota, não no schema Zod) precisa carregar "fields" para que o
     // frontend consiga destacar o campo coverUrl, e não só exibir a mensagem genérica no topo.
     expect(rejectedBody.error.fields?.coverUrl?.[0]).toBeTruthy();
+  });
+  it("aplica CASO A/B/C de coverUrl com fixture real (devir.com.br): create rejeita, edit sem alteração preserva, novo host permitido troca, remoção funciona", async () => {
+    const account = await register("devir-cover@example.com");
+    const devirCoverUrl = "https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png";
+
+    // CASO A (CREATE): mesmo sendo um domínio real conhecido, fora da allowlist é sempre rejeitado.
+    const createRejected = await request("/rpgs", "POST", { ...rpg, title: "Nao Deve Existir Devir", coverUrl: devirCoverUrl }, account.cookie, account.csrf);
+    expect(createRejected.status).toBe(422);
+    expect(((await createRejected.json()) as { error: { code: string } }).error.code).toBe("INVALID_COVER_IMAGE");
+
+    // Cria sem capa e força, via D1, uma capa legada da Devir (simula import/registro antigo).
+    const created = await request("/rpgs", "POST", { ...rpg, title: "RPG com Capa Devir", coverUrl: null }, account.cookie, account.csrf);
+    const devirRpgId = ((await created.json()) as { item: { id: string } }).item.id;
+    await testEnv.DB.prepare("UPDATE rpgs SET cover_url=? WHERE id=?").bind(devirCoverUrl, devirRpgId).run();
+
+    const item = ((await (await request(`/rpgs/${devirRpgId}`, "GET", undefined, account.cookie)).json()) as { item: Record<string, unknown> }).item;
+    const base = {
+      title: item.title, categoryId: item.categoryId, subgenreId: item.subgenreId, readingStatus: item.readingStatus,
+      hasPlayed: item.hasPlayed, wantsToPlay: item.wantsToPlay, priority: item.priority, playGroupNotes: item.playGroupNotes,
+      playGroupId: item.playGroupId, plannedPlayDate: item.plannedPlayDate, tableStatus: item.tableStatus, gameMaster: item.gameMaster,
+      notes: item.notes, isbn: item.isbn, coverSourceUrl: item.coverSourceUrl, coverSourceNote: item.coverSourceNote,
+    };
+
+    // CASO C: sem alteração -> preserva, sem exigir fetch/allowlist.
+    const unchanged = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: devirCoverUrl }, account.cookie, account.csrf);
+    expect(unchanged.status).toBe(200);
+    expect(((await unchanged.json()) as { item: { coverUrl: string } }).item.coverUrl).toBe(devirCoverUrl);
+
+    // CASO C variante: valor final submetido volta a ser igual ao persistido (editar e reverter
+    // manualmente) — não pode depender de uma flag "dirty", só do valor final.
+    const reverted = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: devirCoverUrl }, account.cookie, account.csrf);
+    expect(reverted.status).toBe(200);
+
+    // CASO B: trocar para um host novo PROIBIDO -> rejeitado, capa antiga preservada intacta.
+    const rejected = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: "https://outro-proibido.example.com/x.jpg" }, account.cookie, account.csrf);
+    expect(rejected.status).toBe(422);
+    const afterRejected = await testEnv.DB.prepare("SELECT cover_url FROM rpgs WHERE id=?").bind(devirRpgId).first<{ cover_url: string }>();
+    expect(afterRejected?.cover_url).toBe(devirCoverUrl);
+
+    // CASO B: trocar para um host novo PERMITIDO -> aceito, passa a valer o novo valor.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("image", { status: 200, headers: { "Content-Type": "image/jpeg" } })));
+    const allowedHost = "https://covers.openlibrary.org/b/isbn/9780765326355-L.jpg";
+    const changedToAllowed = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: allowedHost }, account.cookie, account.csrf);
+    expect(changedToAllowed.status).toBe(200);
+    expect(((await changedToAllowed.json()) as { item: { coverUrl: string } }).item.coverUrl).toBe(allowedHost);
+    vi.unstubAllGlobals();
+
+    // Remoção da capa: deve funcionar e normalizar para null (não é tratada como URL inválida).
+    const removed = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: null }, account.cookie, account.csrf);
+    expect(removed.status).toBe(200);
+    expect(((await removed.json()) as { item: { coverUrl: string | null } }).item.coverUrl).toBeNull();
   });
   it("rejeita payload excessivo e devolve cabeçalhos defensivos", async () => {
     const account = await register("headers@example.com");

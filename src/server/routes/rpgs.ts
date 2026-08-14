@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendationScore, type RecommendationCandidate } from '../../domain/rpg/recommendation';
+import { shouldRevalidateCoverUrl } from '../../domain/rpg/cover-policy';
 import { rpgInputSchema } from '../../shared/validation/schemas';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
@@ -128,7 +129,7 @@ rpgRoutes.patch('/:id', async (c) => {
   // Só reaplica a allowlist de hosts e o fetch remoto (SSRF) quando a capa é de fato alterada;
   // uma capa legada/importada já persistida pode não constar na allowlist atual e não deve
   // bloquear a edição dos demais campos.
-  if (cleanNullable(input.coverUrl) !== existing.cover_url) await validateCoverImage(input.coverUrl);
+  if (shouldRevalidateCoverUrl(cleanNullable(input.coverUrl), existing.cover_url)) await validateCoverImage(input.coverUrl);
   const result = await c.env.DB.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
     play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,cover_url=?,isbn=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=? AND user_id=?`)
     .bind(input.title, cleanNullable(input.categoryId), cleanNullable(input.subgenreId), input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,

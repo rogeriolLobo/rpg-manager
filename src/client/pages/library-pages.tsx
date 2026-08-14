@@ -294,15 +294,26 @@ const initial = {
 };
 export function RpgFormPage() {
   const { id } = useParams();
+  // A key força um remount completo sempre que o RPG (ou o modo editar/novo) muda: evita
+  // que campos de uma tela anterior — como coverUrl — "vazem" para este RPG e pareçam já
+  // persistidos aqui, sem precisar resetar estado manualmente dentro de um efeito.
+  return <RpgFormFields key={id ?? "__new__"} id={id} />;
+}
+function RpgFormFields({ id }: { id?: string }) {
   const navigate = useNavigate();
   const [metadata, setMetadata] = useState<Metadata>();
   const [form, setForm] = useState<Record<string, string | boolean>>(initial);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [loading, setLoading] = useState(Boolean(id));
   useEffect(() => {
-    void api<Metadata>("/rpgs/metadata").then(setMetadata);
+    // O guard `active` evita que uma resposta lenta ainda em voo sobrescreva os dados corretos
+    // caso o componente seja desmontado (troca de RPG) antes dela chegar.
+    let active = true;
+    void api<Metadata>("/rpgs/metadata").then((data) => { if (active) setMetadata(data); });
     if (id)
-      void api<{ item: Rpg }>(`/rpgs/${id}`).then(({ item }) =>
+      void api<{ item: Rpg }>(`/rpgs/${id}`).then(({ item }) => {
+        if (!active) return;
         setForm({
           title: item.title,
           categoryId: item.categoryId ?? "",
@@ -321,8 +332,10 @@ export function RpgFormPage() {
           isbn: item.isbn ?? "",
           coverSourceUrl: item.coverSourceUrl ?? "",
           coverSourceNote: item.coverSourceNote ?? "",
-        }),
-      );
+        });
+        setLoading(false);
+      });
+    return () => { active = false; };
   }, [id]);
   const category = String(form.categoryId);
   const subgenres = useMemo(
@@ -378,6 +391,10 @@ export function RpgFormPage() {
         description="Os campos são validados novamente no servidor."
       />
       <form className="panel form-grid" onSubmit={submit}>
+        {/* Trava todos os campos enquanto os dados reais do RPG ainda carregam: evita que uma
+            digitação nesse intervalo seja descartada quando a resposta do GET chegar e
+            substituir o formulário pelos dados corretos (ver useEffect acima). */}
+        <fieldset className="rpg-form-fields" disabled={loading}>
         <label className="span-2">
           Título
           <input
@@ -539,6 +556,7 @@ export function RpgFormPage() {
             rows={5}
           />
         </label>
+        </fieldset>
         {error && <p className="form-error span-2">{error}</p>}
         <div className="form-actions span-2">
           <button
@@ -548,7 +566,7 @@ export function RpgFormPage() {
           >
             Cancelar
           </button>
-          <button className="primary-button">Salvar RPG</button>
+          <button className="primary-button" disabled={loading}>Salvar RPG</button>
         </div>
       </form>
     </div>

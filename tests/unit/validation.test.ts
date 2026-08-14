@@ -28,6 +28,11 @@ describe('validação de entrada',()=>{it('rejeita senha curta e campo arbitrár
     expect(result.success).toBe(true);
   });
 
+  it('aceita a forma de coverUrl legado da Devir (regressão do segundo achado do smoke manual)', () => {
+    const result = rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png' });
+    expect(result.success).toBe(true);
+  });
+
   it('rejeita coverUrl com protocolo perigoso ou host privado mesmo fora da allowlist estrita', () => {
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'javascript:alert(1)' }).success).toBe(false);
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'data:image/png;base64,abc' }).success).toBe(false);

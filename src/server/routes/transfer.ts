@@ -120,14 +120,17 @@ transferRoutes.post('/import/preview', async (c) => {
     const isbn=(isbnIndex>=0?cells[isbnIndex]:'')?.trim()||null;
     const coverSourceUrl=(coverSourceIndex>=0?cells[coverSourceIndex]:'')?.trim()||null;
     const coverSourceNote=(coverNoteIndex>=0?cells[coverNoteIndex]:'')?.trim()||null;
-    if(coverUrl&&!isAllowedCoverUrl(coverUrl))rowIssues.push('CAPA INVÁLIDA: use HTTPS e um domínio de imagens autorizado.');
     if(coverSourceUrl&&!isPublicHttpsUrl(coverSourceUrl))rowIssues.push('Fonte da capa inválida: use uma URL HTTPS pública.');
     const key=normalizeTitle(title);const matches=existingMap.get(key)??[];
     if(key&&(titleCounts.get(key)??0)>1)rowIssues.push('Título repetido no CSV; revisão manual necessária.');
     if(matches.length>1)rowIssues.push('Mais de um RPG existente corresponde ao título normalizado; revisão manual necessária.');
+    const existing=matches.length===1?matches[0]:null;
+    // A allowlist de hosts só se aplica quando a capa do CSV for de fato usada para gravar um
+    // valor NOVO (RPG novo, ou existente ainda sem capa). Se o RPG já tem capa própria, a linha
+    // será IGNORADA/preservada — não faz sentido reprovar o CSV por uma capa que nem será escrita.
+    if(coverUrl&&(!existing||!existing.cover_url)&&!isAllowedCoverUrl(coverUrl))rowIssues.push('CAPA INVÁLIDA: use HTTPS e um domínio de imagens autorizado.');
     const candidate={title,categoryId,subgenreId,readingStatus:readingStatus??'NOT_STARTED',hasPlayed:booleanValue(cells[index('ja joguei?')]??''),wantsToPlay:booleanValue(cells[index('quero jogar?')]??''),priority:priorityMap[normalize(cells[index('prioridade')]??'')]??'NONE',playGroupNotes:(cells[index('grupo / jogadores')]??'').trim(),playGroupId:null,plannedPlayDate:plannedPlayDate??null,tableStatus:tableMap[normalize(cells[index('status da mesa')]??'')]??'IDEA',gameMaster:(cells[index('mestre')]??'').trim(),notes:(cells[index('observacoes')]??'').trim(),coverUrl,isbn,coverSourceUrl,coverSourceNote};
     const parsed=rpgInputSchema.safeParse(candidate);if(!parsed.success&&!rowIssues.length)rowIssues.push('Campos fora dos limites permitidos.');
-    const existing=matches.length===1?matches[0]:null;
     if(!rowIssues.length&&coverUrl&&(!existing||!existing.cover_url)){
       const remoteValidation=await validateRemoteCoverImage(coverUrl);
       if(!remoteValidation.ok)rowIssues.push(`CAPA INVÁLIDA: ${remoteValidation.message}`);

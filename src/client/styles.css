@@ -592,6 +592,13 @@ label small {
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
 }
+.rpg-form-fields {
+  display: contents;
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-inline-size: auto;
+}
 .span-2 {
   grid-column: span 2;
 }
