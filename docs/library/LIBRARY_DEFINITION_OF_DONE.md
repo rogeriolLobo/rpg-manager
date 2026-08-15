@@ -171,5 +171,23 @@ Ver `docs/library/PUBLICATION_IDENTITY.md` para o desenho completo.
 
 ### Release — LIB-003
 
-Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
-valores finais de commit/Worker Version/contagens de produção).
+- Commit: `387cb86` (feature) + `da12019` (fix de infra de CI, ver abaixo)
+- CI: 1ª tentativa falhou por dois flakes com a mesma causa raiz
+  (`RATE_LIMIT` no registro + `SQLITE_BUSY` no D1 local, ambos por
+  2 workers do Playwright em paralelo) — corrigido na raiz
+  (`playwright.config.ts`: `workers:1` só no CI), não por rerun cego;
+  2ª tentativa verde sem retries.
+- Migration remota: `0017_publication_identity.sql` aplicada em
+  produção — contagem pré/pós: 30 rpgs (inalterado), 30 publications
+  (inalterado), 20 publications com `isbn13` populado (exatamente as
+  20 ISBNs reais não vazias, auditadas antes da migration), 0 com
+  `isbn10` (nenhuma no dataset real), `publication_external_ids` vazia,
+  0 mismatches campo a campo entre `isbn` legado e `isbn13` backfillado.
+- Deploy: Worker Version `7d9f7daf-d608-4257-9793-be056dbea660`
+- `/api/v1/version`: `{"commit":"da12019",...}` — HEAD local ==
+  origin/main == produção
+- Smoke: `/api/v1/health` 200, `/` 200, contagem de RPGs em produção
+  confirmada em 30 antes e depois (somente leitura)
+- `MANUAL_SMOKE_REQUIRED`: clique autenticado real (cadastrar/editar
+  ISBN, confirmar dedup) continua bloqueado por Turnstile/CAPTCHA, não
+  contornado — mesma situação já registrada para LIB-001/LIB-002

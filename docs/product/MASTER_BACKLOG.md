@@ -81,17 +81,22 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## LIB-003 — Biblioteca: identidade de Publication, ISBN, provenance e deduplicação segura
 
 - **Priority:** P1
-- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após migration
-  remota + deploy + production proof confirmados nesta mesma sessão
-  (ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md` para o checklist
-  completo).
+- **Status:** `DONE` (código + migration remota + deploy + smoke
+  read-only confirmados; ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+  para o checklist completo), `MANUAL_SMOKE_REQUIRED` (clique
+  autenticado real, bloqueado por Turnstile/CAPTCHA, não contornado —
+  mesma situação de LIB-001/LIB-002)
 - **Dependencies:** LIB-002 (`DONE`)
 - **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
 - **Migration:** `migrations/0017_publication_identity.sql` (aditiva —
   `CREATE TABLE publication_external_ids`, backfill de `isbn13`/`isbn10`
   a partir do `isbn` legado, índices únicos parciais
   `idx_publications_isbn13_unique`/`idx_publications_isbn10_unique`/
-  `idx_rpgs_user_publication_unique`)
+  `idx_rpgs_user_publication_unique`) — aplicada em produção: 30→30
+  rpgs, 30 publications, 20 com `isbn13` (100% das ISBNs reais não
+  vazias), 0 mismatches
+- **Commit:** `387cb86` (feature), `da12019` (fix de infra E2E no CI)
+- **Production version:** `7d9f7daf-d608-4257-9793-be056dbea660`
 - **Docs:** `docs/library/PUBLICATION_IDENTITY.md` (novo),
   `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-003"),
   `docs/library/LIBRARY_CURRENT_STATE.md` (seção "Atualização — LIB-003"),
