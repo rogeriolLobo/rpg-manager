@@ -112,7 +112,29 @@ pedido, que pede que a arquitetura não impeça isso no futuro).
 **Recomendação: Opção A, em uma sessão dedicada**, com o mesmo processo
 rigoroso (arquiteto → backend → frontend → QA → devops) usado nesta.
 
-### O que a Opção A NÃO muda
+### LIB-003 — Identidade, ISBN, provenance e deduplicação segura (implementado)
+
+Ver `docs/library/PUBLICATION_IDENTITY.md` para o desenho completo. Resumo
+das decisões que alteram o que este documento (seção "LIB-002 —
+Implementado", acima) descrevia como escopo do LIB-002:
+
+- **Reuso/dedup entre criações passou a existir**, restrito a identidade
+  exata de ISBN-13 (direto ou derivado de ISBN-10) — a decisão de LIB-002
+  de "sempre criar Publication distinta" foi deliberadamente revista
+  agora que existe uma política de segurança para metadata compartilhada
+  (abaixo), fechando a lacuna que LIB-002 tinha deixado em aberto.
+- **Política de metadata compartilhada**: editável livremente enquanto a
+  Publication tiver 1 única User Library Entry; bloqueada
+  (`422 SHARED_PUBLICATION_METADATA_LOCKED`) quando compartilhada por
+  mais de uma conta. Estado pessoal nunca é afetado por essa trava.
+- **`rpgs.publication_id` agora é único por `user_id`**
+  (`idx_rpgs_user_publication_unique`) — uma biblioteca não pode ter duas
+  entries para a mesma Publication.
+- **`publications.isbn13`/`isbn10` agora são únicos** (índices parciais)
+  — identidade real de Publication a partir desta migration.
+- Título continua nunca sendo usado para decidir reuso (só ISBN).
+
+## O que a Opção A NÃO muda
 
 - Nenhum RPG existente é perdido ou alterado incorretamente (migração
   de dados testada e reversível antes de tocar produção).

@@ -78,6 +78,36 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   F-009 (Open Library), F-010 (dedup real por ISBN), F-011 (archive de
   RPG), mover `category_id`/`subgenre_id` para `game_systems`.
 
+## LIB-003 — Biblioteca: identidade de Publication, ISBN, provenance e deduplicação segura
+
+- **Priority:** P1
+- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após migration
+  remota + deploy + production proof confirmados nesta mesma sessão
+  (ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md` para o checklist
+  completo).
+- **Dependencies:** LIB-002 (`DONE`)
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Migration:** `migrations/0017_publication_identity.sql` (aditiva —
+  `CREATE TABLE publication_external_ids`, backfill de `isbn13`/`isbn10`
+  a partir do `isbn` legado, índices únicos parciais
+  `idx_publications_isbn13_unique`/`idx_publications_isbn10_unique`/
+  `idx_rpgs_user_publication_unique`)
+- **Docs:** `docs/library/PUBLICATION_IDENTITY.md` (novo),
+  `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-003"),
+  `docs/library/LIBRARY_CURRENT_STATE.md` (seção "Atualização — LIB-003"),
+  `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **O que muda de comportamento:** ISBN validado por checksum real
+  (não só forma); cadastrar/importar ISBN já existente no catálogo
+  reaproveita a Publication entre contas (antes: sempre 1:1, decisão
+  do LIB-002 revista aqui com política de segurança); metadata
+  compartilhada (2+ referências) fica protegida contra edição cruzada
+  (`422 SHARED_PUBLICATION_METADATA_LOCKED`).
+- **Fora de escopo (deliberado, ver docs acima):** F-008 (upload+KV),
+  F-009 (Open Library/Google Books — nenhuma chamada externa), F-011
+  (archive de RPG), merge automático de Game System por nome
+  semelhante, reatribuição de `publication_id` no PATCH (só CREATE/import
+  resolvem identidade).
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0
@@ -123,7 +153,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `DONE` (LIB-002) |
 | F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `NOT_STARTED` |
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `NOT_STARTED` |
-| F-010 | Dedup de RPG por ISBN em vez de título exato (schema pronto desde LIB-002: `publications.isbn10`/`isbn13`) | P2 | `NOT_STARTED` |
+| F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `NOT_STARTED` |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):

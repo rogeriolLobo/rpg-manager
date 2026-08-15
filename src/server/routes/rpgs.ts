@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendationScore, type RecommendationCandidate } from '../../domain/rpg/recommendation';
-import { rpgInputSchema } from '../../shared/validation/schemas';
+import { rpgInputSchema, rpgUpdateInputSchema } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 import { LIBRARY_ENTRY_JOIN, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
@@ -101,10 +101,17 @@ rpgRoutes.post('/', async (c) => {
   const input = await readJson(c, rpgInputSchema); const user = c.get('user'); const id = crypto.randomUUID(); const now = nowIso();
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
   await validateGroup(c, input.playGroupId);
-  const { statements } = buildCreateLibraryEntryStatements(c.env.DB, { entryId: id, userId: user.id, input, now });
+  // LIB-003: pode lançar ApiError(409 ALREADY_IN_LIBRARY) antes de qualquer escrita —
+  // fora do try/catch abaixo de propósito, para não ser reclassificado como DUPLICATE_RPG.
+  const { statements } = await buildCreateLibraryEntryStatements(c.env.DB, { entryId: id, userId: user.id, input, now });
   try {
     await c.env.DB.batch(statements);
-  } catch (error) { if (String(error).includes('UNIQUE')) throw new ApiError(409, 'DUPLICATE_RPG', 'Já existe um RPG com este título.'); throw error; }
+  } catch (error) {
+    const message = String(error);
+    if (message.includes('isbn13') || message.includes('isbn10')) throw new ApiError(409, 'DUPLICATE_ISBN', 'Este ISBN já pertence a outra publicação no catálogo.');
+    if (message.includes('UNIQUE')) throw new ApiError(409, 'DUPLICATE_RPG', 'Já existe um RPG com este título.');
+    throw error;
+  }
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(id, user.id).first<RpgRow>();
   return c.json({ item: present(row!) }, 201);
 });
@@ -118,7 +125,9 @@ rpgRoutes.get('/:id', async (c) => {
 });
 
 rpgRoutes.patch('/:id', async (c) => {
-  const input = await readJson(c, rpgInputSchema); const user = c.get('user'); const entryId = c.req.param('id');
+  // LIB-003: schema mais permissivo na forma do isbn — a checagem real de checksum só roda
+  // se o valor mudou em relação ao persistido (ver buildUpdateLibraryEntryStatements).
+  const input = await readJson(c, rpgUpdateInputSchema); const user = c.get('user'); const entryId = c.req.param('id');
   const existing = await c.env.DB.prepare('SELECT id,publication_id FROM rpgs WHERE id=? AND user_id=?').bind(entryId, user.id).first<{ id: string; publication_id: string | null }>();
   if (!existing) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
@@ -126,13 +135,24 @@ rpgRoutes.patch('/:id', async (c) => {
   // publication_id sempre presente após o backfill do LIB-002 (toda criação nova também sempre
   // cria a Publication na mesma transação) — o fallback só evita quebrar num estado inconsistente
   // impossível de alcançar por código, não é um caminho suportado.
+  // Pode lançar ApiError (ISBN inválido, ou SHARED_PUBLICATION_METADATA_LOCKED) antes de
+  // qualquer escrita — fora do try/catch abaixo de propósito.
   const statements = existing.publication_id
-    ? buildUpdateLibraryEntryStatements(c.env.DB, { entryId, userId: user.id, publicationId: existing.publication_id, input, now: nowIso() })
+    ? await buildUpdateLibraryEntryStatements(c.env.DB, { entryId, userId: user.id, publicationId: existing.publication_id, input, now: nowIso() })
     : [c.env.DB.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
         play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,updated_at=? WHERE id=? AND user_id=?`)
         .bind(input.title, input.categoryId ?? null, input.subgenreId ?? null, input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
           input.playGroupNotes, input.playGroupId ?? null, input.plannedPlayDate ?? null, input.tableStatus, input.gameMaster, input.notes, nowIso(), entryId, user.id)];
-  const results = await c.env.DB.batch(statements);
+  let results;
+  try {
+    results = await c.env.DB.batch(statements);
+  } catch (error) {
+    const message = String(error);
+    if (message.includes('isbn13') || message.includes('isbn10')) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Dados inválidos.', { isbn: ['Este ISBN já pertence a outra publicação no catálogo.'] });
+    }
+    throw error;
+  }
   if (!results.at(-1)!.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, user.id).first<RpgRow>();
   return c.json({ item: present(row!) });

@@ -5,7 +5,8 @@ import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 import { hashSecret } from '../security/crypto';
 import { isPublicHttpsUrl } from '../../shared/security/cover-url';
-import { buildCreateLibraryEntryStatements } from './library-writes';
+import { classifyIsbn, isIsbnInputValid } from '../../domain/rpg/isbn';
+import { buildCreateLibraryEntryStatements, findPublicationsByIsbn13List } from './library-writes';
 
 export const transferRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 const previewSchema = z.strictObject({ csv: z.string().min(1).max(500_000) });
@@ -15,16 +16,25 @@ const catalogConfirmSchema = z.strictObject({
   approvedRows: z.array(z.number().int().min(2)).min(1).max(40),
 });
 
+// LIB-003: EXISTING_PUBLICATION/ALREADY_IN_LIBRARY são as duas classificações
+// novas de identidade por ISBN — ver docs/library/PUBLICATION_IDENTITY.md
+// ("Import CSV — mesma regra canônica"). As 4 originais (NOVO/ATUALIZACAO/
+// IGNORADO/ERRO) continuam cobrindo o caminho sem ISBN ou sem correspondência,
+// inalteradas desde LIB-001/LIB-002.
 const catalogPlanItemSchema = z.strictObject({
   row: z.number().int().min(2),
   title: z.string().max(160),
-  classification: z.enum(['NOVO', 'ATUALIZACAO', 'IGNORADO', 'ERRO']),
+  classification: z.enum(['NOVO', 'ATUALIZACAO', 'IGNORADO', 'ERRO', 'EXISTING_PUBLICATION', 'ALREADY_IN_LIBRARY']),
   message: z.string().max(500),
   existingId: z.string().nullable(),
   currentCoverUrl: z.string().nullable(),
   incomingCoverUrl: z.string().nullable(),
   changes: z.array(z.enum(['coverUrl', 'isbn', 'coverSourceUrl', 'coverSourceNote'])),
   input: rpgInputSchema.nullable(),
+  // Publication que seria reaproveitada (EXISTING_PUBLICATION/ALREADY_IN_LIBRARY) — só
+  // informativo no preview; o confirm sempre reresolve a identidade ao vivo (nunca confia
+  // num valor até 30 min velho), então este campo nunca é lido no /import/confirm.
+  resolvedPublicationId: z.string().nullable(),
 });
 const catalogPlanSchema = z.array(catalogPlanItemSchema).max(40);
 type CatalogPlanItem = z.infer<typeof catalogPlanItemSchema>;
@@ -33,6 +43,7 @@ interface ExistingCatalogRpg {
   id: string;
   title: string;
   cover_url: string | null;
+  publication_id: string | null;
 }
 
 function parseCsv(input: string): string[][] {
@@ -98,13 +109,18 @@ transferRoutes.post('/import/preview', async (c) => {
     c.env.DB.prepare('SELECT id,category_id,name FROM subgenres'),
     // LIB-002: cover_url é lido de `publications` (fonte de verdade editorial), não mais
     // da coluna homônima legada em `rpgs` — ver src/server/routes/library-writes.ts.
-    c.env.DB.prepare('SELECT r.id,r.title,p.cover_url FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id WHERE r.user_id=?').bind(c.get('user').id),
+    // LIB-003: publication_id também, para resolver ALREADY_IN_LIBRARY por identidade.
+    c.env.DB.prepare('SELECT r.id,r.title,r.publication_id,p.cover_url FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id WHERE r.user_id=?').bind(c.get('user').id),
   ]);
   const categoryRows = categories.results as Array<{id:string;name:string}>;
   const subgenreRows = subgenres.results as Array<{id:string;category_id:string;name:string}>;
   const categoryMap = new Map(categoryRows.map((item) => [normalize(item.name),item.id]));
   const subgenreMap = new Map(subgenreRows.map((item) => [`${item.category_id}:${normalize(item.name)}`,item.id]));
-  const existingMap = mapExistingRpgs(existingRpgs.results as unknown as ExistingCatalogRpg[]);
+  const existingRows = existingRpgs.results as unknown as ExistingCatalogRpg[];
+  const existingMap = mapExistingRpgs(existingRows);
+  // LIB-003: mapa publication_id -> id do próprio RPG do usuário, para resolver
+  // ALREADY_IN_LIBRARY (o usuário já tem essa Publication, por ISBN).
+  const userEntryByPublication = new Map(existingRows.filter((item) => item.publication_id).map((item) => [item.publication_id as string, item.id]));
   const dataRows = rows.slice(1).map((cells, offset) => ({ cells, row: offset + 2 })).filter(({ cells }) => cells.some((cell) => cell.trim()));
   if(dataRows.length>40)throw new ApiError(422,'IMPORT_BATCH_LIMIT','A V1 importa até 40 registros por arquivo para respeitar o limite transacional do plano gratuito.');
   const titleCounts = new Map<string, number>();
@@ -112,6 +128,11 @@ transferRoutes.post('/import/preview', async (c) => {
     const key = normalizeTitle(cells[index('sistema / jogo')] ?? '');
     if (key) titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1);
   }
+  // LIB-003: resolve identidade por ISBN para todas as linhas de uma vez (1 query batelada,
+  // não N) antes do loop principal — ver docs/library/PUBLICATION_IDENTITY.md.
+  const isbnByRow = new Map(dataRows.map(({ cells, row }) => [row, classifyIsbn((isbnIndex>=0?cells[isbnIndex]:'')?.trim()||null)]));
+  const isbn13Candidates = [...isbnByRow.values()].filter((item) => item !== null).map((item) => item!.isbn13!);
+  const publicationByIsbn13 = await findPublicationsByIsbn13List(c.env.DB, isbn13Candidates);
   const items: CatalogPlanItem[]=[];
   for (const { cells, row } of dataRows) { const title=cells[index('sistema / jogo')]?.trim()??''; const categoryId=categoryMap.get(normalize(cells[index('categoria')]??''))??null;
     const subgenreId=categoryId?subgenreMap.get(`${categoryId}:${normalize(cells[index('subgenero')]??'')}`)??null:null; const readingStatus=readingMap[normalize(cells[index('status da leitura')]??'')];
@@ -125,30 +146,45 @@ transferRoutes.post('/import/preview', async (c) => {
     if(coverSourceUrl&&!isPublicHttpsUrl(coverSourceUrl))rowIssues.push('Fonte da capa inválida: use uma URL HTTPS pública.');
     // coverUrl é usada só como <img src> pelo navegador — o importer nunca busca essa URL,
     // então a mesma validação sintática (sem allowlist de hosts) do create/edit se aplica aqui,
-    // igual para toda linha (NOVO, ATUALIZACAO ou IGNORADO) — sem regra especial por classificação.
+    // igual para toda linha — sem regra especial por classificação.
     if(coverUrl&&!isPublicHttpsUrl(coverUrl))rowIssues.push('CAPA INVÁLIDA: use uma URL HTTPS pública.');
+    // LIB-003: mesma validação de checksum do cadastro manual — mensagem clara em vez de
+    // cair no "Campos fora dos limites permitidos." genérico.
+    if(isbn&&!isIsbnInputValid(isbn))rowIssues.push('ISBN inválido: confira os dígitos.');
     const key=normalizeTitle(title);const matches=existingMap.get(key)??[];
     if(key&&(titleCounts.get(key)??0)>1)rowIssues.push('Título repetido no CSV; revisão manual necessária.');
     if(matches.length>1)rowIssues.push('Mais de um RPG existente corresponde ao título normalizado; revisão manual necessária.');
     const existing=matches.length===1?matches[0]:null;
     const candidate={title,categoryId,subgenreId,readingStatus:readingStatus??'NOT_STARTED',hasPlayed:booleanValue(cells[index('ja joguei?')]??''),wantsToPlay:booleanValue(cells[index('quero jogar?')]??''),priority:priorityMap[normalize(cells[index('prioridade')]??'')]??'NONE',playGroupNotes:(cells[index('grupo / jogadores')]??'').trim(),playGroupId:null,plannedPlayDate:plannedPlayDate??null,tableStatus:tableMap[normalize(cells[index('status da mesa')]??'')]??'IDEA',gameMaster:(cells[index('mestre')]??'').trim(),notes:(cells[index('observacoes')]??'').trim(),coverUrl,isbn,coverSourceUrl,coverSourceNote};
     const parsed=rpgInputSchema.safeParse(candidate);if(!parsed.success&&!rowIssues.length)rowIssues.push('Campos fora dos limites permitidos.');
-    if(rowIssues.length||!parsed.success){items.push({row,title,classification:'ERRO',message:rowIssues.join(' '),existingId:existing?.id??null,currentCoverUrl:existing?.cover_url??null,incomingCoverUrl:coverUrl,changes:[],input:null});continue;}
-    if(!existing){items.push({row,title,classification:'NOVO',message:'Novo RPG pronto para importação.',existingId:null,currentCoverUrl:null,incomingCoverUrl:coverUrl,changes:coverUrl?['coverUrl','isbn','coverSourceUrl','coverSourceNote']:[],input:parsed.data});continue;}
-    if(existing.cover_url){items.push({row,title,classification:'IGNORADO',message:existing.cover_url===coverUrl?'O RPG já possui esta capa; nenhuma alteração necessária.':'O RPG já possui capa; a capa existente será preservada.',existingId:existing.id,currentCoverUrl:existing.cover_url,incomingCoverUrl:coverUrl,changes:[],input:parsed.data});continue;}
-    if(!coverUrl){items.push({row,title,classification:'IGNORADO',message:'O RPG já existe e o CSV não fornece uma capa.',existingId:existing.id,currentCoverUrl:null,incomingCoverUrl:null,changes:[],input:parsed.data});continue;}
-    items.push({row,title,classification:'ATUALIZACAO',message:'Somente os campos de capa serão atualizados.',existingId:existing.id,currentCoverUrl:null,incomingCoverUrl:coverUrl,changes:['coverUrl','isbn','coverSourceUrl','coverSourceNote'],input:parsed.data});
+    if(rowIssues.length||!parsed.success){items.push({row,title,classification:'ERRO',message:rowIssues.join(' '),existingId:existing?.id??null,currentCoverUrl:existing?.cover_url??null,incomingCoverUrl:coverUrl,changes:[],input:null,resolvedPublicationId:null});continue;}
+    // LIB-003: identidade por ISBN tem prioridade sobre o caminho por título (nunca o
+    // contrário — título não é identificador confiável, seção 4 do pedido).
+    const classified=isbnByRow.get(row);
+    if(classified){
+      const existingPublication=publicationByIsbn13.get(classified.isbn13!);
+      if(existingPublication){
+        const ownEntryId=userEntryByPublication.get(existingPublication.id)??null;
+        if(ownEntryId){items.push({row,title,classification:'ALREADY_IN_LIBRARY',message:'Você já tem este título (mesmo ISBN) na sua biblioteca.',existingId:ownEntryId,currentCoverUrl:existingPublication.cover_url,incomingCoverUrl:coverUrl,changes:[],input:parsed.data,resolvedPublicationId:existingPublication.id});continue;}
+        const titleNote=existingPublication.title===title?'':` O catálogo já usa o título "${existingPublication.title}" para este ISBN — o título do catálogo prevalece.`;
+        items.push({row,title,classification:'EXISTING_PUBLICATION',message:`Este ISBN já existe no catálogo; será vinculado à sua biblioteca sem duplicar.${titleNote}`,existingId:null,currentCoverUrl:existingPublication.cover_url,incomingCoverUrl:coverUrl,changes:[],input:parsed.data,resolvedPublicationId:existingPublication.id});continue;
+      }
+    }
+    if(!existing){items.push({row,title,classification:'NOVO',message:'Novo RPG pronto para importação.',existingId:null,currentCoverUrl:null,incomingCoverUrl:coverUrl,changes:coverUrl?['coverUrl','isbn','coverSourceUrl','coverSourceNote']:[],input:parsed.data,resolvedPublicationId:null});continue;}
+    if(existing.cover_url){items.push({row,title,classification:'IGNORADO',message:existing.cover_url===coverUrl?'O RPG já possui esta capa; nenhuma alteração necessária.':'O RPG já possui capa; a capa existente será preservada.',existingId:existing.id,currentCoverUrl:existing.cover_url,incomingCoverUrl:coverUrl,changes:[],input:parsed.data,resolvedPublicationId:null});continue;}
+    if(!coverUrl){items.push({row,title,classification:'IGNORADO',message:'O RPG já existe e o CSV não fornece uma capa.',existingId:existing.id,currentCoverUrl:null,incomingCoverUrl:null,changes:[],input:parsed.data,resolvedPublicationId:null});continue;}
+    items.push({row,title,classification:'ATUALIZACAO',message:'Somente os campos de capa serão atualizados.',existingId:existing.id,currentCoverUrl:null,incomingCoverUrl:coverUrl,changes:['coverUrl','isbn','coverSourceUrl','coverSourceNote'],input:parsed.data,resolvedPublicationId:null});
   }
   const payload=JSON.stringify(items);const payloadHash=await hashSecret(`RPG_CATALOG:${payload}`,c.env.PASSWORD_PEPPER);const existing=await c.env.DB.prepare("SELECT id FROM import_jobs WHERE user_id=? AND payload_hash=? AND kind='RPG_CATALOG' AND confirmed_at IS NULL AND expires_at>?").bind(c.get('user').id,payloadHash,nowIso()).first<{id:string}>();
   const jobId=existing?.id??crypto.randomUUID();if(!existing)await c.env.DB.prepare('INSERT INTO import_jobs (id,user_id,payload_hash,normalized_payload,row_count,expires_at,kind) VALUES (?,?,?,?,?,?,?)').bind(jobId,c.get('user').id,payloadHash,payload,items.length,new Date(Date.now()+30*60_000).toISOString(),'RPG_CATALOG').run();
   const issues=items.filter((item)=>item.classification==='ERRO').map((item)=>({row:item.row,message:item.message}));
-  const summary=items.reduce<Record<string,number>>((result,item)=>({...result,[item.classification]:(result[item.classification]??0)+1}),{NOVO:0,ATUALIZACAO:0,IGNORADO:0,ERRO:0});
-  return c.json({jobId,count:items.length,issues,items,summary,canConfirm:items.some((item)=>item.classification==='NOVO'||item.classification==='ATUALIZACAO')});
+  const summary=items.reduce<Record<string,number>>((result,item)=>({...result,[item.classification]:(result[item.classification]??0)+1}),{NOVO:0,ATUALIZACAO:0,IGNORADO:0,ERRO:0,EXISTING_PUBLICATION:0,ALREADY_IN_LIBRARY:0});
+  return c.json({jobId,count:items.length,issues,items,summary,canConfirm:items.some((item)=>item.classification==='NOVO'||item.classification==='ATUALIZACAO'||item.classification==='EXISTING_PUBLICATION')});
 });
 
 transferRoutes.post('/import/confirm',async(c)=>{const {jobId,approvedRows}=await readJson(c,catalogConfirmSchema);const user=c.get('user');const job=await c.env.DB.prepare("SELECT normalized_payload FROM import_jobs WHERE id=? AND user_id=? AND kind='RPG_CATALOG' AND confirmed_at IS NULL AND expires_at>?").bind(jobId,user.id,nowIso()).first<{normalized_payload:string}>();if(!job)throw new ApiError(404,'IMPORT_JOB_NOT_FOUND','Prévia expirada ou já confirmada.');
   const items=catalogPlanSchema.parse(JSON.parse(job.normalized_payload));const approvedSet=new Set(approvedRows);if(approvedSet.size!==approvedRows.length)throw new ApiError(422,'INVALID_IMPORT_SELECTION','A seleção contém linhas repetidas.');
-  const selected=items.filter((item)=>approvedSet.has(item.row));if(selected.length!==approvedSet.size||selected.some((item)=>!['NOVO','ATUALIZACAO'].includes(item.classification)||!item.input))throw new ApiError(422,'INVALID_IMPORT_SELECTION','Selecione apenas linhas novas ou de atualização.');
+  const selected=items.filter((item)=>approvedSet.has(item.row));if(selected.length!==approvedSet.size||selected.some((item)=>!['NOVO','ATUALIZACAO','EXISTING_PUBLICATION'].includes(item.classification)||!item.input))throw new ApiError(422,'INVALID_IMPORT_SELECTION','Selecione apenas linhas novas, de atualização ou de vínculo a publicação existente.');
   // LIB-002: existência checada só por título normalizado (cover_url não importa aqui) — cria
   // via camada canônica compartilhada (buildCreateLibraryEntryStatements), a mesma do cadastro
   // manual (seção 18 do pedido: "não manter um caminho paralelo incompatível").
@@ -156,9 +192,12 @@ transferRoutes.post('/import/confirm',async(c)=>{const {jobId,approvedRows}=awai
   const currentTitles=new Set(currentTitleRows.results.map((row)=>normalizeTitle(row.title)));
   const now=nowIso();const statements:D1PreparedStatement[]=[];const countTargets:Array<{index:number;action:'NOVO'|'ATUALIZACAO'}>=[];
   for(const item of selected){const input=item.input!;
-    if(item.classification==='NOVO'){
-      if(currentTitles.has(normalizeTitle(input.title)))continue;
-      const {statements:createStatements}=buildCreateLibraryEntryStatements(c.env.DB,{entryId:crypto.randomUUID(),userId:user.id,input,now});
+    if(item.classification==='NOVO'||item.classification==='EXISTING_PUBLICATION'){
+      // LIB-003: reresolve identidade AO VIVO (nunca confia no resolvedPublicationId do
+      // preview, que pode ter até 30min — ver comentário no schema) — mesma função do
+      // cadastro manual decide sozinha se reaproveita Publication existente ou cria nova.
+      if(item.classification==='NOVO'&&currentTitles.has(normalizeTitle(input.title)))continue;
+      const {statements:createStatements}=await buildCreateLibraryEntryStatements(c.env.DB,{entryId:crypto.randomUUID(),userId:user.id,input,now});
       countTargets.push({index:statements.length+createStatements.length-1,action:'NOVO'});
       statements.push(...createStatements);
     } else {
@@ -198,7 +237,7 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
   // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
   // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).
   const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
-  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems]=await c.env.DB.batch([
+  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems,publicationExternalIds]=await c.env.DB.batch([
     c.env.DB.prepare('SELECT * FROM rpgs WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT * FROM campaigns WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT m.* FROM campaign_members m JOIN campaigns c ON c.id=m.campaign_id WHERE c.user_id=?').bind(user.id),
@@ -217,6 +256,9 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     // (título/capa/ISBN vivem nelas desde esta migration, não mais nas colunas legadas de rpgs).
     c.env.DB.prepare('SELECT DISTINCT p.* FROM publications p JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT DISTINCT gs.* FROM game_systems gs JOIN publications p ON p.game_system_id=gs.id JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
+    // LIB-003: publication_external_ids — vazia hoje (nenhum provider chamado ainda), incluída
+    // por completude/futuro (ver docs/library/PUBLICATION_IDENTITY.md).
+    c.env.DB.prepare('SELECT DISTINCT pe.* FROM publication_external_ids pe JOIN publications p ON p.id=pe.publication_id JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),version:6,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results}});
+  return c.json({exportedAt:nowIso(),version:7,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results,publicationExternalIds:publicationExternalIds.results}});
 });

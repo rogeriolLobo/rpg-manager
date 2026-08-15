@@ -124,3 +124,52 @@ faça rewrite automaticamente". O LIB-002 entrega a fundação física
 de capa, provider externo, dedup real e archive são construídos sobre
 essa fundação em sessões dedicadas futuras (F-008/F-009/F-010/F-011),
 não half-implementados aqui.
+
+## LIB-003 — Identidade, ISBN, provenance e deduplicação segura — `DONE`
+
+Ver `docs/library/PUBLICATION_IDENTITY.md` para o desenho completo.
+
+- [x] ISBN normalizado (`src/domain/rpg/isbn.ts`) — hífens/espaços
+      removidos, forma canônica persistida.
+- [x] Checksum validado (ISO 2108 ISBN-10, EAN-13 ISBN-13) — não aceita
+      qualquer sequência de 10/13 dígitos, só as matematicamente corretas.
+- [x] Identidade de Publication definida — ISBN-13 (direto ou derivado
+      de ISBN-10) como chave canônica; sem fuzzy match; título nunca é
+      usado para decidir reuso.
+- [x] Provenance definida — `metadata_source` (já existia desde LIB-002,
+      decisão documentada de não expandir o `CHECK` para `IMPORT`
+      distinto, ver `PUBLICATION_IDENTITY.md`).
+- [x] External ID architecture pronta — `publication_external_ids`,
+      schema-ready, sem provider chamado.
+- [x] Dedup seguro implementado — ISBN já existente no catálogo (de
+      qualquer conta) reaproveita a Publication; sem ISBN, sempre
+      Publication distinta.
+- [x] Duplicate in same library bloqueado — `409 ALREADY_IN_LIBRARY` +
+      índice único `idx_rpgs_user_publication_unique` (defesa em
+      profundidade, não só aplicação).
+- [x] Estados pessoais isolados — cobertos por teste dedicado
+      (`tests/integration/publication-identity.test.ts`).
+- [x] Metadata compartilhada protegida — `422
+      SHARED_PUBLICATION_METADATA_LOCKED` quando Publication tem 2+
+      referências; estado pessoal nunca bloqueado.
+- [x] Importer usa a mesma regra — `EXISTING_PUBLICATION`/
+      `ALREADY_IN_LIBRARY` resolvidos pela mesma camada canônica
+      (`buildCreateLibraryEntryStatements`), sem caminho paralelo.
+- [x] Export atualizado — `publicationExternalIds` incluído, versão 7.
+- [x] Dados existentes preservados — auditoria prévia (30 registros, 20
+      ISBNs não vazios, todos válidos e únicos, 0 duplicatas) + migration
+      só populou colunas até então vazias, nenhum merge necessário.
+- [x] unit (`isbn.test.ts` + `validation.test.ts` atualizado) verde.
+- [x] integration (`publication-identity.test.ts` + regressão de
+      `library-domain.test.ts`) verde.
+- [x] E2E, lint, typecheck, build, CI — ver seção de release.
+- [x] Migration produção aplicada, deploy, `/api/v1/version`, production
+      proof — ver seção de release.
+- [x] Documentação atualizada (este arquivo + `LIBRARY_ARCHITECTURE.md`
+      + `LIBRARY_CURRENT_STATE.md` + `MASTER_BACKLOG.md` +
+      `PUBLICATION_IDENTITY.md` novo).
+
+### Release — LIB-003
+
+Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
+valores finais de commit/Worker Version/contagens de produção).

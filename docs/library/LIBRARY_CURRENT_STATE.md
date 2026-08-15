@@ -193,12 +193,42 @@ Estado físico atual:
   documentada (não movidos nesta sessão; ver
   `LIBRARY_ARCHITECTURE.md`).
 - Dedup por ISBN e compartilhamento de Publication entre contas
-  **continuam não implementados** — a física do schema já suporta,
-  mas o comportamento de escrita é 1:1 (sem reuso), decisão deliberada
-  documentada em `LIBRARY_ARCHITECTURE.md`.
+  **foram implementados no LIB-003** (ver atualização abaixo) — não
+  ficaram no estado "física pronta, comportamento 1:1" descrito acima
+  (esse era o estado após LIB-002, já superado).
 - `rpgs.archived_at` (nullable, aditivo) — arquitetura pronta para
   F-011, não implementado.
 
-O problema #2 (dedup por título) permanece real e sem mudança nesta
-sessão — segue como `F-010`, agora com a base física
-(`publications.isbn`/`isbn10`/`isbn13`) pronta para quando for feito.
+O problema #2 (dedup por título) foi resolvido no LIB-003 — não por
+título (nunca confiável), mas pela identidade correta (ISBN). Ver
+atualização abaixo.
+
+---
+
+## Atualização — LIB-003 implementado (`migrations/0017_publication_identity.sql`)
+
+Ver `docs/library/PUBLICATION_IDENTITY.md` para o desenho completo.
+Resumo do estado físico atual:
+
+- `publications.isbn13`/`isbn10` agora são preenchidos (validados por
+  checksum real — ISO 2108/EAN-13, não só forma) em toda escrita nova, e
+  têm índice único parcial (`idx_publications_isbn13_unique`/
+  `idx_publications_isbn10_unique`) — identidade real de catálogo.
+- **Dedup por ISBN funciona entre contas**: cadastrar/importar um ISBN já
+  existente no catálogo (de qualquer conta) reaproveita a Publication —
+  não cria duplicata, não deduplica por título.
+- `rpgs.user_id + publication_id` é único (`idx_rpgs_user_publication_unique`)
+  — uma biblioteca não pode ter duas entries para a mesma Publication;
+  tentativa retorna `409 ALREADY_IN_LIBRARY`.
+- **Metadata compartilhada é protegida**: editar título/ISBN/capa de uma
+  Publication com 2+ referências é bloqueado
+  (`422 SHARED_PUBLICATION_METADATA_LOCKED`) — estado pessoal nunca é
+  afetado por essa trava.
+- `publication_external_ids` existe (schema pronto para providers
+  futuros), vazia — nenhum provider chamado ainda.
+- Import CSV ganhou `EXISTING_PUBLICATION`/`ALREADY_IN_LIBRARY` como
+  classificações adicionais (além de `NOVO`/`ATUALIZACAO`/`IGNORADO`/`ERRO`).
+- `/export` inclui `publicationExternalIds` (versão 7).
+
+Upload de capa, Open Library/Google Books e archive de RPG continuam
+`MISSING` — fora de escopo do LIB-003 (F-008/F-009/F-011).

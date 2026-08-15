@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { isIsbnInputValid } from '../../domain/rpg/isbn';
 import { isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -55,13 +56,31 @@ export const rpgInputSchema = z.strictObject({
     z.literal(''),
     z.null(),
   ]).optional(),
-  isbn: z.union([z.string().trim().max(32), z.null()]).optional(),
+  // LIB-003: ISBN validado por checksum real (ISO 2108/EAN-13), não por forma.
+  // Vazio continua permitido; valor preenchido precisa ser um ISBN-10/13 válido
+  // (ver src/domain/rpg/isbn.ts — sem invenção/correção automática).
+  isbn: z.union([
+    z.string().trim().max(32).refine(isIsbnInputValid, 'ISBN inválido — confira os dígitos.'),
+    z.literal(''),
+    z.null(),
+  ]).optional(),
   coverSourceUrl: z.union([
     z.string().trim().max(1000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
     z.literal(''),
     z.null(),
   ]).optional(),
   coverSourceNote: z.union([z.string().trim().max(1000), z.null()]).optional(),
+});
+
+// LIB-003: variante usada só pelo PATCH de RPG — mesmo princípio do incidente
+// de coverUrl (LIB-001, CLAUDE.md seção 18): um RPG legado cujo isbn já
+// persistido não bata no checksum (nenhum caso real conhecido hoje, mas a
+// proteção precisa existir) não pode ficar impossível de salvar só porque o
+// usuário editou outro campo sem tocar no ISBN. A rota faz a checagem real de
+// "mudou ou não" comparando com o valor persistido (ver src/server/routes/rpgs.ts)
+// — aqui só relaxamos a forma para não bloquear o parse antes dessa checagem.
+export const rpgUpdateInputSchema = rpgInputSchema.extend({
+  isbn: z.union([z.string().trim().max(32), z.literal(''), z.null()]).optional(),
 });
 
 export const campaignInputSchema = z.strictObject({

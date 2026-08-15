@@ -41,11 +41,19 @@ describe('validação de entrada',()=>{it('rejeita senha curta e campo arbitrár
     expect(rpgInputSchema.safeParse({ ...baseRpg, coverUrl: 'https://192.168.1.10/capa.jpg' }).success).toBe(false);
   });
 
-  it('ISBN aceita vazio, nulo e formatos com/sem hífen', () => {
+  it('ISBN aceita vazio, nulo e formatos com/sem hífen (LIB-003: checksum real, não só forma)', () => {
+    // 978-3-16-148410-0 é o exemplo clássico de ISBN-13 com checksum válido usado na
+    // documentação pública do padrão — mesmo valor usado em tests/unit/isbn.test.ts.
     expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: '' }).success).toBe(true);
     expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: null }).success).toBe(true);
-    expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: '978-85-98600-05-2' }).success).toBe(true);
-    expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: '9788598600052' }).success).toBe(true);
+    expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: '978-3-16-148410-0' }).success).toBe(true);
+    expect(rpgInputSchema.safeParse({ ...baseRpg, isbn: '9783161484100' }).success).toBe(true);
+  });
+
+  it('ISBN com checksum inválido é rejeitado com field error claro', () => {
+    const result = rpgInputSchema.safeParse({ ...baseRpg, isbn: '9783161484101' });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.flatten().fieldErrors.isbn?.[0]).toContain('ISBN inválido');
   });
 
   it('cover metadata parcial é válida (capa preenchida sem isbn/fonte/nota)', () => {

@@ -41,33 +41,40 @@ async function register(name: string) {
   return { userId: body.user.id, cookie: `rpg_session=${session}; rpg_csrf=${csrf}`, csrf };
 }
 
+// LIB-003: isbn fica null no fixture base de propósito. Testes deste arquivo não têm
+// isolamento de storage entre `it()` blocks (só as migrations são reaplicadas em
+// beforeEach — os dados persistem entre testes do mesmo arquivo), então dois testes
+// usando o mesmo ISBN acionariam o dedup real um no outro (o comportamento correto do
+// LIB-003, mas indesejado como acoplamento acidental entre testes independentes). Cada
+// teste que precisa de um ISBN específico declara o seu, distinto dos demais.
 const rpg = {
   title: 'Chamado de Cthulhu', categoryId: 'horror', subgenreId: 'horror-cosmico', readingStatus: 'READ', hasPlayed: true,
   wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '',
-  notes: 'Notas pessoais', coverUrl: 'https://covers.openlibrary.org/b/isbn/9780000000000-L.jpg', isbn: '9780000000000',
+  notes: 'Notas pessoais', coverUrl: 'https://covers.openlibrary.org/b/isbn/generic-L.jpg', isbn: null as string | null,
   coverSourceUrl: null, coverSourceNote: null,
 };
 
 describe('LIB-002: Game System + Publication + User Library Entry', () => {
   it('CREATE grava as 3 tabelas ligadas (1 Game System + 1 Publication + 1 User Library Entry)', async () => {
     const account = await register('lib002-create');
-    const created = await request('/rpgs', 'POST', rpg, account.cookie, account.csrf);
+    // ISBN exclusivo deste teste — ver nota no fixture `rpg` sobre isolamento entre testes.
+    const isbn = '9783161484100';
+    const created = await request('/rpgs', 'POST', { ...rpg, coverUrl: `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`, isbn }, account.cookie, account.csrf);
     expect(created.status).toBe(201);
     const item = ((await created.json()) as { item: { id: string; title: string; coverUrl: string; isbn: string } }).item;
 
     const row = await testEnv.DB.prepare('SELECT publication_id FROM rpgs WHERE id=?').bind(item.id).first<{ publication_id: string }>();
     expect(row?.publication_id).toBeTruthy();
-    const publication = await testEnv.DB.prepare('SELECT title,cover_url,isbn,game_system_id,publication_type FROM publications WHERE id=?').bind(row!.publication_id).first<{
-      title: string; cover_url: string; isbn: string; game_system_id: string; publication_type: string;
+    const publication = await testEnv.DB.prepare('SELECT title,cover_url,isbn,isbn13,game_system_id,publication_type FROM publications WHERE id=?').bind(row!.publication_id).first<{
+      title: string; cover_url: string; isbn: string; isbn13: string; game_system_id: string; publication_type: string;
     }>();
-    expect(publication).toMatchObject({ title: 'Chamado de Cthulhu', cover_url: rpg.coverUrl, isbn: rpg.isbn, publication_type: 'CORE_RULEBOOK' });
+    expect(publication).toMatchObject({ title: 'Chamado de Cthulhu', cover_url: item.coverUrl, isbn, isbn13: isbn, publication_type: 'CORE_RULEBOOK' });
     const gameSystem = await testEnv.DB.prepare('SELECT name FROM game_systems WHERE id=?').bind(publication!.game_system_id).first<{ name: string }>();
     expect(gameSystem?.name).toBe('Chamado de Cthulhu');
 
     // GET reflete os dados compostos via JOIN, no mesmo formato achatado de sempre (compat de API).
     expect(item.title).toBe('Chamado de Cthulhu');
-    expect(item.coverUrl).toBe(rpg.coverUrl);
-    expect(item.isbn).toBe(rpg.isbn);
+    expect(item.isbn).toBe(isbn);
   });
 
   it('PATCH separa metadata (Publication/Game System) de estado pessoal (User Library Entry) na mesma transação', async () => {
@@ -95,7 +102,8 @@ describe('LIB-002: Game System + Publication + User Library Entry', () => {
 
   it('import CSV cria Game System + Publication + User Library Entry pelo mesmo caminho canônico do cadastro manual', async () => {
     const account = await register('lib002-import');
-    const csv = ['Sistema / Jogo,Categoria,Subgênero,Status da leitura,Capa URL,ISBN', 'Vampiro A Mascara,Horror,Horror Pessoal,Lido,https://covers.openlibrary.org/b/isbn/1-L.jpg,1112223334445'].join('\n');
+    // 9780306406157 = ISBN-13 equivalente do exemplo clássico 0-306-40615-2 (checksum real válido).
+    const csv = ['Sistema / Jogo,Categoria,Subgênero,Status da leitura,Capa URL,ISBN', 'Vampiro A Mascara,Horror,Horror Pessoal,Lido,https://covers.openlibrary.org/b/isbn/1-L.jpg,9780306406157'].join('\n');
     const preview = await request('/import/preview', 'POST', { csv }, account.cookie, account.csrf);
     expect(preview.status).toBe(200);
     const previewBody = (await preview.json()) as { jobId: string };
@@ -106,7 +114,7 @@ describe('LIB-002: Game System + Publication + User Library Entry', () => {
     const row = await testEnv.DB.prepare('SELECT id,publication_id FROM rpgs WHERE user_id=?').bind(account.userId).first<{ id: string; publication_id: string }>();
     expect(row?.publication_id).toBeTruthy();
     const publication = await testEnv.DB.prepare('SELECT title,cover_url,isbn,game_system_id FROM publications WHERE id=?').bind(row!.publication_id).first<{ title: string; cover_url: string; isbn: string; game_system_id: string }>();
-    expect(publication).toMatchObject({ title: 'Vampiro A Mascara', cover_url: 'https://covers.openlibrary.org/b/isbn/1-L.jpg', isbn: '1112223334445' });
+    expect(publication).toMatchObject({ title: 'Vampiro A Mascara', cover_url: 'https://covers.openlibrary.org/b/isbn/1-L.jpg', isbn: '9780306406157' });
     const gameSystem = await testEnv.DB.prepare('SELECT id FROM game_systems WHERE id=?').bind(publication!.game_system_id).first();
     expect(gameSystem).toBeTruthy();
   });
@@ -130,18 +138,23 @@ describe('LIB-002: Game System + Publication + User Library Entry', () => {
     expect(legacy?.cover_url).toBeNull();
   });
 
-  it('/export inclui publications e gameSystems (versão 6) escopados ao dono, sem vazar entre contas', async () => {
+  it('/export inclui publications e gameSystems (versão 7) escopados ao dono, sem vazar entre contas', async () => {
     const a = await register('lib002-export-a');
     const b = await register('lib002-export-b');
     await request('/rpgs', 'POST', rpg, a.cookie, a.csrf);
-    await request('/rpgs', 'POST', { ...rpg, title: 'Outro RPG de B' }, b.cookie, b.csrf);
+    // ISBN diferente (e não vazio) de propósito: este teste cobre escopo de export por dono,
+    // não dedup entre contas (isso é coberto em tests/integration/publication-identity.test.ts) —
+    // um ISBN igual ao de A faria B reaproveitar a Publication de A (comportamento correto do
+    // LIB-003, mas erraria o que este teste especificamente verifica).
+    await request('/rpgs', 'POST', { ...rpg, title: 'Outro RPG de B', isbn: '0306406152' }, b.cookie, b.csrf);
     const exported = await request('/export', 'GET', undefined, a.cookie);
-    const body = (await exported.json()) as { version: number; data: { publications: Array<{ title: string }>; gameSystems: Array<{ name: string }> } };
-    expect(body.version).toBe(6);
+    const body = (await exported.json()) as { version: number; data: { publications: Array<{ title: string }>; gameSystems: Array<{ name: string }>; publicationExternalIds: unknown[] } };
+    expect(body.version).toBe(7);
     expect(body.data.publications).toHaveLength(1);
     expect(body.data.publications[0].title).toBe('Chamado de Cthulhu');
     expect(body.data.gameSystems).toHaveLength(1);
     expect(body.data.gameSystems[0].name).toBe('Chamado de Cthulhu');
+    expect(body.data.publicationExternalIds).toEqual([]);
   });
 
   it('backfill idempotente: linha legada sem publication_id ganha Game System + Publication próprios sem perder dados', async () => {
