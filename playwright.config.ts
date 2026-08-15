@@ -6,6 +6,16 @@ process.env.no_proxy = '127.0.0.1,localhost';
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  // LIB-003: 1 worker só no CI — causa raiz de dois flakes recorrentes
+  // (RATE_LIMIT em AUTH_REGISTRATION_RATE_LIMITER e SQLITE_BUSY no D1 local)
+  // era o mesmo: 2 workers do Playwright, cada um registrando contas e
+  // escrevendo no MESMO arquivo SQLite local em paralelo, estourando o rate
+  // limiter compartilhado e disputando lock do arquivo. `fullyParallel:false`
+  // só serializa testes DENTRO de um arquivo — arquivos/projetos ainda corriam
+  // em paralelo entre si. workers:1 serializa tudo (poucos testes, poucos
+  // minutos a mais, elimina as duas classes de flake na raiz em vez de
+  // reruns repetidos). Local mantém o paralelismo padrão (não é o gate real).
+  workers: process.env.CI ? 1 : undefined,
   // Um retry só no CI: mais barato que um re-run do workflow inteiro (que refaz
   // npm ci, lint, typecheck, unit, integration, build antes de chegar no E2E) e
   // absorve timing induzido por runner compartilhado sem mascarar bug real.
