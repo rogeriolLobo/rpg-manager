@@ -56,16 +56,21 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## LIB-002 — Biblioteca: normalização de domínio (Game System + Publication + User Library Entry)
 
 - **Priority:** P1
-- **Status:** `IN_PROGRESS` — ver
-  `docs/library/LIBRARY_DEFINITION_OF_DONE.md` para o checklist completo;
-  preenchido para `DONE` só após migration remota + deploy + smoke
-  confirmados nesta mesma sessão.
+- **Status:** `DONE` (código + migration remota + deploy + smoke
+  read-only confirmados; ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+  para o checklist completo), `MANUAL_SMOKE_REQUIRED` (clique
+  autenticado real pós-migration, bloqueado por Turnstile/CAPTCHA, não
+  contornado — mesma situação de LIB-001)
 - **Dependencies:** LIB-001 (`DONE`)
 - **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
 - **Migration:** `migrations/0016_library_domain_normalization.sql`
   (aditiva — `CREATE TABLE game_systems`, `CREATE TABLE publications`,
   `ALTER TABLE rpgs ADD COLUMN publication_id`,
-  `ALTER TABLE rpgs ADD COLUMN archived_at`, backfill idempotente)
+  `ALTER TABLE rpgs ADD COLUMN archived_at`, backfill idempotente) —
+  aplicada em produção: 30→30 rpgs, 30 publications, 30 game_systems,
+  0 mismatches campo a campo
+- **Commit:** `762550d`
+- **Production version:** `7bcd3ce4-cb53-432f-a0eb-e215d0b7aeef`
 - **Docs:** `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-002 —
   Implementado"), `docs/library/LIBRARY_CURRENT_STATE.md` (seção
   "Atualização — LIB-002"), `docs/library/LIBRARY_DEFINITION_OF_DONE.md`

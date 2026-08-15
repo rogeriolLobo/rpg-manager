@@ -89,8 +89,31 @@ Status por escopo. `DONE` exige produção validada, não só código.
       atualizados para a nova fonte de verdade.
 - [x] lint, typecheck, unit, integration, E2E, build — ver seção de
       release.
-- [ ] Migration remota aplicada em produção com contagem pré/pós —
-      preenchido na seção de release após a execução.
+- [x] Migration remota aplicada em produção com contagem pré/pós:
+      30 → 30 rpgs, 30 publications, 30 game_systems, 0 divergências
+      campo a campo (título/capa/ISBN) nas 30 linhas reais.
+
+## Release — LIB-002
+
+- Commit: `762550d`
+- CI: verde (run re-executada após 1ª tentativa falhar por
+  `RATE_LIMIT` no rate limiter de registro sob 2 workers Playwright em
+  paralelo — em `core-flow.spec.ts`/`navigation-invariants.spec.ts`,
+  arquivos não tocados por este commit; `rpg-cover-edit.spec.ts`, o
+  único arquivo E2E alterado, passou de primeira em ambos os projetos)
+- Migration remota: `0016_library_domain_normalization.sql` aplicada
+  em produção — contagem pré 30 rpgs, pós 30 rpgs/30 publications/30
+  game_systems/30 com publication_id, 0 mismatches campo a campo
+- Deploy: Worker Version `7bcd3ce4-cb53-432f-a0eb-e215d0b7aeef`
+- `/api/v1/version`: `{"commit":"762550d",...}` — HEAD local ==
+  origin/main == produção
+- Smoke: `/api/v1/health` 200 com headers de segurança íntegros,
+  `/` 200, contagem de RPGs em produção confirmada em 30 antes e
+  depois do smoke (somente leitura)
+- `MANUAL_SMOKE_REQUIRED`: clique autenticado real (editar RPG
+  existente pós-migration, confirmar capa/estado pessoal) continua
+  bloqueado por Turnstile/CAPTCHA, não contornado — mesma situação já
+  registrada para LIB-001
 
 ## Por que só o domínio (não upload/providers/dedup/archive) foi declarado DONE
 
