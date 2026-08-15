@@ -5,6 +5,7 @@ import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 import { hashSecret } from '../security/crypto';
 import { isPublicHttpsUrl } from '../../shared/security/cover-url';
+import { buildCreateLibraryEntryStatements } from './library-writes';
 
 export const transferRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 const previewSchema = z.strictObject({ csv: z.string().min(1).max(500_000) });
@@ -95,7 +96,9 @@ transferRoutes.post('/import/preview', async (c) => {
   const [categories,subgenres,existingRpgs] = await c.env.DB.batch([
     c.env.DB.prepare('SELECT id,name FROM categories'),
     c.env.DB.prepare('SELECT id,category_id,name FROM subgenres'),
-    c.env.DB.prepare('SELECT id,title,cover_url FROM rpgs WHERE user_id=?').bind(c.get('user').id),
+    // LIB-002: cover_url é lido de `publications` (fonte de verdade editorial), não mais
+    // da coluna homônima legada em `rpgs` — ver src/server/routes/library-writes.ts.
+    c.env.DB.prepare('SELECT r.id,r.title,p.cover_url FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id WHERE r.user_id=?').bind(c.get('user').id),
   ]);
   const categoryRows = categories.results as Array<{id:string;name:string}>;
   const subgenreRows = subgenres.results as Array<{id:string;category_id:string;name:string}>;
@@ -146,10 +149,30 @@ transferRoutes.post('/import/preview', async (c) => {
 transferRoutes.post('/import/confirm',async(c)=>{const {jobId,approvedRows}=await readJson(c,catalogConfirmSchema);const user=c.get('user');const job=await c.env.DB.prepare("SELECT normalized_payload FROM import_jobs WHERE id=? AND user_id=? AND kind='RPG_CATALOG' AND confirmed_at IS NULL AND expires_at>?").bind(jobId,user.id,nowIso()).first<{normalized_payload:string}>();if(!job)throw new ApiError(404,'IMPORT_JOB_NOT_FOUND','Prévia expirada ou já confirmada.');
   const items=catalogPlanSchema.parse(JSON.parse(job.normalized_payload));const approvedSet=new Set(approvedRows);if(approvedSet.size!==approvedRows.length)throw new ApiError(422,'INVALID_IMPORT_SELECTION','A seleção contém linhas repetidas.');
   const selected=items.filter((item)=>approvedSet.has(item.row));if(selected.length!==approvedSet.size||selected.some((item)=>!['NOVO','ATUALIZACAO'].includes(item.classification)||!item.input))throw new ApiError(422,'INVALID_IMPORT_SELECTION','Selecione apenas linhas novas ou de atualização.');
-  const currentRows=await c.env.DB.prepare('SELECT id,title,cover_url FROM rpgs WHERE user_id=?').bind(user.id).all<ExistingCatalogRpg>();const currentMap=mapExistingRpgs(currentRows.results);const now=nowIso();const statements:D1PreparedStatement[]=[];const actions:Array<'NOVO'|'ATUALIZACAO'>=[];
-  for(const item of selected){const input=item.input!;if(item.classification==='NOVO'){if((currentMap.get(normalizeTitle(input.title))??[]).length)continue;statements.push(c.env.DB.prepare(`INSERT INTO rpgs (id,user_id,title,category_id,subgenre_id,reading_status,has_played,wants_to_play,priority,play_group_notes,planned_play_date,table_status,game_master,notes,cover_url,isbn,cover_source_url,cover_source_note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),user.id,input.title,input.categoryId??null,input.subgenreId??null,input.readingStatus,Number(input.hasPlayed),Number(input.wantsToPlay),input.priority,input.playGroupNotes,input.plannedPlayDate??null,input.tableStatus,input.gameMaster,input.notes,input.coverUrl??null,input.isbn??null,input.coverSourceUrl??null,input.coverSourceNote??null,now,now));actions.push('NOVO');}
-    else{statements.push(c.env.DB.prepare('UPDATE rpgs SET cover_url=?,isbn=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=? AND user_id=? AND cover_url IS NULL').bind(input.coverUrl??null,input.isbn??null,input.coverSourceUrl??null,input.coverSourceNote??null,now,item.existingId,user.id));actions.push('ATUALIZACAO');}}
-  statements.push(c.env.DB.prepare('UPDATE import_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now,jobId,user.id));const results=await c.env.DB.batch(statements);let imported=0;let updated=0;for(const [index,action] of actions.entries()){const changes=Number(results[index].meta.changes??0);if(action==='NOVO')imported+=changes;else updated+=changes;}return c.json({imported,updated,skipped:items.length-imported-updated});});
+  // LIB-002: existência checada só por título normalizado (cover_url não importa aqui) — cria
+  // via camada canônica compartilhada (buildCreateLibraryEntryStatements), a mesma do cadastro
+  // manual (seção 18 do pedido: "não manter um caminho paralelo incompatível").
+  const currentTitleRows=await c.env.DB.prepare('SELECT title FROM rpgs WHERE user_id=?').bind(user.id).all<{title:string}>();
+  const currentTitles=new Set(currentTitleRows.results.map((row)=>normalizeTitle(row.title)));
+  const now=nowIso();const statements:D1PreparedStatement[]=[];const countTargets:Array<{index:number;action:'NOVO'|'ATUALIZACAO'}>=[];
+  for(const item of selected){const input=item.input!;
+    if(item.classification==='NOVO'){
+      if(currentTitles.has(normalizeTitle(input.title)))continue;
+      const {statements:createStatements}=buildCreateLibraryEntryStatements(c.env.DB,{entryId:crypto.randomUUID(),userId:user.id,input,now});
+      countTargets.push({index:statements.length+createStatements.length-1,action:'NOVO'});
+      statements.push(...createStatements);
+    } else {
+      // Guard `cover_url IS NULL` agora em `publications` (fonte de verdade), via subquery em
+      // `rpgs.publication_id` — preserva a mesma idempotência de antes (só atualiza se a
+      // Publication vinculada ainda não tem capa própria).
+      countTargets.push({index:statements.length,action:'ATUALIZACAO'});
+      statements.push(c.env.DB.prepare('UPDATE publications SET cover_url=?,isbn=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=(SELECT publication_id FROM rpgs WHERE id=? AND user_id=?) AND cover_url IS NULL')
+        .bind(input.coverUrl??null,input.isbn??null,input.coverSourceUrl??null,input.coverSourceNote??null,now,item.existingId,user.id));
+    }}
+  statements.push(c.env.DB.prepare('UPDATE import_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now,jobId,user.id));
+  const results=await c.env.DB.batch(statements);let imported=0;let updated=0;
+  for(const {index,action} of countTargets){const changes=Number(results[index].meta.changes??0);if(action==='NOVO')imported+=changes;else updated+=changes;}
+  return c.json({imported,updated,skipped:items.length-imported-updated});});
 
 const campaignImportItemSchema=z.object({input:campaignInputSchema,lastSessionDate:z.iso.date().nullable(),legacySessionsCompleted:z.number().int().nonnegative()});
 transferRoutes.post('/import/campaigns/preview',async(c)=>{const {csv}=await readJson(c,previewSchema);const rows=parseCsv(csv);if(rows.length<2)throw new ApiError(422,'EMPTY_IMPORT','O CSV não contém registros.');
@@ -171,8 +194,11 @@ transferRoutes.post('/import/campaigns/confirm',async(c)=>{const {jobId}=await r
   statements.push(c.env.DB.prepare('UPDATE import_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now,jobId,user.id));const results=await c.env.DB.batch(statements);const imported=results.slice(0,-1).reduce((sum,result)=>sum+Number(result.meta.changes??0),0);return c.json({imported,skipped:items.length-imported});});
 
 function csvEscape(value: unknown): string { const text=String(value??''); return /[",\n]/u.test(text)?`"${text.replaceAll('"','""')}"`:text; }
-transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.req.query('format')??'json';if(format==='csv'){const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,r.cover_url,r.isbn,r.cover_source_url,r.cover_source_note FROM rpgs r LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
-  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities]=await c.env.DB.batch([
+transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.req.query('format')??'json';if(format==='csv'){
+  // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
+  // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).
+  const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
+  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems]=await c.env.DB.batch([
     c.env.DB.prepare('SELECT * FROM rpgs WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT * FROM campaigns WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT m.* FROM campaign_members m JOIN campaigns c ON c.id=m.campaign_id WHERE c.user_id=?').bind(user.id),
@@ -186,6 +212,11 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     c.env.DB.prepare('SELECT * FROM vault_entities WHERE owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT a.* FROM adventure_details a JOIN vault_entities e ON e.id=a.entity_id WHERE e.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT ce.* FROM campaign_entities ce JOIN campaigns c ON c.id=ce.campaign_id WHERE c.user_id=?').bind(user.id),
+    // LIB-002: Publication/GameSystem não têm user_id próprio (catálogo, não estado pessoal) —
+    // escopadas aqui via JOIN pelos rpgs do usuário, para o backup continuar 100% completo
+    // (título/capa/ISBN vivem nelas desde esta migration, não mais nas colunas legadas de rpgs).
+    c.env.DB.prepare('SELECT DISTINCT p.* FROM publications p JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT DISTINCT gs.* FROM game_systems gs JOIN publications p ON p.game_system_id=gs.id JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),version:5,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results}});
+  return c.json({exportedAt:nowIso(),version:6,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results}});
 });

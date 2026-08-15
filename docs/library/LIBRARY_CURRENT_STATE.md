@@ -165,3 +165,40 @@ domínios. Erros de campo (`fields`) agora chegam ao frontend para
 Nenhum desses é `BROKEN` hoje — são gaps funcionais reais (`MISSING`),
 não regressões. O único bug funcional real (`coverUrl` rejeitando URLs
 HTTPS válidas) está corrigido e em produção.
+
+---
+
+## Atualização — LIB-002 implementado (`migrations/0016_library_domain_normalization.sql`)
+
+O modelo misto descrito acima (problema #1) foi endereçado nesta sessão.
+Estado físico atual:
+
+- `game_systems` e `publications` existem como tabelas próprias (ver
+  `docs/library/LIBRARY_ARCHITECTURE.md`, seção "LIB-002 —
+  Implementado"), populadas por um backfill idempotente para os
+  registros pré-existentes e por toda criação nova (manual ou import)
+  a partir de `src/server/routes/library-writes.ts`.
+- `rpgs.publication_id` (nullable, aditivo) liga cada linha à sua
+  Publication. `rpgs` passa a representar o User Library Entry
+  (estado pessoal), mantendo o nome físico da tabela por ser a única
+  forma aditiva de fazer essa transição (renomear exigiria reescrever a
+  FK de `campaigns.rpg_id`, que continua apontando para `rpgs.id` sem
+  qualquer mudança).
+- `title`/`coverUrl`/`isbn`/`coverSourceUrl`/`coverSourceNote` agora são
+  lidos de `publications` (fonte de verdade); as colunas homônimas em
+  `rpgs` continuam fisicamente presentes mas congeladas (não escritas
+  pelo app, exceto `title`, mantido em dual-write pela constraint
+  `UNIQUE(user_id, title)`).
+- `category_id`/`subgenre_id` **permanecem em `rpgs`** — decisão
+  documentada (não movidos nesta sessão; ver
+  `LIBRARY_ARCHITECTURE.md`).
+- Dedup por ISBN e compartilhamento de Publication entre contas
+  **continuam não implementados** — a física do schema já suporta,
+  mas o comportamento de escrita é 1:1 (sem reuso), decisão deliberada
+  documentada em `LIBRARY_ARCHITECTURE.md`.
+- `rpgs.archived_at` (nullable, aditivo) — arquitetura pronta para
+  F-011, não implementado.
+
+O problema #2 (dedup por título) permanece real e sem mudança nesta
+sessão — segue como `F-010`, agora com a base física
+(`publications.isbn`/`isbn10`/`isbn13`) pronta para quando for feito.

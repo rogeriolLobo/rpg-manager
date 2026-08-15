@@ -1,13 +1,18 @@
 import { Hono, type Context } from 'hono';
 import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendationScore, type RecommendationCandidate } from '../../domain/rpg/recommendation';
 import { rpgInputSchema } from '../../shared/validation/schemas';
-import { ApiError, cleanNullable, nowIso, readJson } from '../http';
+import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
+import { LIBRARY_ENTRY_JOIN, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+// LIB-002: title/coverUrl/isbn/coverSourceUrl/coverSourceNote vêm de `publications`
+// (p.*), a fonte de verdade editorial desde a normalização de domínio — não mais
+// das colunas homônimas em `rpgs`, mantidas fisicamente por segurança de rollback
+// mas não lidas pelo app (ver src/server/routes/library-writes.ts).
 interface RpgRow {
-  id: string; title: string; category_id: string | null; category_name: string | null; subgenre_id: string | null; subgenre_name: string | null;
+  id: string; publication_id: string | null; title: string; category_id: string | null; category_name: string | null; subgenre_id: string | null; subgenre_name: string | null;
   reading_status: RecommendationCandidate['readingStatus']; has_played: number; wants_to_play: number; priority: RecommendationCandidate['priority'];
   play_group_notes: string; planned_play_date: string | null; table_status: RecommendationCandidate['tableStatus']; game_master: string; notes: string;
   play_group_id: string | null; play_group_name: string | null; cover_url: string | null; isbn: string | null;
@@ -15,12 +20,13 @@ interface RpgRow {
 }
 
 function present(row: RpgRow) {
+  const title = row.title;
   const candidate: RecommendationCandidate = {
-    title: row.title, readingStatus: row.reading_status, hasPlayed: Boolean(row.has_played), wantsToPlay: Boolean(row.wants_to_play),
+    title, readingStatus: row.reading_status, hasPlayed: Boolean(row.has_played), wantsToPlay: Boolean(row.wants_to_play),
     priority: row.priority, hasPlayGroup: Boolean(row.play_group_id || row.play_group_notes.trim()), tableStatus: row.table_status,
   };
   return {
-    id: row.id, title: row.title, categoryId: row.category_id, categoryName: row.category_name, subgenreId: row.subgenre_id,
+    id: row.id, title, categoryId: row.category_id, categoryName: row.category_name, subgenreId: row.subgenre_id,
     subgenreName: row.subgenre_name, readingStatus: row.reading_status, hasPlayed: candidate.hasPlayed, wantsToPlay: candidate.wantsToPlay,
     priority: row.priority, playGroupId: row.play_group_id, playGroupName: row.play_group_name, playGroupNotes: row.play_group_notes, plannedPlayDate: row.planned_play_date, tableStatus: row.table_status,
     gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, isbn: row.isbn, coverSourceUrl: row.cover_source_url,
@@ -29,8 +35,11 @@ function present(row: RpgRow) {
   };
 }
 
-const SELECT = `SELECT r.*,c.name category_name,s.name subgenre_name,g.name play_group_name FROM rpgs r
-  LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id`;
+const SELECT = `SELECT r.id,r.publication_id,COALESCE(p.title,r.title) title,r.category_id,c.name category_name,r.subgenre_id,s.name subgenre_name,
+  r.reading_status,r.has_played,r.wants_to_play,r.priority,r.play_group_notes,r.play_group_id,g.name play_group_name,r.planned_play_date,r.table_status,
+  r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note,
+  r.created_at,r.updated_at FROM rpgs r
+  ${LIBRARY_ENTRY_JOIN} LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id`;
 
 async function validateTaxonomy(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
@@ -92,12 +101,9 @@ rpgRoutes.post('/', async (c) => {
   const input = await readJson(c, rpgInputSchema); const user = c.get('user'); const id = crypto.randomUUID(); const now = nowIso();
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
   await validateGroup(c, input.playGroupId);
+  const { statements } = buildCreateLibraryEntryStatements(c.env.DB, { entryId: id, userId: user.id, input, now });
   try {
-    await c.env.DB.prepare(`INSERT INTO rpgs (id,user_id,title,category_id,subgenre_id,reading_status,has_played,wants_to_play,priority,
-      play_group_notes,play_group_id,planned_play_date,table_status,game_master,notes,cover_url,isbn,cover_source_url,cover_source_note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(id, user.id, input.title, cleanNullable(input.categoryId), cleanNullable(input.subgenreId), input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
-        input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), cleanNullable(input.isbn),
-        cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), now, now).run();
+    await c.env.DB.batch(statements);
   } catch (error) { if (String(error).includes('UNIQUE')) throw new ApiError(409, 'DUPLICATE_RPG', 'Já existe um RPG com este título.'); throw error; }
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(id, user.id).first<RpgRow>();
   return c.json({ item: present(row!) }, 201);
@@ -112,18 +118,23 @@ rpgRoutes.get('/:id', async (c) => {
 });
 
 rpgRoutes.patch('/:id', async (c) => {
-  const input = await readJson(c, rpgInputSchema); const user = c.get('user');
-  const existing = await c.env.DB.prepare('SELECT id FROM rpgs WHERE id=? AND user_id=?').bind(c.req.param('id'), user.id).first();
+  const input = await readJson(c, rpgInputSchema); const user = c.get('user'); const entryId = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT id,publication_id FROM rpgs WHERE id=? AND user_id=?').bind(entryId, user.id).first<{ id: string; publication_id: string | null }>();
   if (!existing) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
   await validateTaxonomy(c, input.categoryId, input.subgenreId);
   await validateGroup(c, input.playGroupId);
-  const result = await c.env.DB.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
-    play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,cover_url=?,isbn=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=? AND user_id=?`)
-    .bind(input.title, cleanNullable(input.categoryId), cleanNullable(input.subgenreId), input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
-      input.playGroupNotes, cleanNullable(input.playGroupId), cleanNullable(input.plannedPlayDate), input.tableStatus, input.gameMaster, input.notes, cleanNullable(input.coverUrl), cleanNullable(input.isbn),
-      cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), nowIso(), c.req.param('id'), user.id).run();
-  if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
-  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(c.req.param('id'), user.id).first<RpgRow>();
+  // publication_id sempre presente após o backfill do LIB-002 (toda criação nova também sempre
+  // cria a Publication na mesma transação) — o fallback só evita quebrar num estado inconsistente
+  // impossível de alcançar por código, não é um caminho suportado.
+  const statements = existing.publication_id
+    ? buildUpdateLibraryEntryStatements(c.env.DB, { entryId, userId: user.id, publicationId: existing.publication_id, input, now: nowIso() })
+    : [c.env.DB.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
+        play_group_notes=?,play_group_id=?,planned_play_date=?,table_status=?,game_master=?,notes=?,updated_at=? WHERE id=? AND user_id=?`)
+        .bind(input.title, input.categoryId ?? null, input.subgenreId ?? null, input.readingStatus, Number(input.hasPlayed), Number(input.wantsToPlay), input.priority,
+          input.playGroupNotes, input.playGroupId ?? null, input.plannedPlayDate ?? null, input.tableStatus, input.gameMaster, input.notes, nowIso(), entryId, user.id)];
+  const results = await c.env.DB.batch(statements);
+  if (!results.at(-1)!.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
+  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, user.id).first<RpgRow>();
   return c.json({ item: present(row!) });
 });
 

@@ -141,3 +141,73 @@ A Opção A já modela isso via `publication_type` (`CORE_RULEBOOK`,
 `ADVENTURE`, `ONE_SHOT`, `CAMPAIGN`, etc.) — não precisa de mudança
 adicional de schema para isso no futuro, só popular o enum conforme o
 produto evoluir.
+
+---
+
+## LIB-002 — Implementado (migration `0016_library_domain_normalization.sql`)
+
+A Opção A acima foi implementada nesta sessão, com os ajustes de escopo
+abaixo (documentados porque divergem ou detalham o desenho original).
+
+### Escopo de criação: sem reuso/dedup nesta versão
+
+`game_systems`/`publications` **não têm coluna `user_id`** (são
+fisicamente tabelas de catálogo, não de estado por usuário — o mesmo
+padrão já usado por `categories`/`subgenres`), mas o **comportamento**
+de escrita do LIB-002 é 1:1: toda criação (manual ou import) sempre gera
+um novo `game_systems` + `publications`, nunca reaproveita uma linha
+existente, mesmo com título ou ISBN idênticos (dentro da mesma conta ou
+entre contas diferentes). `UNIQUE(user_id, title)` em `rpgs` continua
+sendo a única defesa contra duplicata, exatamente como antes desta
+migration.
+
+Isso é deliberado, não uma limitação esquecida: a seção 13 do pedido que
+motivou o LIB-002 exige que "cada publication tenha apenas um owner
+associado" nesta fase, e a seção 14 proíbe transformar `publications` em
+catálogo compartilhado sem revisão de segurança dedicada. Dedup real por
+ISBN (seção 15) e reuso entre contas (habilitando "biblioteca visível
+para amigos" no futuro) ficam para uma sessão futura com desenho de
+autorização próprio — a física das tabelas já suporta isso sem nova
+migration de schema quando chegar a hora.
+
+### category_id/subgenre_id continuam em `rpgs`
+
+Auditados como conceitualmente pertencentes ao catálogo (Game System),
+não ao estado pessoal — mas **não foram movidos** nesta migration.
+Mover exigiria uma segunda mudança de schema não relacionada (adicionar
+as colunas em `game_systems`, migrar os dados, reescrever todas as
+queries de filtro/busca/contagem que hoje leem `r.category_id`/
+`r.subgenre_id` diretamente) — fora do escopo de "uma fundação por vez".
+Fica registrado como candidato a uma sessão futura, não como pendência
+esquecida.
+
+### Fonte de verdade após o cutover
+
+`publications` é a fonte de verdade para `title`/`coverUrl`/`isbn`/
+`coverSourceUrl`/`coverSourceNote` — todo `SELECT` do app usa o JOIN
+canônico (`src/server/routes/library-writes.ts`, `LIBRARY_ENTRY_JOIN`).
+As colunas homônimas em `rpgs` continuam fisicamente na tabela (nenhuma
+coluna foi removida — migration aditiva) mas **não são mais escritas**
+pelo app após esta migration, exceto `rpgs.title`: essa continua sendo
+escrita em paralelo (dual-write) porque `UNIQUE(user_id, title)` e
+`NOT NULL CHECK` são constraints físicas da tabela `rpgs` que a
+aplicação não pode deixar de satisfazer sem uma migration destrutiva de
+schema (fora de escopo aqui). As demais (`cover_url`, `isbn`,
+`cover_source_url`, `cover_source_note` em `rpgs`) ficam congeladas no
+valor que tinham no momento da migration — mantidas apenas como rede de
+segurança para rollback lógico, nunca lidas pelo app.
+
+### `archived_at`
+
+Coluna aditiva adicionada em `rpgs` (nullable, nunca definida por nenhum
+código desta sessão) — arquitetura pronta para F-011 (Archive de RPG),
+que continua `NOT_STARTED` e fora de escopo do LIB-002.
+
+### O que NÃO mudou (compatibilidade)
+
+- Nenhum endpoint novo (`/game-systems`, `/publications`) — não fazia
+  sentido nesta fase (seção 19 do pedido).
+- `GET/POST/PATCH /rpgs` continuam com o mesmo formato de payload
+  achatado — o frontend (`library-pages.tsx`) não precisou mudar.
+- Import CSV usa a mesma camada canônica de escrita do cadastro manual
+  (`buildCreateLibraryEntryStatements`, `src/server/routes/library-writes.ts`).

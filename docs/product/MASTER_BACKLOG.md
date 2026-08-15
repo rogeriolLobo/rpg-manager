@@ -38,22 +38,40 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   `docs/bugs/RPG_EDIT_INVALID_DATA.md` e `docs/library/COVER_STORAGE.md`)
 - **Production version:** `77696b49-0204-47c9-92da-1cebea49c4d7`
 
-## LIB-001 — Biblioteca: vertical slice completo
+## LIB-001 — Biblioteca: bug de coverUrl
 
-- **Priority:** P0 (bug de coverUrl) → P2 (restante do vertical slice)
-- **Status:** `IN_PROGRESS` — bug funcional `DONE`, arquitetura futura
-  (upload/KV, metadata providers, split System→Publication→User State)
-  `NOT_STARTED` (desenhada, não implementada — ver
-  `docs/library/`)
+- **Priority:** P0
+- **Status:** `DONE` (bug funcional) — ver LIB-002 para a evolução de
+  arquitetura que era P2 dentro deste item e virou item próprio.
 - **Dependencies:** nenhuma
 - **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
-- **Commit:** `ec51077` (bug de coverUrl); restante sem commit ainda
+- **Commit:** `ec51077`
 - **Production version:** `77696b49-0204-47c9-92da-1cebea49c4d7`
 - **Docs:** `docs/library/LIBRARY_CURRENT_STATE.md`,
   `docs/library/LIBRARY_ARCHITECTURE.md`,
   `docs/library/COVER_STORAGE.md`,
   `docs/library/METADATA_PROVIDERS.md`,
   `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+
+## LIB-002 — Biblioteca: normalização de domínio (Game System + Publication + User Library Entry)
+
+- **Priority:** P1
+- **Status:** `IN_PROGRESS` — ver
+  `docs/library/LIBRARY_DEFINITION_OF_DONE.md` para o checklist completo;
+  preenchido para `DONE` só após migration remota + deploy + smoke
+  confirmados nesta mesma sessão.
+- **Dependencies:** LIB-001 (`DONE`)
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Migration:** `migrations/0016_library_domain_normalization.sql`
+  (aditiva — `CREATE TABLE game_systems`, `CREATE TABLE publications`,
+  `ALTER TABLE rpgs ADD COLUMN publication_id`,
+  `ALTER TABLE rpgs ADD COLUMN archived_at`, backfill idempotente)
+- **Docs:** `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-002 —
+  Implementado"), `docs/library/LIBRARY_CURRENT_STATE.md` (seção
+  "Atualização — LIB-002"), `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Fora de escopo (deliberado, ver docs acima):** F-008 (upload+KV),
+  F-009 (Open Library), F-010 (dedup real por ISBN), F-011 (archive de
+  RPG), mover `category_id`/`subgenre_id` para `game_systems`.
 
 ## P0-002 — Falhas em GitHub Actions
 
@@ -97,11 +115,11 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `NOT_STARTED` |
 | F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `NOT_STARTED` |
 | F-006 | Teste de integração dedicado para Global Search | P2 | `NOT_STARTED` |
-| F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `NOT_STARTED` |
+| F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `DONE` (LIB-002) |
 | F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `NOT_STARTED` |
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `NOT_STARTED` |
-| F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `NOT_STARTED` |
-| F-011 | Archive de RPG (hoje só existe delete físico) | P3 | `NOT_STARTED` |
+| F-010 | Dedup de RPG por ISBN em vez de título exato (schema pronto desde LIB-002: `publications.isbn10`/`isbn13`) | P2 | `NOT_STARTED` |
+| F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `NOT_STARTED` |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):
 VTT, Sheets (motor completo), Social/Amizades.

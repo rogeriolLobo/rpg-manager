@@ -27,6 +27,13 @@ async function request(
     body: body ? JSON.stringify(body) : undefined,
   });
 }
+// LIB-002: cover_url é lido de `publications` (fonte de verdade editorial), não mais da coluna
+// homônima legada em `rpgs` — ver src/server/routes/library-writes.ts. Testes que simulam um
+// registro "legado" gravando a capa direto no banco (bypassando a API) precisam escrever na
+// tabela certa para que o GET/PATCH reais enxerguem o valor simulado.
+async function setLegacyCoverUrl(rpgId: string, coverUrl: string | null) {
+  await testEnv.DB.prepare("UPDATE publications SET cover_url=? WHERE id=(SELECT publication_id FROM rpgs WHERE id=?)").bind(coverUrl, rpgId).run();
+}
 function authCookies(response: Response) {
   const value = response.headers.get("set-cookie") ?? "";
   const session = value.match(/rpg_session=([^;,]+)/)?.[1];
@@ -349,7 +356,7 @@ describe("API real com D1", () => {
     expect(((await detailAfterCrossAccountUpdate.json()) as {members:Array<{playerName:string;active:number}>}).members[0]).toMatchObject({ playerName: "Adriana L.", active: 1 });
     const backup = await request('/export','GET',undefined,account.cookie);
     const backupData = (await backup.json()) as {version:number;data:{groups:unknown[];groupMembers:unknown[];preferences:Array<{theme:string}>}};
-    expect(backupData.version).toBe(5);
+    expect(backupData.version).toBe(6);
     expect(backupData.data.groups).toHaveLength(1);
     expect(backupData.data.groupMembers).toHaveLength(1);
     expect(backupData.data.preferences).toEqual([expect.objectContaining({theme:'SYSTEM'})]);
@@ -473,7 +480,7 @@ describe("API real com D1", () => {
     const dragonAgeId=((await dragonAge.json()) as {item:{id:string}}).item.id;
     const alien=await request('/rpgs','POST',{...rpg,title:'Alien'},account.cookie,account.csrf);
     const originalCover='https://www.jamboeditora.com.br/wp-content/uploads/2023/03/jamboeditora-capa-blue-rose-560x560.png';
-    await testEnv.DB.prepare('UPDATE rpgs SET cover_url=? WHERE id=?').bind(originalCover,blueRoseId).run();
+    await setLegacyCoverUrl(blueRoseId, originalCover);
     vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response('image',{status:200,headers:{'Content-Type':'image/jpeg'}})));
     const csv=[
       'Sistema / Jogo,Categoria,Subgênero,Status da leitura,Capa URL',
@@ -487,7 +494,7 @@ describe("API real com D1", () => {
     expect(preview.items.map((item)=>item.classification)).toEqual(['IGNORADO','ATUALIZACAO','ATUALIZACAO']);
     const confirmed=await request('/import/confirm','POST',{jobId:preview.jobId,approvedRows:[3]},account.cookie,account.csrf);
     expect(await confirmed.json()).toMatchObject({updated:1});
-    const rows=await testEnv.DB.prepare('SELECT id,cover_url FROM rpgs WHERE user_id=?').bind(account.user.id).all<{id:string;cover_url:string|null}>();
+    const rows=await testEnv.DB.prepare('SELECT r.id,p.cover_url FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id WHERE r.user_id=?').bind(account.user.id).all<{id:string;cover_url:string|null}>();
     const covers=new Map(rows.results.map((item)=>[item.id,item.cover_url]));
     expect(covers.get(blueRoseId)).toBe(originalCover);
     expect(covers.get(dragonAgeId)).toBe('https://covers.openlibrary.org/b/isbn/222-L.jpg');
@@ -499,7 +506,7 @@ describe("API real com D1", () => {
     const created = await request('/rpgs', 'POST', { ...rpg, title: 'RPG Legado Import' }, account.cookie, account.csrf);
     const importRpgId = ((await created.json()) as { item: { id: string } }).item.id;
     const legacyCoverUrl = 'https://devir.com.br/wp-content/uploads/2022/08/imagem-destaque-site-1-2-780x654.png';
-    await testEnv.DB.prepare('UPDATE rpgs SET cover_url=? WHERE id=?').bind(legacyCoverUrl, importRpgId).run();
+    await setLegacyCoverUrl(importRpgId, legacyCoverUrl);
 
     // Simula reexportar/reimportar o catálogo: a mesma capa legada (fora da allowlist atual)
     // volta no CSV para uma linha cujo RPG já existe e já tem capa própria — deve ser
@@ -521,7 +528,7 @@ describe("API real com D1", () => {
     const rpgId = ((await created.json()) as { item: { id: string } }).item.id;
     // Simula um registro legado/importado cuja capa aponta para um host que não está na allowlist atual.
     const legacyCoverUrl = "https://encrypted-tbn2.gstatic.com/shopping?q=tbn:ANd9GcSlegacythumb";
-    await testEnv.DB.prepare("UPDATE rpgs SET cover_url=? WHERE id=?").bind(legacyCoverUrl, rpgId).run();
+    await setLegacyCoverUrl(rpgId, legacyCoverUrl);
 
     // READ MODEL: exatamente o que o frontend usa para preencher o formulário de edição.
     const got = await request(`/rpgs/${rpgId}`, "GET", undefined, account.cookie);
@@ -593,7 +600,7 @@ describe("API real com D1", () => {
       const rejected = await request(`/rpgs/${devirRpgId}`, "PATCH", { ...base, coverUrl: unsafe }, account.cookie, account.csrf);
       expect(rejected.status).toBe(422);
     }
-    const afterRejected = await testEnv.DB.prepare("SELECT cover_url FROM rpgs WHERE id=?").bind(devirRpgId).first<{ cover_url: string }>();
+    const afterRejected = await testEnv.DB.prepare("SELECT p.cover_url cover_url FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id WHERE r.id=?").bind(devirRpgId).first<{ cover_url: string }>();
     expect(afterRejected?.cover_url).toBe(newHostUrl);
 
     // Remoção da capa: deve funcionar e normalizar para null (não é tratada como URL inválida).

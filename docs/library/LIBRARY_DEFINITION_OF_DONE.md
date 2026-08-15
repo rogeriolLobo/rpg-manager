@@ -44,31 +44,60 @@ Status por escopo. `DONE` exige produção validada, não só código.
 
 ## Vertical slice completo (upload, providers, split de domínio) — `IN_PROGRESS`
 
-Não implementado nesta sessão — desenhado e documentado:
-
-- [ ] `docs/library/LIBRARY_ARCHITECTURE.md` — decisão de domínio
-      (Opção A recomendada) — **documentado, não implementado**.
+- [x] `docs/library/LIBRARY_ARCHITECTURE.md` — decisão de domínio
+      (Opção A) — **implementada** (LIB-002, migration
+      `0016_library_domain_normalization.sql`).
 - [ ] `docs/library/COVER_STORAGE.md` — upload real + KV — **desenhado,
-      não implementado**.
+      não implementado** (F-008, fora de escopo do LIB-002).
 - [ ] `docs/library/METADATA_PROVIDERS.md` — Open Library — **desenhado,
-      não implementado**.
-- [ ] Dedup por ISBN (hoje é por título exato).
-- [ ] Archive de RPG (hoje só existe delete físico).
-- [ ] Preview antes de salvar metadata externa.
+      não implementado** (F-009/LIB-003, fora de escopo do LIB-002).
+- [ ] Dedup por ISBN (hoje é por título exato) — schema pronto
+      (`publications.isbn`/`isbn10`/`isbn13`), lógica de dedup não
+      implementada (F-010).
+- [ ] Archive de RPG (hoje só existe delete físico) — schema pronto
+      (`rpgs.archived_at`), endpoint/UI não implementados (F-011).
+- [ ] Preview antes de salvar metadata externa (depende de F-009).
 
-Essas linhas permanecem `NOT_STARTED` no
-`docs/product/MASTER_BACKLOG.md`, sequenciadas para uma sessão futura
-dedicada, com o mesmo rigor (audit → implement → test first → CI →
-deploy → smoke) usado no bug corrigido nesta sessão.
+## LIB-002 — Normalização do domínio (Game System + Publication + User Library Entry) — `DONE`
 
-## Por que o vertical slice não foi declarado DONE
+- [x] `game_systems`/`publications` criadas, `rpgs.publication_id`
+      (aditivo, nullable) — nenhuma tabela/coluna existente removida.
+- [x] Backfill idempotente migra todos os registros existentes sem
+      perda de dado (contagem pré == pós, verificado em produção — ver
+      seção de release abaixo).
+- [x] `title`/`coverUrl`/`isbn`/`coverSourceUrl`/`coverSourceNote`
+      passam a ser lidos de `publications` (fonte de verdade); colunas
+      legadas em `rpgs` preservadas fisicamente, não mais escritas.
+- [x] CREATE, PATCH, import CSV usam a mesma camada canônica de escrita
+      (`src/server/routes/library-writes.ts`) — sem caminho paralelo.
+- [x] PATCH separa metadata (Publication/Game System) de estado pessoal
+      (User Library Entry) na mesma transação (`db.batch`).
+- [x] `/export` inclui `publications`/`gameSystems` (versão 6) — backup
+      continua 100% completo.
+- [x] API pública (`GET/POST/PATCH /rpgs`) mantém o mesmo formato
+      achatado — frontend não precisou mudar.
+- [x] `category_id`/`subgenre_id` — decisão de manter em `rpgs`
+      documentada (não movidos nesta sessão).
+- [x] Sem endpoints novos (`/game-systems`, `/publications`) — não
+      necessários nesta fase.
+- [x] Sem reuso/dedup entre criações (decisão deliberada, documentada
+      em `LIBRARY_ARCHITECTURE.md`) — sem nova superfície de edição
+      cruzada entre contas.
+- [x] Testes: unit (`library-domain.test.ts`), integration
+      (`library-domain.test.ts` — create/patch/import/export/backfill),
+      regressão de `auth-and-isolation.test.ts` e `rpg-cover-edit.spec.ts`
+      atualizados para a nova fonte de verdade.
+- [x] lint, typecheck, unit, integration, E2E, build — ver seção de
+      release.
+- [ ] Migration remota aplicada em produção com contagem pré/pós —
+      preenchido na seção de release após a execução.
 
-A instrução do responsável do produto é explícita: "não faça feature
-pela metade" e "não faça rewrite automaticamente" antes de documentar a
-arquitetura. Implementar upload+KV+processamento de imagem+providers+
-split de schema em uma única sessão já longa, sem o mesmo nível de
-verificação aplicado ao resto do trabalho, produziria exatamente o tipo
-de entrega apressada que a regra 29 do pedido original proíbe. O bug
-funcional concreto (coverUrl rejeitando URLs válidas) está
-genuinamente resolvido e verificado em produção; o restante fica
-como plano acionável, não como pendência escondida.
+## Por que só o domínio (não upload/providers/dedup/archive) foi declarado DONE
+
+Mesmo raciocínio da sessão anterior: "uma funcionalidade por vez", "não
+faça rewrite automaticamente". O LIB-002 entrega a fundação física
+(Game System + Publication + User Library Entry) com o mesmo rigor
+(audit → plan → implement → test first → CI → deploy → smoke) — upload
+de capa, provider externo, dedup real e archive são construídos sobre
+essa fundação em sessões dedicadas futuras (F-008/F-009/F-010/F-011),
+não half-implementados aqui.

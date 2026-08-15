@@ -1,8 +1,10 @@
 import { execSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 
+// LIB-002: cover_url é lido de `publications` (fonte de verdade editorial), não mais da
+// coluna homônima legada em `rpgs` — ver src/server/routes/library-writes.ts.
 function updateLocalCoverUrl(rpgId: string, coverUrl: string) {
-  const sql = `UPDATE rpgs SET cover_url='${coverUrl}' WHERE id='${rpgId}';`;
+  const sql = `UPDATE publications SET cover_url='${coverUrl}' WHERE id=(SELECT publication_id FROM rpgs WHERE id='${rpgId}');`;
   execSync(`npx wrangler d1 execute DB --local --command "${sql.replaceAll('"', '\\"')}"`, { stdio: "pipe" });
 }
 
