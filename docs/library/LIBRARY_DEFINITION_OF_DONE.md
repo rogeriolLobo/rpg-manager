@@ -242,5 +242,35 @@ Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo.
 
 ### Release — LIB-004
 
-Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
-valores finais de commit/Worker Version/contagens de produção).
+- Git HEAD: `4dde623` (`origin/main` = `4dde623`, mesmo commit).
+- Commits da feature: `feat(library): LIB-004 busca online de publicações
+  (Open Library)`, mais dois fixes de causa raiz do CI (colisão de
+  substring `getByLabel("Título")`/`getByText("Manual")` e o
+  `AUTH_REGISTRATION_RATE_LIMITER` global-por-IP estourando com o suite
+  de E2E maior — ver commit `4dde623`).
+- CI: run `31928174310` — `success` (`validate` em 3m32s).
+- Migration `0018_publication_authors.sql` aplicada em produção
+  (`rpg-manager-production`, remote) — aditiva, `ALTER TABLE
+  publications ADD COLUMN authors`. Pré-contagem 30/30/30
+  (rpgs/publications/game_systems) preservada, pós-contagem 30/30 —
+  nenhum dado perdido.
+- Deploy: `wrangler deploy` — Worker Version ID
+  `fcef1f72-4a17-4ae4-be20-37c78b36790e`.
+- Produção via `/api/v1/version`: `{"commit":"4dde623","build":"2026-08-16T05:09:27.182Z","environment":"production"}`
+  — bate com Git HEAD e `origin/main`.
+- Smoke read-only: homepage `200`, `/login` `200`,
+  `GET /api/v1/rpgs/search-external` sem sessão → `401` (rota nova
+  existe e exige autenticação, como esperado).
+- Smoke autenticado (Buscar online → selecionar → preview → salvar):
+  `MANUAL_SMOKE_REQUIRED` — Turnstile bloqueia registro/login
+  automatizado em produção. Checklist para o responsável:
+  1. Login em produção.
+  2. Biblioteca → Novo RPG → "Buscar online".
+  3. Buscar um livro real (ex.: título ou ISBN de um RPG existente).
+  4. Selecionar um resultado → conferir tela de preview (dados +
+     aviso "Dados de: Open Library").
+  5. Editar um campo do preview (ex.: notas pessoais) antes de salvar.
+  6. Salvar → conferir card na Biblioteca e "Origem do cadastro:
+     Open Library" na página de detalhe.
+  7. Editar esse RPG depois (PATCH) → confirmar que o cadastro manual
+     de outro RPG continua funcionando normalmente (regressão zero).
