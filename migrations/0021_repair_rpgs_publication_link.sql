@@ -1,0 +1,43 @@
+-- LIB-004B: repara `rpgs.publication_id`, corrompido pela migration 0020.
+--
+-- CAUSA RAIZ (reproduzida e comprovada localmente antes deste reparo — ver
+-- docs/library/LIBRARY_ARCHITECTURE.md, seção "LIB-004B"): a migration 0020
+-- fazia `DROP TABLE publications` para trocar sua estrutura (técnica oficial
+-- do SQLite para alterar CHECK constraints). `rpgs.publication_id` tem
+-- `REFERENCES publications(id) ON DELETE SET NULL` (migration 0016). A
+-- `PRAGMA foreign_keys = OFF` no topo da migration 0020 NÃO teve efeito sobre
+-- o `DROP TABLE` seguinte — SQLite trata `PRAGMA foreign_keys` como no-op
+-- dentro de uma transação já aberta, e o D1 executa cada arquivo de migration
+-- como uma transação implícita única. Resultado: o `DROP TABLE publications`
+-- dispara o `ON DELETE SET NULL`, zerando `publication_id` em TODA LINHA de
+-- `rpgs` que referenciava a Publication antiga — mesmo a Publication tendo
+-- sido corretamente recriada (com o mesmo `id`) alguns comandos depois, no
+-- mesmo arquivo.
+--
+-- Local (banco vazio) e CI (banco vazio) nunca reproduziram o bug porque a
+-- migration 0020 roda ANTES de qualquer `rpgs` existir nesses ambientes — só
+-- produção (com 30 linhas reais já existentes antes desta sessão) tinha algo
+-- para o `ON DELETE SET NULL` realmente zerar. Reproduzido deliberadamente
+-- nesta sessão com uma tabela `parent`/`child` mínima replicando exatamente a
+-- sequência da migration 0020, confirmando o mecanismo antes de escrever este
+-- reparo (não foi aplicado por suposição).
+--
+-- Nenhum dado de `publications` foi perdido (a tabela foi recriada com as
+-- MESMAS 30 linhas/mesmos IDs, só a constraint de metadata_source mudou) —
+-- só o PONTEIRO em `rpgs.publication_id` sumiu. Toda Publication migrada
+-- pela migration 0016 tem `id = 'pub_' || rpgs.id` (padrão determinístico,
+-- nunca alterado desde então) — verificado em produção antes deste reparo:
+-- 30/30 linhas de `rpgs` têm uma Publication correspondente exatamente nesse
+-- padrão. O reparo é, portanto, uma correspondência exata e verificável, não
+-- uma inferência.
+--
+-- Idempotente e seguro para reexecução/aplicação em qualquer ambiente: só
+-- atualiza linhas com `publication_id IS NULL` E que tenham uma Publication
+-- correspondente pelo padrão determinístico — nunca sobrescreve um
+-- `publication_id` já preenchido (ex.: RPGs criados depois da migration 0020,
+-- via LIB-003/LIB-004, com IDs de Publication gerados por
+-- `crypto.randomUUID()`, que não seguem esse padrão e não são afetados).
+UPDATE rpgs
+SET publication_id = 'pub_' || id
+WHERE publication_id IS NULL
+  AND EXISTS (SELECT 1 FROM publications p WHERE p.id = 'pub_' || rpgs.id);

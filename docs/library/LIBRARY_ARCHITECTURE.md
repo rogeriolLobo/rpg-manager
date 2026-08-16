@@ -341,3 +341,94 @@ contra a API real antes de qualquer mudança de código). Resumo do que muda:
   trabalho (não é uma mudança do LIB-004A em si, mas afeta como qualquer
   release — incluindo este — se verifica): ver
   `docs/release/RELEASE_CHAIN_POLICY.md`.
+
+## LIB-004B — Regressão de capas na listagem da Biblioteca (causa raiz + reparo)
+
+Descoberta no manual smoke do LIB-004A: a busca (online e catálogo interno)
+mostrava capas corretamente, mas a grade "Biblioteca → Seu catálogo" mostrava
+quase todos os cards sem capa (placeholder H&M), mesmo para RPGs com capa
+real cadastrada em `publications.cover_url`.
+
+### Causa raiz (comprovada, não hipotética)
+
+A migration `0020_publication_metadata_source_open.sql` (LIB-004A) recriava
+`publications` via `DROP TABLE publications` (técnica oficial do SQLite para
+alterar um `CHECK` constraint, que não pode ser feito por `ALTER TABLE`).
+`rpgs.publication_id` tem `REFERENCES publications(id) ON DELETE SET NULL`
+(migration 0016). A migration 0020 abria com `PRAGMA foreign_keys = OFF`,
+mas essa pragma é **no-op dentro de uma transação já aberta** (documentado
+pelo próprio SQLite) — e o D1 executa cada arquivo de migration como uma
+única transação implícita. Resultado: o `DROP TABLE publications` disparou o
+`ON DELETE SET NULL`, zerando `publication_id` em **toda linha de `rpgs` que
+já existia em produção antes da migration rodar** — mesmo a Publication
+tendo sido recriada com o mesmo `id` poucos comandos depois, no mesmo
+arquivo.
+
+Local e CI nunca reproduziram o bug porque ambos sempre migram um banco
+**vazio** (replay completo de todas as migrations desde o início) — não
+havia nenhuma linha de `rpgs` para o `ON DELETE SET NULL` zerar nesse
+momento. Só produção, com 30 linhas reais já existentes antes desta sessão,
+tinha algo para o cascade realmente destruir. **Mecanismo reproduzido
+deliberadamente** com uma tabela pai/filho mínima replicando a sequência
+exata da migration 0020, confirmando o efeito antes de escrever qualquer
+reparo — ver `tests/integration/library-list-cover-regression.test.ts`
+("técnica segura de rebuild de tabela").
+
+`publications` em si **nunca perdeu dado nenhum** — foi recriada com as
+mesmas 30 linhas/mesmos valores, só a constraint mudou. Só o **ponteiro**
+`rpgs.publication_id` foi apagado, silenciosamente, sem gerar nenhuma
+violação de FK (`SET NULL` por definição não deixa violação — por isso
+`PRAGMA foreign_key_check`, rodado após a migration 0020 antes de aplicar em
+produção, não detectou nada de errado).
+
+### "28 títulos" vs "30 RPGs" — não é perda de dados
+
+Investigado à parte (seção 10 do pedido LIB-004B): o número "30" reportado
+em todos os releases anteriores é o total GLOBAL da tabela `rpgs` (todas as
+contas). A conta principal usada nas auditorias (`rogerioluislobo@gmail.com`)
+tem exatamente **28** RPGs; as outras 2 linhas pertencem a **duas contas
+reais de outros usuários**, registradas em 13–14/08/2026 (antes desta
+sessão), cada uma com 1 RPG próprio. Nenhum dado foi perdido — "30" sempre
+foi a soma multi-tenant, "28" é a contagem correta e isolada de uma conta
+específica. Lição para relatórios futuros: registrar sempre que uma
+contagem é global (toda `rpgs`) ou por conta, para não repetir essa
+confusão.
+
+### Reparo (`migrations/0021_repair_rpgs_publication_link.sql`, aditivo)
+
+Toda Publication migrada pela migration 0016 (backfill original do LIB-002)
+tem `id = 'pub_' || rpgs.id` — padrão determinístico, nunca alterado depois.
+Verificado em produção, antes do reparo: **30/30** linhas de `rpgs` têm uma
+Publication correspondente exatamente nesse padrão (nenhuma linha órfã).
+
+```sql
+UPDATE rpgs
+SET publication_id = 'pub_' || id
+WHERE publication_id IS NULL
+  AND EXISTS (SELECT 1 FROM publications p WHERE p.id = 'pub_' || rpgs.id);
+```
+
+Idempotente e seguro: só toca linhas com `publication_id IS NULL` e uma
+Publication correspondente pelo padrão — RPGs criados depois da migration
+0020 (com Publication de ID aleatório, via LIB-003/004) nunca são afetados.
+
+### Lição para migrations futuras: rebuild de tabela com FKs de entrada
+
+`PRAGMA foreign_keys = OFF` **não é confiável** dentro de um arquivo de
+migration D1 (é no-op na transação implícita do arquivo). Qualquer rebuild
+de tabela (`DROP TABLE` + recriar) que tenha outra tabela referenciando-a por
+FK precisa, na mesma migration, **capturar os valores de FK antes do DROP e
+restaurá-los depois** — nunca confiar só na pragma:
+
+```sql
+CREATE TABLE _fk_backup (id TEXT PRIMARY KEY, parent_id TEXT);
+INSERT INTO _fk_backup SELECT id, parent_id FROM tabela_filha WHERE parent_id IS NOT NULL;
+-- ... DROP TABLE / recriar / RENAME da tabela pai ...
+UPDATE tabela_filha SET parent_id = (SELECT parent_id FROM _fk_backup WHERE _fk_backup.id = tabela_filha.id) WHERE id IN (SELECT id FROM _fk_backup);
+DROP TABLE _fk_backup;
+```
+
+(`CREATE TEMP TABLE` não é autorizado pelo D1 — `SQLITE_AUTH` — usar uma
+tabela normal removida ao final da mesma migration.) Testado e comprovado em
+`tests/integration/library-list-cover-regression.test.ts`. Nenhuma migration
+futura que recrie uma tabela referenciada por outra deve pular esse passo.

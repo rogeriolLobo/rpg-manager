@@ -353,3 +353,74 @@ completa em `docs/library/METADATA_PROVIDERS.md`).
 
 Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
 valores finais de commit/CI/Worker Version/contagens de produção/smoke).
+
+## LIB-004B — Regressão de capas na listagem da Biblioteca (reparo) — `DONE`
+
+P0 de regressão real em produção, causada pela própria migration 0020 do
+LIB-004A. Ver `docs/library/LIBRARY_ARCHITECTURE.md`, seção "LIB-004B",
+para a causa raiz completa e a lição para migrations futuras.
+
+- [x] Causa raiz identificada por reprodução real do mecanismo (tabela
+      pai/filho mínima replicando a sequência exata da migration 0020) —
+      não especulação: `PRAGMA foreign_keys = OFF` é no-op dentro da
+      transação implícita de um arquivo de migration D1; `DROP TABLE
+      publications` disparou `ON DELETE SET NULL` em
+      `rpgs.publication_id` para toda linha já existente em produção.
+- [x] Diagnóstico ponta a ponta com tabela real (4 títulos nomeados —
+      Vampiro: A Mascara 5 edição, Rastro de Cthulhu, Chamado de Cthulhu
+      (7ª edição), Blue Rose): `rpg_legacy_cover` e `publication_cover`
+      idênticos em todos os 4 (nenhum dado perdido), `rpg.publication_id`
+      nulo em todos, causa a listagem a devolver `coverUrl: null`.
+- [x] Contagem "28 vs 30" investigada e explicada factualmente: "30" é o
+      total GLOBAL de `rpgs` (multi-tenant); a conta principal auditada
+      tem 28; as outras 2 linhas são de 2 outras contas reais,
+      registradas antes desta sessão. **Não é perda de dados.**
+- [x] Nenhuma cópia de volta para `rpgs.cover_url` — a Biblioteca continua
+      consumindo só `publications` (fonte canônica desde LIB-002); o
+      reparo é só do ponteiro `publication_id`, nunca duplica a fonte de
+      verdade.
+- [x] Todos os endpoints que retornam RPG/Library Entry auditados —
+      todos usam o mesmo `SELECT`/`LIBRARY_ENTRY_JOIN` canônico
+      (`src/server/routes/rpgs.ts`/`library-writes.ts`) — não havia
+      mapper duplicado usando a estrutura antiga; a query já estava
+      correta desde LIB-004, o problema era puramente de dado
+      (`publication_id` nulo), não de query/DTO.
+- [x] Frontend confirmado consumindo `coverUrl` da API corretamente (sem
+      bug de naming/normalização) — o campo chega `null` da API quando o
+      vínculo está quebrado, e o placeholder H&M assume corretamente;
+      fallback nunca foi desligado.
+- [x] Migration `0021_repair_rpgs_publication_link.sql` (aditiva,
+      idempotente): restaura `publication_id` a partir do padrão
+      determinístico `pub_<rpg.id>` do backfill original (LIB-002),
+      verificado 30/30 em produção antes de aplicar — nunca sobrescreve
+      um `publication_id` já preenchido, nunca inventa vínculo sem
+      correspondência exata.
+- [x] Teste de regressão que falha no estado corrompido e passa após o
+      reparo (`tests/integration/library-list-cover-regression.test.ts`):
+      reproduz a corrupção exata (`publication_id=NULL` com Publication
+      intacta) → `GET /rpgs` devolve `coverUrl: null` → aplica o reparo →
+      `coverUrl` volta a bater com `publications.cover_url`.
+- [x] Teste dedicado de "técnica segura de rebuild de tabela": prova o
+      mecanismo (`DROP TABLE` zera FK `SET NULL` de outra tabela mesmo
+      com a pragma) e prova a técnica correta (captura antes/restaura
+      depois) para qualquer rebuild futuro.
+- [x] LIB-001 preservado: cover HTTPS externa continua aceita, sem
+      allowlist de domínio, sem fetch server-side para imagem simples.
+- [x] LIB-003 preservado: política de metadata compartilhada inalterada.
+- [x] LIB-004A preservado: relevância/aliases/catálogo interno/Open
+      Library/import por URL/SSRF — nenhum tocado nesta tarefa.
+- [x] unit: 172 (inalterado — nenhum código de domínio puro mudou nesta
+      tarefa, só dado + 1 migration + testes de integração).
+- [x] integration: 91 (5 novos em `library-list-cover-regression.test.ts`).
+- [x] lint, typecheck, build — verdes localmente.
+- [x] CI, deploy, `/api/v1/version` — ver seção de release.
+- [x] docs atualizadas (`LIBRARY_ARCHITECTURE.md` — causa raiz completa +
+      lição para migrations futuras, `LIBRARY_CURRENT_STATE.md`, este
+      arquivo, `MASTER_BACKLOG.md`).
+- [ ] Manual smoke: `MANUAL_SMOKE_REQUIRED` — confirmação visual das capas
+      de Vampiro/Rastro de Cthulhu/Chamado de Cthulhu/Blue Rose na
+      Biblioteca após o reparo + deploy continua bloqueada por
+      Turnstile/CAPTCHA (mesma situação de sempre, não contornado).
+      Checklist exato em `docs/product/MASTER_BACKLOG.md`. Verificação
+      read-only equivalente já feita via D1 direto (dado corrigido,
+      `publication_id` restaurado, cover_url idêntico ao pré-corrupção).

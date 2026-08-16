@@ -158,9 +158,10 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 
 - **Priority:** P0 (regressão funcional real em produção — busca
   retornava um resultado incorreto)
-- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após CI verde,
-  migration remota + deploy + production proof confirmados nesta mesma
-  sessão (ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`).
+- **Status:** `DONE` — CI verde, migration remota + deploy + production
+  proof confirmados. Reaberto brevemente como `IN_PROGRESS` pelo manual
+  smoke ter encontrado uma regressão real (LIB-004B, causada pela própria
+  migration 0020 desta tarefa) — corrigido e fechado, ver LIB-004B abaixo.
 - **Dependencies:** LIB-004 (`DONE`)
 - **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
 - **Bug relatado:** busca por "Rastro de Cthulhu" (RPG de Kenneth Hite/
@@ -186,6 +187,45 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - **Fora de escopo (deliberado):** UI de administração/confirmação de
   aliases (schema pronto, escrita fica para um fluxo futuro), tradução
   automática de títulos, upload/KV, archive, friends, maps, VTT.
+
+## LIB-004B — Regressão de capas na listagem da Biblioteca (reparo)
+
+- **Priority:** P0 (regressão de dados real em produção, causada pela
+  própria migration 0020 do LIB-004A)
+- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após CI verde,
+  migration remota + deploy + production proof confirmados nesta mesma
+  sessão.
+- **Dependencies:** LIB-004A
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Causa raiz:** `migrations/0020_publication_metadata_source_open.sql`
+  usava `DROP TABLE publications` para trocar um `CHECK` constraint.
+  `rpgs.publication_id` tem `ON DELETE SET NULL` (migration 0016);
+  `PRAGMA foreign_keys = OFF` no topo do arquivo é no-op dentro da
+  transação implícita do D1 — o `DROP TABLE` disparou o `SET NULL` em
+  toda linha de `rpgs` já existente em produção. `publications` nunca
+  perdeu dado; só o ponteiro `rpgs.publication_id` foi apagado. Local/CI
+  nunca reproduziram porque sempre migram um banco vazio. Mecanismo
+  reproduzido e comprovado — ver `docs/library/LIBRARY_ARCHITECTURE.md`,
+  seção "LIB-004B".
+- **"28 vs 30" investigado:** não é perda de dados — "30" é o total
+  GLOBAL de `rpgs` (multi-tenant, 3 contas); a conta principal auditada
+  tem 28, as outras 2 linhas são de 2 outras contas reais registradas
+  antes desta sessão.
+- **Migration:** `migrations/0021_repair_rpgs_publication_link.sql`
+  (aditiva, idempotente) — restaura `rpgs.publication_id` a partir do
+  padrão determinístico `pub_<rpg.id>` do backfill original (LIB-002),
+  verificado 30/30 em produção antes de aplicar.
+- **Docs:** `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-004B" —
+  causa raiz completa + lição para migrations futuras de rebuild de
+  tabela), `docs/library/LIBRARY_CURRENT_STATE.md`,
+  `docs/library/LIBRARY_DEFINITION_OF_DONE.md`, este arquivo.
+- **O que muda de comportamento:** nenhuma mudança de comportamento
+  além do reparo do dado — a query da Biblioteca já estava correta
+  desde LIB-002/004 (lê `publications` via JOIN); o problema era 100%
+  de dado corrompido, não de código.
+- **Fora de escopo (deliberado):** qualquer mudança em LIB-001
+  (external cover), LIB-003 (metadata compartilhada) ou LIB-004A
+  (relevância/aliases/catálogo interno/Open Library/import por URL).
 
 ## P0-002 — Falhas em GitHub Actions
 

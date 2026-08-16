@@ -283,3 +283,24 @@ retornava um livro errado — ver causa raiz completa em
 - `publications.metadata_source` deixou de ter uma lista fechada de
   valores no banco (rebuild seguro, migration 0020) — próximos providers
   não exigem mais uma migration só para isso.
+
+## Atualização — LIB-004B: regressão de capas na listagem (reparo, `migrations/0021_repair_rpgs_publication_link.sql`)
+
+Regressão real causada pela própria migration 0020 (LIB-004A): `DROP TABLE
+publications` disparou `ON DELETE SET NULL` em `rpgs.publication_id` para
+toda linha já existente em produção antes da migration rodar — `PRAGMA
+foreign_keys = OFF` no topo do arquivo não teve efeito (no-op dentro da
+transação implícita do D1). Resultado visível: a grade "Biblioteca → Seu
+catálogo" perdeu quase todas as capas (o JOIN para `publications` silenciosamente
+não encontrava nada), mesmo com a busca (online/interna) continuando a
+mostrar capas corretamente — porque a busca lê `publications` diretamente,
+sem depender de `rpgs.publication_id`.
+
+Causa raiz completa, mecanismo reproduzido, e a lição para migrations
+futuras de rebuild de tabela: `docs/library/LIBRARY_ARCHITECTURE.md`, seção
+"LIB-004B". `publications` nunca perdeu dado — só o ponteiro
+`rpgs.publication_id` foi apagado. Reparo aditivo (migration 0021),
+idempotente, restaura o vínculo a partir do padrão determinístico
+`pub_<rpg.id>` do backfill original do LIB-002 (verificado 30/30 antes de
+aplicar). Nenhum dado perdido — "28 títulos" vs "30 RPGs" era contagem
+por-conta vs global, não perda de dados (ver mesma seção).
