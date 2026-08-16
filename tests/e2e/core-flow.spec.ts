@@ -78,7 +78,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await openNavigation();
   await page.getByRole("link", { name: "Biblioteca" }).click();
   await page.getByRole("link", { name: "Novo RPG" }).click();
-  await page.getByLabel("Título").fill("Blue Rose E2E");
+  await page.getByLabel("Título", { exact: true }).fill("Blue Rose E2E");
   await page.getByLabel("Categoria").selectOption("fantasia");
   await page.getByLabel("Subgênero").selectOption("alta-fantasia");
   await page.getByLabel("Status da leitura").selectOption("READ");
@@ -116,7 +116,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(page.getByLabel("Personagem de Adriana")).toHaveValue("Lina");
 
   await page.getByRole("link", { name: "Registrar sessão" }).first().click();
-  await page.getByLabel("Título").fill("O chamado");
+  await page.getByLabel("Título", { exact: true }).fill("O chamado");
   await page.getByLabel(/Adriana/).check();
   await page
     .getByLabel("Resumo")

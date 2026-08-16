@@ -37,7 +37,7 @@ test("busca online: buscar, selecionar, revisar em preview e confirmar cria o RP
 
   // Preview: mesmo formulário, pré-preenchido, com o aviso de origem — revisável antes de salvar.
   await expect(page.getByText("Dados de: Open Library.", { exact: false })).toBeVisible();
-  await expect(page.getByLabel("Título")).toHaveValue("Aventuras de Teste");
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue("Aventuras de Teste");
   await expect(page.getByLabel("ISBN (opcional)")).toHaveValue("9783161484100");
 
   await page.getByRole("button", { name: "Salvar RPG" }).click();
@@ -55,7 +55,7 @@ test("busca online: sem resultados mostra mensagem clara, sem travar a tela", as
   await expect(page.getByText("Nenhum resultado para essa busca")).toBeVisible();
   // Cadastro manual continua acessível a partir daqui.
   await page.getByRole("button", { name: "Cadastrar manualmente" }).click();
-  await expect(page.getByLabel("Título")).toBeVisible();
+  await expect(page.getByLabel("Título", { exact: true })).toBeVisible();
 });
 
 test("busca online: provider indisponível mostra erro amigável, cadastro manual continua funcionando", async ({ page }) => {
@@ -67,7 +67,7 @@ test("busca online: provider indisponível mostra erro amigável, cadastro manua
   await expect(page.getByText("Não foi possível consultar a Open Library agora")).toBeVisible();
 
   await page.getByRole("button", { name: "Cadastrar manualmente" }).click();
-  await page.getByLabel("Título").fill("RPG Cadastrado na Mão");
+  await page.getByLabel("Título", { exact: true }).fill("RPG Cadastrado na Mão");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Cadastrado na Mão" })).toBeVisible();
 });
@@ -96,8 +96,8 @@ test("busca online: selecionar o mesmo resultado de novo é rejeitado (ALREADY_I
 test("cadastro manual continua funcionando sem nenhuma interação com busca online (regressão)", async ({ page }) => {
   await registerFreshAccount(page, "manual-regressao");
   await page.goto("/app/library/new");
-  await expect(page.getByLabel("Título")).toBeVisible();
-  await page.getByLabel("Título").fill("RPG 100% Manual");
+  await expect(page.getByLabel("Título", { exact: true })).toBeVisible();
+  await page.getByLabel("Título", { exact: true }).fill("RPG 100% Manual");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG 100% Manual" })).toBeVisible();
   await expect(page.getByText("Manual")).toBeVisible();

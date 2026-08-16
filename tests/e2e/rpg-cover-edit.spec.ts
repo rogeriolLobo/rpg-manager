@@ -23,14 +23,14 @@ test("edição de RPG: sem alteração salva, sem vazar dados entre RPGs, capa n
 
   // Cria dois RPGs distintos, sem capa, para testar troca de contexto no formulário.
   await page.goto("/app/library/new");
-  await page.getByLabel("Título").fill("RPG Alfa Capa");
+  await page.getByLabel("Título", { exact: true }).fill("RPG Alfa Capa");
   await page.getByLabel("Notas").fill("Notas exclusivas do Alfa.");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Alfa Capa" })).toBeVisible();
   const alphaUrl = page.url();
 
   await page.goto("/app/library/new");
-  await page.getByLabel("Título").fill("RPG Beta Capa");
+  await page.getByLabel("Título", { exact: true }).fill("RPG Beta Capa");
   await page.getByLabel("Notas").fill("Notas exclusivas do Beta.");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Beta Capa" })).toBeVisible();
@@ -42,7 +42,7 @@ test("edição de RPG: sem alteração salva, sem vazar dados entre RPGs, capa n
   await expect(page.getByLabel("Notas")).toHaveValue("Notas exclusivas do Alfa.");
   await page.getByLabel("Notas").fill("Rascunho não salvo do Alfa — não deve vazar.");
   await page.goto(`${betaUrl}/edit`);
-  await expect(page.getByLabel("Título")).toHaveValue("RPG Beta Capa");
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue("RPG Beta Capa");
   await expect(page.getByLabel("Notas")).toHaveValue("Notas exclusivas do Beta.");
 
   // Editar sem alterar nada precisa funcionar (regressão principal do bug original).
@@ -78,7 +78,7 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
   // RPG "legado": criado sem capa, depois recebe via D1 a URL real relatada no smoke manual
   // (devir.com.br) — simula um registro cuja capa já está persistida antes desta edição.
   await page.goto("/app/library/new");
-  await page.getByLabel("Título").fill("RPG Legado Devir");
+  await page.getByLabel("Título", { exact: true }).fill("RPG Legado Devir");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Legado Devir" })).toBeVisible();
   const legacyId = page.url().split("/").filter(Boolean).pop()!;
@@ -87,7 +87,7 @@ test("DoD RPG_EDIT_INVALID_DATA: capa legada real (devir.com.br) pelo formulári
 
   // Segundo RPG com outra capa qualquer já persistida.
   await page.goto("/app/library/new");
-  await page.getByLabel("Título").fill("RPG Capa Permitida");
+  await page.getByLabel("Título", { exact: true }).fill("RPG Capa Permitida");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG Capa Permitida" })).toBeVisible();
   const allowedId = page.url().split("/").filter(Boolean).pop()!;
