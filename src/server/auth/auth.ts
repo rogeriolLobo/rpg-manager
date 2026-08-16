@@ -143,21 +143,32 @@ async function enforceRateLimit(
   normalizedEmail: string,
   limiter: RateLimit = c.env.AUTH_LOGIN_RATE_LIMITER,
 ): Promise<number> {
-  const ipKey = await hashSecret(`ip:${clientIp(c)}`, c.env.PASSWORD_PEPPER);
   const accountKey = await hashSecret(
     `account:${normalizedEmail}`,
     c.env.PASSWORD_PEPPER,
   );
-  const [ipLimit, accountLimit] = await Promise.all([
-    limiter.limit({ key: ipKey }),
-    limiter.limit({ key: accountKey }),
-  ]);
-  if (!ipLimit.success || !accountLimit.success)
-    throw new ApiError(
-      429,
-      "RATE_LIMITED",
-      "Muitas tentativas. Aguarde antes de tentar novamente.",
-    );
+  // O limiter do Cloudflare é global por IP. Em dev local/CI, TODO teste E2E
+  // compartilha a mesma origem (127.0.0.1) — um limite de produção como 5
+  // registros/60s (desenhado contra abuso real) estoura com o suite de
+  // testes crescendo normalmente, sem nenhum abuso acontecendo. Só pula essa
+  // checada por IP/binding fora de produção (ENVIRONMENT só é "production"
+  // no deploy real — ver wrangler.jsonc vars vs .dev.vars); o bloqueio
+  // progressivo por CONTA abaixo (D1, failed_attempts/blocked_until) continua
+  // sempre ativo — é a proteção realmente testada e não depende de IP
+  // compartilhado. Descoberto no CI do LIB-004.
+  if (c.env.ENVIRONMENT === "production") {
+    const ipKey = await hashSecret(`ip:${clientIp(c)}`, c.env.PASSWORD_PEPPER);
+    const [ipLimit, accountLimit] = await Promise.all([
+      limiter.limit({ key: ipKey }),
+      limiter.limit({ key: accountKey }),
+    ]);
+    if (!ipLimit.success || !accountLimit.success)
+      throw new ApiError(
+        429,
+        "RATE_LIMITED",
+        "Muitas tentativas. Aguarde antes de tentar novamente.",
+      );
+  }
   const row = await c.env.DB.prepare(
     "SELECT failed_attempts, blocked_until FROM auth_rate_limits WHERE key_hash = ?",
   )

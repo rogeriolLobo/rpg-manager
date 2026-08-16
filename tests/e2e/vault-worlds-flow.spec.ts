@@ -17,7 +17,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
 
   await navigateFromMenu('Biblioteca');
   await page.getByRole('link',{name:'Novo RPG'}).click();
-  await page.getByLabel('Título').fill('Sistema de Aldea');
+  await page.getByLabel('Título', { exact: true }).fill('Sistema de Aldea');
   await page.getByLabel('Categoria').selectOption('fantasia');
   await page.getByLabel('Subgênero').selectOption('alta-fantasia');
   await page.getByRole('button',{name:'Salvar RPG'}).click();
@@ -198,7 +198,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
 
   await navigateFromMenu('Diário');
   await page.getByRole('button',{name:'Nova página'}).click();
-  await page.getByLabel('Título').fill('Próxima sessão');
+  await page.getByLabel('Título', { exact: true }).fill('Próxima sessão');
   await page.getByLabel('Conteúdo').fill('Preparar a audiência secreta da corte.');
   await page.getByRole('button',{name:'Salvar página'}).click();
   await expect(page.getByRole('button',{name:/Próxima sessão/u})).toBeVisible();

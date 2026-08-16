@@ -100,5 +100,7 @@ test("cadastro manual continua funcionando sem nenhuma interação com busca onl
   await page.getByLabel("Título", { exact: true }).fill("RPG 100% Manual");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
   await expect(page.getByRole("heading", { name: "RPG 100% Manual" })).toBeVisible();
-  await expect(page.getByText("Manual")).toBeVisible();
+  // exact:true — "Manual" sem isso colide com o nome de usuário/e-mail do
+  // teste ("Buscador manual-regressao", "...manual-regressao...@example.com").
+  await expect(page.getByText("Manual", { exact: true })).toBeVisible();
 });
