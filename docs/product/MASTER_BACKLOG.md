@@ -113,6 +113,34 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   semelhante, reatribuição de `publication_id` no PATCH (só CREATE/import
   resolvem identidade).
 
+## LIB-004 — Biblioteca: busca online de publicações (Open Library)
+
+- **Priority:** P2
+- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após migration
+  remota + deploy + production proof confirmados nesta mesma sessão
+  (ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md` para o checklist
+  completo).
+- **Dependencies:** LIB-003 (`DONE`)
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Migration:** `migrations/0018_publication_authors.sql` (aditiva —
+  `ALTER TABLE publications ADD COLUMN authors`)
+- **Docs:** `docs/library/METADATA_PROVIDERS.md` (implementado),
+  `docs/library/LIBRARY_ARCHITECTURE.md` (seção "LIB-004"),
+  `docs/library/LIBRARY_CURRENT_STATE.md` (seção "Atualização — LIB-004"),
+  `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **O que muda de comportamento:** novo endpoint `GET
+  /rpgs/search-external` (Open Library, autenticado, rate-limited,
+  timeout, sem SSRF — host fixo); `/app/library/new` ganha "Buscar
+  online" (cadastro manual continua sendo o padrão); identidade de
+  Publication ganha uma 3ª prioridade de resolução (Edition/Work ID
+  externo, antes do ISBN); provenance (`metadata_source`/
+  `metadata_source_id`/etc.) e `publication_external_ids` passam a ser
+  efetivamente populados (schema já existia desde LIB-002/003).
+- **Fora de escopo (deliberado, ver docs acima):** F-008 (upload+KV,
+  capas continuam só por URL externa), F-011 (archive de RPG), Google
+  Books (preparado na interface, não implementado), merge/reatribuição
+  automática de identidade fora do fluxo de CREATE.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0
@@ -157,7 +185,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-006 | Teste de integração dedicado para Global Search | P2 | `NOT_STARTED` |
 | F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `DONE` (LIB-002) |
 | F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `NOT_STARTED` |
-| F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `NOT_STARTED` |
+| F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |
 | F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `NOT_STARTED` |
 

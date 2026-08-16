@@ -1155,3 +1155,61 @@ legend {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* LIB-004: busca externa (Open Library) */
+.online-search {
+  display: grid;
+  gap: 1rem;
+}
+.online-search-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.search-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+.search-result-item {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+.search-result-item img {
+  width: 56px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 0.4rem;
+}
+.search-result-item .cover-placeholder.small {
+  width: 56px;
+  height: 76px;
+  border-radius: 0.4rem;
+  background: linear-gradient(145deg, var(--cover-background), var(--cover-background-end));
+}
+.search-result-item .cover-placeholder.small svg {
+  color: var(--cover-accent);
+  width: 20px;
+  height: 20px;
+}
+.search-result-info {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.search-result-info strong {
+  color: var(--text-primary);
+}
+.search-result-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

@@ -1,11 +1,23 @@
 import { Hono, type Context } from 'hono';
+import { classifyIsbn } from '../../domain/rpg/isbn';
+import { MetadataProviderError } from '../../domain/rpg/metadata-provider';
 import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendationScore, type RecommendationCandidate } from '../../domain/rpg/recommendation';
+import { openLibraryProvider } from '../providers/open-library';
 import { rpgInputSchema, rpgUpdateInputSchema } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 import { LIBRARY_ENTRY_JOIN, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+// LIB-004: fixture determinística para E2E — ver rota /search-external abaixo.
+const E2E_FIXTURE_RESULTS = [{
+  source: 'OPEN_LIBRARY', workId: 'OLE2EW', editionId: 'OLE2EM',
+  sourceUrl: 'https://openlibrary.org/books/OLE2EM',
+  title: 'Aventuras de Teste', subtitle: 'Edição de Testes E2E', authors: 'Autora Fixture',
+  publisher: 'Editora Fixture', publicationYear: 2024, language: 'por',
+  isbn10: undefined, isbn13: '9783161484100', coverUrl: undefined,
+}];
 
 // LIB-002: title/coverUrl/isbn/coverSourceUrl/coverSourceNote vêm de `publications`
 // (p.*), a fonte de verdade editorial desde a normalização de domínio — não mais
@@ -17,6 +29,9 @@ interface RpgRow {
   play_group_notes: string; planned_play_date: string | null; table_status: RecommendationCandidate['tableStatus']; game_master: string; notes: string;
   play_group_id: string | null; play_group_name: string | null; cover_url: string | null; isbn: string | null;
   cover_source_url: string | null; cover_source_note: string | null; created_at: string; updated_at: string;
+  // LIB-004: campos editoriais adicionais, sempre de `publications` (fonte de verdade).
+  subtitle: string; authors: string; publisher: string; publication_year: number | null; language: string;
+  publication_type: string; metadata_source: string;
 }
 
 function present(row: RpgRow) {
@@ -31,6 +46,8 @@ function present(row: RpgRow) {
     priority: row.priority, playGroupId: row.play_group_id, playGroupName: row.play_group_name, playGroupNotes: row.play_group_notes, plannedPlayDate: row.planned_play_date, tableStatus: row.table_status,
     gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, isbn: row.isbn, coverSourceUrl: row.cover_source_url,
     coverSourceNote: row.cover_source_note, createdAt: row.created_at, updatedAt: row.updated_at,
+    subtitle: row.subtitle, authors: row.authors, publisher: row.publisher, publicationYear: row.publication_year, language: row.language,
+    publicationType: row.publication_type, metadataSource: row.metadata_source,
     recommendationScore: calculateRpgRecommendationScore(candidate), readiness: calculateRpgReadiness(candidate), nextAction: calculateRpgNextAction(candidate),
   };
 }
@@ -38,6 +55,8 @@ function present(row: RpgRow) {
 const SELECT = `SELECT r.id,r.publication_id,COALESCE(p.title,r.title) title,r.category_id,c.name category_name,r.subgenre_id,s.name subgenre_name,
   r.reading_status,r.has_played,r.wants_to_play,r.priority,r.play_group_notes,r.play_group_id,g.name play_group_name,r.planned_play_date,r.table_status,
   r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note,
+  COALESCE(p.subtitle,'') subtitle,COALESCE(p.authors,'') authors,COALESCE(p.publisher,'') publisher,p.publication_year publication_year,
+  COALESCE(p.language,'') language,COALESCE(p.publication_type,'CORE_RULEBOOK') publication_type,COALESCE(p.metadata_source,'MANUAL') metadata_source,
   r.created_at,r.updated_at FROM rpgs r
   ${LIBRARY_ENTRY_JOIN} LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id`;
 
@@ -67,6 +86,42 @@ rpgRoutes.get('/metadata', async (c) => {
       FROM play_groups g WHERE g.user_id=? ORDER BY g.name COLLATE NOCASE`).bind(c.get('user').id),
   ]);
   return c.json({ categories: categories.results, subgenres: subgenres.results, groups: groups.results });
+});
+
+// LIB-004: busca externa de Publication (Open Library). Host fixo no provider
+// (nunca aceita URL/host vindo do usuário — não é o mesmo fluxo de coverUrl
+// externo), autenticado (herdado de requireAuth em /api/v1/rpgs/*), rate
+// limit local (reaproveita DIRECTORY_RATE_LIMITER com chave própria — mesmo
+// binding zero-cost já provisionado, sem criar novo recurso Cloudflare),
+// timeout+erro amigável (nunca derruba a Biblioteca — seção 8 do pedido).
+// Não persiste nada — só devolve candidatos para o usuário revisar (preview
+// obrigatório antes de qualquer escrita, seção 18).
+rpgRoutes.get('/search-external', async (c) => {
+  const query = (c.req.query('q') ?? '').trim();
+  if (query.length < 2 || query.length > 200) throw new ApiError(422, 'INVALID_SEARCH_QUERY', 'Digite entre 2 e 200 caracteres para buscar.');
+  const rateLimit = await c.env.DIRECTORY_RATE_LIMITER.limit({ key: `metadata-search:${c.get('user').id}` });
+  if (!rateLimit.success) throw new ApiError(429, 'RATE_LIMITED', 'Muitas buscas. Aguarde antes de tentar novamente.');
+  // LIB-004: seam determinístico só para E2E (Playwright não intercepta fetch server-side —
+  // só o navegador). Travado atrás de duas condições: ambiente != production (nunca alcançável
+  // em produção, mesmo que alguém digite o prefixo mágico) E o prefixo exato na query. Nenhuma
+  // chamada real à Open Library acontece nesse caminho — ver tests/e2e/rpg-online-search.spec.ts.
+  if (c.env.ENVIRONMENT !== 'production' && query.startsWith('__e2e_fixture__')) {
+    if (query.includes('provider-error')) throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
+    return c.json({ results: query.includes('no-results') ? [] : E2E_FIXTURE_RESULTS });
+  }
+  try {
+    // ISBN detectado -> lookup exato (mais preciso, é uma Edition específica); senão, busca
+    // textual por título/autor (seção 11 do pedido).
+    const classified = classifyIsbn(query);
+    const results = classified?.isbn13
+      ? await openLibraryProvider.lookupByIsbn(classified.isbn13).then((found) => (found ? [found] : []))
+      : await openLibraryProvider.search(query);
+    return c.json({ results });
+  } catch (error) {
+    if (!(error instanceof MetadataProviderError)) throw error;
+    console.error(JSON.stringify({ level: 'error', requestId: c.get('requestId'), operation: 'METADATA_SEARCH', provider: 'OPEN_LIBRARY', reason: error.reason }));
+    throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
+  }
 });
 
 rpgRoutes.get('/', async (c) => {

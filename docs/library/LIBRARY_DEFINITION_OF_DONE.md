@@ -191,3 +191,56 @@ Ver `docs/library/PUBLICATION_IDENTITY.md` para o desenho completo.
 - `MANUAL_SMOKE_REQUIRED`: clique autenticado real (cadastrar/editar
   ISBN, confirmar dedup) continua bloqueado por Turnstile/CAPTCHA, não
   contornado — mesma situação já registrada para LIB-001/LIB-002
+
+## LIB-004 — Busca online de publicações / Open Library — `DONE`
+
+Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo.
+
+- [x] `BookMetadataProvider` existe (`src/domain/rpg/metadata-provider.ts`).
+- [x] `OpenLibraryProvider` implementado (`src/server/providers/open-library.ts`).
+- [x] Busca por ISBN (lookup exato via `/isbn/{isbn}.json`).
+- [x] Busca por título (via `/search.json?q=...`).
+- [x] Busca por autor — mesmo endpoint de busca textual da Open Library
+      (não há endpoint dedicado "só autor" na API pública; `author_name`
+      vem nos resultados quando a query bate).
+- [x] Resultados limitados (10, sem paginação profunda).
+- [x] Preview — reaproveita o formulário do cadastro manual, pré-preenchido
+      + aviso de origem, antes de qualquer escrita.
+- [x] Confirmação manual — "Salvar RPG" é o único gatilho de escrita.
+- [x] Work/Edition corretamente separados (`workId`/`editionId`
+      distintos, `publication_external_ids.external_type`).
+- [x] External IDs salvos (`publication_external_ids`, `INSERT OR IGNORE`).
+- [x] Provenance salva (`metadata_source`/`metadata_source_id`/
+      `metadata_source_url`/`metadata_fetched_at`).
+- [x] Dedup LIB-003 utilizada — mesma `buildCreateLibraryEntryStatements`,
+      com Edition/Work ID como prioridade extra sobre ISBN.
+- [x] Cadastro manual preservado — "manual" é o modo padrão/imediatamente
+      visível; teste E2E dedicado de regressão.
+- [x] Cover Open Library funciona (URL construída a partir do Cover ID,
+      carregada pelo navegador — mesma política de LIB-001).
+- [x] Fallback funciona (placeholder H&M quando sem capa/capa falha,
+      componente `CoverImage` já existente, reaproveitado sem mudança).
+- [x] Provider error funciona (`502 PROVIDER_UNAVAILABLE`, mensagem
+      amigável, cadastro manual continua acessível).
+- [x] Timeout (`AbortSignal.timeout(5000)` em todo fetch ao provider).
+- [x] Rate limit (`DIRECTORY_RATE_LIMITER` reaproveitado, chave própria).
+- [x] unit (14 casos, `open-library.test.ts`, mapping/erros/timeout com
+      fixtures de uma consulta real única — seção 32 do pedido).
+- [x] integration (12 casos, `metadata-search.test.ts`, upstream mockado
+      via `mockImplementation` — nunca depende da Open Library real).
+- [x] E2E desktop/mobile (`rpg-online-search.spec.ts` — fluxo completo,
+      sem resultados, provider indisponível, ALREADY_IN_LIBRARY,
+      regressão do cadastro manual; seam determinístico server-side
+      travado atrás de `ENVIRONMENT !== production`, já que Playwright
+      não intercepta fetch server-side).
+- [x] lint, typecheck, build — ver seção de release.
+- [x] CI, deploy, `/api/v1/version` — ver seção de release.
+- [x] production smoke possível (read-only; smoke autenticado real
+      continua `MANUAL_SMOKE_REQUIRED`, mesma situação de sempre).
+- [x] docs atualizadas (`METADATA_PROVIDERS.md`, `LIBRARY_ARCHITECTURE.md`,
+      `LIBRARY_CURRENT_STATE.md`, este arquivo, `MASTER_BACKLOG.md`).
+
+### Release — LIB-004
+
+Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
+valores finais de commit/Worker Version/contagens de produção).

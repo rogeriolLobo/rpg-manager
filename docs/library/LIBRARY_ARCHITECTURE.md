@@ -233,3 +233,61 @@ que continua `NOT_STARTED` e fora de escopo do LIB-002.
   achatado — o frontend (`library-pages.tsx`) não precisou mudar.
 - Import CSV usa a mesma camada canônica de escrita do cadastro manual
   (`buildCreateLibraryEntryStatements`, `src/server/routes/library-writes.ts`).
+
+## LIB-004 — Busca online de publicações / Open Library (implementado)
+
+Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo do
+provider e `docs/library/PUBLICATION_IDENTITY.md` para a política de
+segurança de metadata compartilhada (reaproveitada sem alteração — um
+resultado de busca confirmado passa pelo mesmo `buildCreateLibraryEntryStatements`
+do LIB-002/003, sem caminho paralelo). Resumo do que muda:
+
+- **`GET /api/v1/rpgs/search-external`** (novo, único endpoint novo desta
+  tarefa): autenticado, rate limit local (`DIRECTORY_RATE_LIMITER`
+  reaproveitado com chave própria — nenhum recurso Cloudflare novo),
+  detecta ISBN na query (lookup exato) vs busca textual, timeout de 5s,
+  nunca propaga erro cru do provider (`502 PROVIDER_UNAVAILABLE` com
+  mensagem amigável). Não persiste nada — só devolve candidatos.
+- **`rpgInputSchema` ganhou campos opcionais**: `subtitle`, `publisher`,
+  `publicationYear`, `language`, `publicationType`, `authors`,
+  `metadataSource`, `metadataSourceId`, `metadataSourceUrl`,
+  `metadataFetchedAt`, `externalWorkId`, `externalEditionId` — todos
+  opcionais, cadastro manual não envia nenhum (fica `MANUAL`/em branco).
+- **`buildCreateLibraryEntryStatements` ganhou uma 3ª prioridade de
+  resolução de identidade**: Edition ID externo → Work ID externo → ISBN
+  (LIB-003) → nenhuma correspondência. Ao criar uma Publication nova,
+  agora também grava os campos ricos (`subtitle`/`publisher`/
+  `publication_year`/`language`/`authors`/provenance) e insere em
+  `publication_external_ids` (`INSERT OR IGNORE`, nunca duplica nem
+  reatribui um external ID já usado por outra Publication).
+- **`buildUpdateLibraryEntryStatements` ganhou os mesmos campos ricos na
+  trava de metadata compartilhada** (LIB-003) — editar subtítulo/
+  editora/ano/idioma/tipo/autores de uma Publication com 2+ referências
+  é bloqueado do mesmo jeito que título/ISBN/capa já eram.
+- **PATCH nunca resolve identidade nem reescreve provenance/external
+  IDs** — isso só acontece no CREATE (busca → seleção → preview →
+  confirmar é sempre um create). Editar um RPG existente nunca "rebusca"
+  Open Library nem troca a origem registrada do dado.
+- **Frontend**: `OnlineSearchPanel` (novo componente) + `mode` de
+  `RpgFormFields` (`manual` | `search` | `preview`) — "manual" continua
+  sendo o padrão/imediatamente visível ao abrir `/app/library/new` (sem
+  isso, os fluxos E2E e o cadastro manual existentes quebrariam). Selecionar
+  um resultado preenche o MESMO formulário do cadastro manual — essa tela
+  já é o preview obrigatório (seção 18 do pedido), não uma tela separada.
+- **Migration 0018** (aditiva): `ALTER TABLE publications ADD COLUMN
+  authors` — único campo novo necessário (subtitle/publisher/
+  publication_year/language/publication_type/metadata_source* já
+  existiam desde a migration 0016 do LIB-002, só não eram populados).
+
+### Testando fetch server-side em `@cloudflare/vitest-pool-workers`
+
+Descoberta desta sessão, registrada para não ser redescoberta: mockar
+`fetch` global via `vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new
+Response(...)))` falha com `"Cannot perform I/O on behalf of a different
+request"` quando o código sob teste roda dentro de
+`exports.default.fetch()` (o handler HTTP real) — a `Response` mockada é
+criada fora do contexto de request em que é consumida, e Workers proíbe
+isso (streams de I/O são amarrados ao request que os criou). Correção:
+usar `mockImplementation(() => Promise.resolve(new Response(...)))` —
+cria a `Response` só quando `fetch()` é de fato chamado, dentro do
+request real. Ver `tests/integration/metadata-search.test.ts`.

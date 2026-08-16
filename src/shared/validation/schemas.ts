@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isIsbnInputValid } from '../../domain/rpg/isbn';
+import { PUBLICATION_TYPES } from '../../domain/rpg/library-domain';
 import { isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -70,6 +71,25 @@ export const rpgInputSchema = z.strictObject({
     z.null(),
   ]).optional(),
   coverSourceNote: z.union([z.string().trim().max(1000), z.null()]).optional(),
+  // LIB-004: campos editoriais adicionais + provenance, todos opcionais — cadastro manual
+  // continua funcionando sem enviar nenhum deles (default MANUAL/em branco, ver
+  // src/server/routes/library-writes.ts). Populados quando o RPG vem de uma busca externa
+  // confirmada no preview (nunca aplicados automaticamente sem revisão — seção 18 do pedido).
+  subtitle: trimmed(200).optional(),
+  publisher: trimmed(160).optional(),
+  publicationYear: z.number().int().min(1000).max(2100).nullable().optional(),
+  language: trimmed(40).optional(),
+  publicationType: z.enum(PUBLICATION_TYPES).optional(),
+  authors: trimmed(500).optional(),
+  metadataSource: z.enum(['MANUAL', 'OPEN_LIBRARY']).optional(),
+  metadataSourceId: trimmed(80).optional(),
+  metadataSourceUrl: z.union([
+    z.string().trim().max(1000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
+    z.literal(''),
+  ]).optional(),
+  metadataFetchedAt: z.iso.datetime().optional(),
+  externalWorkId: trimmed(80).optional(),
+  externalEditionId: trimmed(80).optional(),
 });
 
 // LIB-003: variante usada só pelo PATCH de RPG — mesmo princípio do incidente

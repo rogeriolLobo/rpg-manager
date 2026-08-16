@@ -32,10 +32,31 @@ export interface Rpg {
   isbn: string | null;
   coverSourceUrl: string | null;
   coverSourceNote: string | null;
+  // LIB-004: campos editoriais adicionais + provenance.
+  subtitle: string;
+  authors: string;
+  publisher: string;
+  publicationYear: number | null;
+  language: string;
+  publicationType: string;
+  metadataSource: string;
   recommendationScore: number;
   readiness: string;
   nextAction: string;
 }
+// LIB-004: resultado de busca externa (Open Library) — espelha
+// BookMetadataResult (src/domain/rpg/metadata-provider.ts) no formato que a
+// API expõe (achatado em JSON).
+interface SearchResult {
+  source: string; workId: string | null; editionId: string | null; sourceUrl: string;
+  title: string; subtitle?: string; authors?: string; publisher?: string;
+  publicationYear?: number; language?: string; isbn10?: string; isbn13?: string; coverUrl?: string;
+}
+const PUBLICATION_TYPE_LABELS: Record<string, string> = {
+  CORE_RULEBOOK: "Livro básico", PLAYER_GUIDE: "Guia do jogador", GM_GUIDE: "Guia do mestre",
+  SUPPLEMENT: "Suplemento", SETTING: "Cenário", ADVENTURE: "Aventura", ONE_SHOT: "One-shot",
+  CAMPAIGN: "Campanha", BESTIARY: "Bestiário", SCREEN: "Tela do mestre", OTHER: "Outro",
+};
 interface Metadata {
   categories: Array<{ id: string; name: string }>;
   subgenres: Array<{ id: string; categoryId: string; name: string }>;
@@ -273,6 +294,78 @@ function CoverImage({ item, eager = false }: { item: Rpg; eager?: boolean }) {
   />;
 }
 
+// LIB-004: painel de busca externa (Open Library) — estados idle/loading/
+// results/no-results/provider-error (seção 25 do pedido). Busca só por ação
+// explícita (submit do formulário: botão "Buscar" ou Enter) — nunca a cada
+// tecla, evita requests desnecessárias contra um provider público de baixo
+// volume (seção 5/9 do pedido).
+function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchResult) => void; onCancel: () => void }) {
+  const [query, setQuery] = useState("");
+  const [state, setState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "results"; results: SearchResult[] }
+    | { status: "no-results" }
+    | { status: "provider-error"; message: string }
+  >({ status: "idle" });
+  const runSearch = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!query.trim()) return;
+    setState({ status: "loading" });
+    try {
+      const data = await api<{ results: SearchResult[] }>(`/rpgs/search-external?q=${encodeURIComponent(query.trim())}`);
+      setState(data.results.length ? { status: "results", results: data.results } : { status: "no-results" });
+    } catch (reason) {
+      setState({ status: "provider-error", message: reason instanceof Error ? reason.message : "Não foi possível consultar a Open Library agora." });
+    }
+  };
+  return (
+    <div className="panel online-search">
+      <form className="search-box" onSubmit={(e) => void runSearch(e)}>
+        <Search />
+        <input
+          aria-label="Buscar livro por título, ISBN ou autor"
+          placeholder="Título, ISBN ou autor…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          maxLength={200}
+        />
+        <button className="primary-button" type="submit" disabled={state.status === "loading"}>Buscar</button>
+      </form>
+      {state.status === "loading" && <Loading />}
+      {state.status === "provider-error" && (
+        <p className="form-error">{state.message}</p>
+      )}
+      {state.status === "no-results" && (
+        <p className="section-note">Nenhum resultado para essa busca. Você pode tentar outros termos ou cadastrar manualmente.</p>
+      )}
+      {state.status === "results" && (
+        <ul className="search-results-list">
+          {state.results.map((result, index) => (
+            <li key={`${result.editionId ?? result.workId ?? index}`} className="search-result-item">
+              {result.coverUrl ? (
+                <img src={result.coverUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />
+              ) : (
+                <div className="cover-placeholder small"><BookOpen aria-hidden="true" /></div>
+              )}
+              <div className="search-result-info">
+                <strong>{result.title}</strong>
+                {result.subtitle && <span>{result.subtitle}</span>}
+                <span className="search-result-meta">
+                  {[result.authors, result.publisher, result.publicationYear].filter(Boolean).join(" · ") || "Sem mais detalhes"}
+                </span>
+                {(result.isbn13 ?? result.isbn10) && <span className="search-result-meta">ISBN {result.isbn13 ?? result.isbn10}</span>}
+              </div>
+              <button type="button" className="secondary-button" onClick={() => onSelect(result)}>Selecionar</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" className="ghost-button" onClick={onCancel}>Cadastrar manualmente</button>
+    </div>
+  );
+}
+
 const initial = {
   title: "",
   categoryId: "",
@@ -291,6 +384,18 @@ const initial = {
   isbn: "",
   coverSourceUrl: "",
   coverSourceNote: "",
+  subtitle: "",
+  publisher: "",
+  publicationYear: "",
+  language: "",
+  publicationType: "",
+  authors: "",
+  metadataSource: "",
+  metadataSourceId: "",
+  metadataSourceUrl: "",
+  metadataFetchedAt: "",
+  externalWorkId: "",
+  externalEditionId: "",
 };
 export function RpgFormPage() {
   const { id } = useParams();
@@ -306,6 +411,11 @@ function RpgFormFields({ id }: { id?: string }) {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(Boolean(id));
+  // LIB-004: só relevante para cadastro novo — editar um RPG existente nunca reabre busca
+  // (o PATCH não reatribui identidade/provenance, ver library-writes.ts). "manual" continua
+  // sendo o modo padrão/imediatamente visível: não pode quebrar quem já usa o cadastro manual
+  // nem os fluxos E2E existentes que preenchem o formulário direto.
+  const [mode, setMode] = useState<"manual" | "search" | "preview">("manual");
   useEffect(() => {
     // O guard `active` evita que uma resposta lenta ainda em voo sobrescreva os dados corretos
     // caso o componente seja desmontado (troca de RPG) antes dela chegar.
@@ -332,6 +442,16 @@ function RpgFormFields({ id }: { id?: string }) {
           isbn: item.isbn ?? "",
           coverSourceUrl: item.coverSourceUrl ?? "",
           coverSourceNote: item.coverSourceNote ?? "",
+          subtitle: item.subtitle ?? "",
+          publisher: item.publisher ?? "",
+          publicationYear: item.publicationYear ? String(item.publicationYear) : "",
+          language: item.language ?? "",
+          publicationType: item.publicationType ?? "",
+          authors: item.authors ?? "",
+          // Provenance nunca é reeditada no PATCH (ver library-writes.ts) — não precisa
+          // ser carregada de volta no formulário, só exibida (RpgDetailPage).
+          metadataSource: "", metadataSourceId: "", metadataSourceUrl: "", metadataFetchedAt: "",
+          externalWorkId: "", externalEditionId: "",
         });
         setLoading(false);
       });
@@ -345,10 +465,36 @@ function RpgFormFields({ id }: { id?: string }) {
   );
   const update = (key: string, value: string | boolean) =>
     setForm((current) => ({ ...current, [key]: value }));
+  // LIB-004: seleção de um resultado de busca preenche o MESMO formulário usado pelo cadastro
+  // manual — a tela que aparece em seguida (mode="preview") já É a revisão obrigatória antes
+  // de salvar (seção 18 do pedido): mesmos campos, editáveis, mesmo botão "Salvar RPG".
+  const selectSearchResult = (result: SearchResult) => {
+    setForm((current) => ({
+      ...current,
+      title: result.title,
+      subtitle: result.subtitle ?? "",
+      publisher: result.publisher ?? "",
+      publicationYear: result.publicationYear ? String(result.publicationYear) : "",
+      language: result.language ?? "",
+      authors: result.authors ?? "",
+      isbn: result.isbn13 ?? result.isbn10 ?? "",
+      coverUrl: result.coverUrl ?? "",
+      coverSourceUrl: result.sourceUrl,
+      publicationType: String(current.publicationType) || "CORE_RULEBOOK",
+      metadataSource: "OPEN_LIBRARY",
+      metadataSourceId: result.editionId ?? result.workId ?? "",
+      metadataSourceUrl: result.sourceUrl,
+      metadataFetchedAt: new Date().toISOString(),
+      externalWorkId: result.workId ?? "",
+      externalEditionId: result.editionId ?? "",
+    }));
+    setMode("preview");
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
     setFieldErrors({});
+    const fromSearch = form.metadataSource === "OPEN_LIBRARY";
     const payload = {
       title: String(form.title),
       categoryId: form.categoryId || null,
@@ -367,6 +513,20 @@ function RpgFormFields({ id }: { id?: string }) {
       isbn: form.isbn || null,
       coverSourceUrl: form.coverSourceUrl || null,
       coverSourceNote: form.coverSourceNote || null,
+      subtitle: form.subtitle || undefined,
+      publisher: form.publisher || undefined,
+      publicationYear: form.publicationYear ? Number(form.publicationYear) : null,
+      language: form.language || undefined,
+      publicationType: form.publicationType || undefined,
+      authors: form.authors || undefined,
+      ...(fromSearch ? {
+        metadataSource: "OPEN_LIBRARY" as const,
+        metadataSourceId: form.metadataSourceId || undefined,
+        metadataSourceUrl: form.metadataSourceUrl || undefined,
+        metadataFetchedAt: form.metadataFetchedAt || undefined,
+        externalWorkId: form.externalWorkId || undefined,
+        externalEditionId: form.externalEditionId || undefined,
+      } : {}),
     };
     try {
       const result = id
@@ -383,13 +543,33 @@ function RpgFormFields({ id }: { id?: string }) {
     }
   };
   const fieldError = (name: string) => fieldErrors[name]?.[0];
+  if (!id && mode === "search") {
+    return (
+      <div className="page narrow">
+        <PageHeader eyebrow="Novo RPG" title="Buscar online" description="Busca pública na Open Library — poucos resultados, você escolhe e revisa antes de salvar." />
+        <OnlineSearchPanel onSelect={selectSearchResult} onCancel={() => setMode("manual")} />
+      </div>
+    );
+  }
   return (
     <div className="page narrow">
       <PageHeader
         eyebrow={id ? "Editar RPG" : "Novo RPG"}
         title={id ? "Atualize o grimório" : "Adicione à estante"}
         description="Os campos são validados novamente no servidor."
+        action={!id && mode === "manual" ? (
+          <button type="button" className="secondary-button" onClick={() => setMode("search")}>
+            <Search size={16} />
+            Buscar online
+          </button>
+        ) : undefined}
       />
+      {mode === "preview" && (
+        <p className="section-note online-search-banner">
+          Dados de: Open Library. Revise antes de salvar.{" "}
+          <button type="button" className="ghost-button" onClick={() => setMode("search")}>Buscar outro</button>
+        </p>
+      )}
       <form className="panel form-grid" onSubmit={submit}>
         {/* Trava todos os campos enquanto os dados reais do RPG ainda carregam: evita que uma
             digitação nesse intervalo seja descartada quando a resposta do GET chegar e
@@ -404,6 +584,15 @@ function RpgFormFields({ id }: { id?: string }) {
             required
           />
           {fieldError("title") && <span className="field-error">{fieldError("title")}</span>}
+        </label>
+        <label className="span-2">
+          Subtítulo (opcional)
+          <input
+            value={String(form.subtitle)}
+            onChange={(e) => update("subtitle", e.target.value)}
+            maxLength={200}
+          />
+          {fieldError("subtitle") && <span className="field-error">{fieldError("subtitle")}</span>}
         </label>
         <label>
           Categoria
@@ -538,6 +727,34 @@ function RpgFormFields({ id }: { id?: string }) {
           {fieldError("isbn") && <span className="field-error">{fieldError("isbn")}</span>}
         </label>
         <label>
+          Autor(es) (opcional)
+          <input value={String(form.authors)} onChange={(e) => update("authors", e.target.value)} maxLength={500} />
+          {fieldError("authors") && <span className="field-error">{fieldError("authors")}</span>}
+        </label>
+        <label>
+          Editora (opcional)
+          <input value={String(form.publisher)} onChange={(e) => update("publisher", e.target.value)} maxLength={160} />
+          {fieldError("publisher") && <span className="field-error">{fieldError("publisher")}</span>}
+        </label>
+        <label>
+          Ano de publicação (opcional)
+          <input type="number" min={1000} max={2100} value={String(form.publicationYear)} onChange={(e) => update("publicationYear", e.target.value)} />
+          {fieldError("publicationYear") && <span className="field-error">{fieldError("publicationYear")}</span>}
+        </label>
+        <label>
+          Idioma (opcional)
+          <input value={String(form.language)} onChange={(e) => update("language", e.target.value)} maxLength={40} placeholder="ex.: por, eng" />
+          {fieldError("language") && <span className="field-error">{fieldError("language")}</span>}
+        </label>
+        <label>
+          Tipo de publicação
+          <select value={String(form.publicationType)} onChange={(e) => update("publicationType", e.target.value)}>
+            <option value="">Não classificado</option>
+            {Object.entries(PUBLICATION_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          {fieldError("publicationType") && <span className="field-error">{fieldError("publicationType")}</span>}
+        </label>
+        <label>
           Fonte da capa (opcional)
           <input type="url" value={String(form.coverSourceUrl)} onChange={(e) => update("coverSourceUrl", e.target.value)} maxLength={1000} />
           {fieldError("coverSourceUrl") && <span className="field-error">{fieldError("coverSourceUrl")}</span>}
@@ -599,7 +816,7 @@ export function RpgDetailPage() {
       <PageHeader
         eyebrow={item.categoryName ?? "RPG"}
         title={item.title}
-        description={`${item.subgenreName ?? "Sem subgênero"} · ${item.readiness}`}
+        description={item.subtitle || `${item.subgenreName ?? "Sem subgênero"} · ${item.readiness}`}
         action={
           <div className="button-row">
             <Link
@@ -658,8 +875,13 @@ export function RpgDetailPage() {
               <dt>Mesa</dt>
               <dd>{displayLabel(item.tableStatus)}</dd>
             </div>
+            {item.authors ? <div><dt>Autor(es)</dt><dd>{item.authors}</dd></div> : null}
+            {item.publisher ? <div><dt>Editora</dt><dd>{item.publisher}{item.publicationYear ? ` (${item.publicationYear})` : ""}</dd></div> : null}
+            {item.language ? <div><dt>Idioma</dt><dd>{item.language}</dd></div> : null}
+            <div><dt>Tipo</dt><dd>{PUBLICATION_TYPE_LABELS[item.publicationType] ?? "Não classificado"}</dd></div>
             {item.isbn ? <div><dt>ISBN</dt><dd>{item.isbn}</dd></div> : null}
             {item.coverSourceUrl ? <div><dt>Fonte da capa</dt><dd><a href={item.coverSourceUrl} target="_blank" rel="noreferrer">Abrir fonte</a></dd></div> : null}
+            <div><dt>Origem do cadastro</dt><dd>{item.metadataSource === "OPEN_LIBRARY" ? "Open Library" : "Manual"}</dd></div>
           </dl>
           {item.coverSourceNote ? <p className="section-note">{item.coverSourceNote}</p> : null}
           <h2>Notas</h2>

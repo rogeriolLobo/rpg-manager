@@ -232,3 +232,30 @@ Resumo do estado físico atual:
 
 Upload de capa, Open Library/Google Books e archive de RPG continuam
 `MISSING` — fora de escopo do LIB-003 (F-008/F-009/F-011).
+
+---
+
+## Atualização — LIB-004 implementado (`migrations/0018_publication_authors.sql`)
+
+Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo. Open
+Library deixa de ser `MISSING` — agora `COMPLETE` no escopo desta tarefa
+(busca, preview, confirmação, provenance, dedup por identidade externa).
+
+- `GET /api/v1/rpgs/search-external` — busca autenticada, rate-limited,
+  com timeout e fallback amigável. Host fixo (`openlibrary.org`), nunca
+  aceita destino vindo do cliente.
+- `publications.authors` (nova coluna, migration 0018) — único campo
+  físico que faltava; todo o resto (`subtitle`/`publisher`/
+  `publication_year`/`language`/`publication_type`/`metadata_source*`)
+  já existia desde a migration 0016 (LIB-002), só não era populado.
+- Criar a partir de um resultado de busca reaproveita a mesma
+  `buildCreateLibraryEntryStatements` do cadastro manual/import — resolve
+  identidade por Edition ID externo → Work ID externo → ISBN (LIB-003) →
+  nova Publication. `publication_external_ids` deixa de estar
+  permanentemente vazia.
+- UI: `/app/library/new` ganha um botão "Buscar online" (cadastro manual
+  continua sendo o padrão/imediatamente visível — sem regressão).
+  Selecionar um resultado preenche o mesmo formulário do cadastro manual
+  (preview obrigatório embutido, não uma tela separada).
+- Upload de capa (Workers KV) e archive de RPG continuam `MISSING` — fora
+  de escopo do LIB-004 (F-008/F-011).

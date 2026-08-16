@@ -3,7 +3,7 @@ import type { ZodType } from 'zod';
 import type { AppVariables, Env } from './types';
 
 export class ApiError extends Error {
-  constructor(public status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429, public code: string, message: string, public fields?: unknown) {
+  constructor(public status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 502, public code: string, message: string, public fields?: unknown) {
     super(message);
   }
 }

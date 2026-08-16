@@ -1,10 +1,12 @@
-// LIB-002/LIB-003: camada canônica de escrita do domínio Game System +
-// Publication + User Library Entry, compartilhada entre o cadastro/edição
-// manual (rpgs.ts) e o import CSV (transfer.ts) — ver
-// docs/library/LIBRARY_ARCHITECTURE.md e docs/library/PUBLICATION_IDENTITY.md.
-// Único lugar que sabe como as 3+1 tabelas se relacionam; nenhuma outra rota
-// deve montar esses INSERTs/UPDATEs por conta própria (seção 18 do pedido
-// LIB-002: "não manter um caminho paralelo incompatível").
+// LIB-002/LIB-003/LIB-004: camada canônica de escrita do domínio Game System +
+// Publication + User Library Entry + Publication External IDs, compartilhada
+// entre o cadastro/edição manual (rpgs.ts, incluindo o fluxo de busca externa
+// confirmada em preview) e o import CSV (transfer.ts) — ver
+// docs/library/LIBRARY_ARCHITECTURE.md, docs/library/PUBLICATION_IDENTITY.md
+// e docs/library/METADATA_PROVIDERS.md. Único lugar que sabe como as tabelas
+// se relacionam; nenhuma outra rota deve montar esses INSERTs/UPDATEs por
+// conta própria (seção 18 do pedido LIB-002: "não manter um caminho paralelo
+// incompatível").
 import { classifyIsbn, type ClassifiedIsbn } from '../../domain/rpg/isbn';
 import { DEFAULT_PUBLICATION_TYPE, normalizeLibraryName } from '../../domain/rpg/library-domain';
 import type { RpgInput } from '../../shared/validation/schemas';
@@ -15,7 +17,11 @@ export interface LibraryEntryIds { entryId: string; gameSystemId: string; public
 interface ExistingPublicationRow {
   id: string; game_system_id: string; title: string; isbn: string | null;
   cover_url: string | null; cover_source_url: string | null; cover_source_note: string | null;
+  subtitle: string; publisher: string; publication_year: number | null; language: string;
+  publication_type: string; authors: string;
 }
+
+const PUBLICATION_COLUMNS = 'id,game_system_id,title,isbn,cover_url,cover_source_url,cover_source_note,subtitle,publisher,publication_year,language,publication_type,authors';
 
 function buildRpgInsertStatement(
   db: D1Database,
@@ -30,8 +36,15 @@ function buildRpgInsertStatement(
 }
 
 async function findPublicationByIsbn13(db: D1Database, isbn13: string): Promise<ExistingPublicationRow | null> {
-  return db.prepare('SELECT id,game_system_id,title,isbn,cover_url,cover_source_url,cover_source_note FROM publications WHERE isbn13=?')
-    .bind(isbn13).first<ExistingPublicationRow>();
+  return db.prepare(`SELECT ${PUBLICATION_COLUMNS} FROM publications WHERE isbn13=?`).bind(isbn13).first<ExistingPublicationRow>();
+}
+
+// LIB-004: identidade também por (provider, external ID) — "External Edition ID já
+// existe -> reutilizar Publication" (seção 17 do pedido). Edition é preferida sobre
+// Work por ser mais precisa (seção 13); Work só é usada quando não há Edition.
+async function findPublicationByExternalId(db: D1Database, provider: string, externalId: string): Promise<ExistingPublicationRow | null> {
+  return db.prepare(`SELECT ${PUBLICATION_COLUMNS.split(',').map((c) => `p.${c}`).join(',')} FROM publication_external_ids e JOIN publications p ON p.id=e.publication_id WHERE e.provider=? AND e.external_id=?`)
+    .bind(provider, externalId).first<ExistingPublicationRow>();
 }
 
 async function findLibraryEntryForPublication(db: D1Database, userId: string, publicationId: string): Promise<{ id: string } | null> {
@@ -50,7 +63,7 @@ export async function findPublicationsByIsbn13List(db: D1Database, isbn13List: s
 }
 
 // Cria só a User Library Entry, ligando a uma Publication já existente (dedup
-// por ISBN, seção 9 do pedido LIB-003) — usado tanto pelo create manual (via
+// por ISBN/external ID) — usado tanto pelo create manual (via
 // buildCreateLibraryEntryStatements) quanto pelo import CSV (classificação
 // EXISTING_PUBLICATION em transfer.ts). Nunca escreve em publications/
 // game_systems — metadata compartilhada não é alterada por um reuso.
@@ -61,12 +74,32 @@ export function buildLinkExistingPublicationStatement(
   return buildRpgInsertStatement(db, params);
 }
 
-// LIB-003: identidade + dedup seguro. ISBN válido que já existe no catálogo
-// (de qualquer conta — publications não têm dono, são catálogo compartilhado,
-// mesmo modelo de categories/subgenres) reaproveita a Publication existente em
-// vez de criar outra — só a nova User Library Entry é criada. Sem ISBN, ou
-// ISBN sem correspondência: cria Game System + Publication novos, como antes
-// (LIB-002). Nunca deduplica por título (não é identificador confiável).
+// LIB-004: registra provenance externa (provider, external ID) sem nunca
+// sobrescrever a linha em `publications` (independente da trava de metadata
+// compartilhada — é uma tabela separada, só soma identidade, nunca modifica
+// título/capa/etc.). INSERT OR IGNORE: se o par (provider, external_id) já
+// existir (UNIQUE, migration 0017), é um no-op seguro — nunca duplica nem
+// reatribui a outra Publication.
+function externalIdStatements(db: D1Database, publicationId: string, input: RpgInput, now: string): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [];
+  if (input.metadataSource !== 'OPEN_LIBRARY') return statements;
+  if (input.externalEditionId) {
+    statements.push(db.prepare('INSERT OR IGNORE INTO publication_external_ids (id,publication_id,provider,external_id,external_type,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(crypto.randomUUID(), publicationId, 'OPEN_LIBRARY', input.externalEditionId, 'EDITION', now));
+  }
+  if (input.externalWorkId) {
+    statements.push(db.prepare('INSERT OR IGNORE INTO publication_external_ids (id,publication_id,provider,external_id,external_type,created_at) VALUES (?,?,?,?,?,?)')
+      .bind(crypto.randomUUID(), publicationId, 'OPEN_LIBRARY', input.externalWorkId, 'WORK', now));
+  }
+  return statements;
+}
+
+// LIB-003/LIB-004: identidade + dedup seguro. Prioridade de resolução (seção 4/17
+// do pedido LIB-003/004): (1) Edition ID externo, (2) Work ID externo, (3) ISBN-13
+// (direto ou derivado de ISBN-10). Encontrado em qualquer conta (publications não
+// têm dono, são catálogo compartilhado, mesmo modelo de categories/subgenres) ->
+// reaproveita, só cria a nova User Library Entry. Nada encontrado -> cria Game
+// System + Publication novos. Nunca deduplica por título.
 export async function buildCreateLibraryEntryStatements(
   db: D1Database,
   params: { entryId: string; userId: string; input: RpgInput; now: string },
@@ -74,48 +107,54 @@ export async function buildCreateLibraryEntryStatements(
   const { entryId, userId, input, now } = params;
   const classified = classifyIsbn(input.isbn ?? null);
 
-  if (classified) {
-    const existing = await findPublicationByIsbn13(db, classified.isbn13!);
-    if (existing) {
-      const alreadyInLibrary = await findLibraryEntryForPublication(db, userId, existing.id);
-      if (alreadyInLibrary) {
-        throw new ApiError(409, 'ALREADY_IN_LIBRARY', 'Você já tem este título na sua biblioteca.');
-      }
-      const statements = [buildRpgInsertStatement(db, { entryId, userId, input, publicationId: existing.id, now })];
-      return { statements, ids: { entryId, gameSystemId: existing.game_system_id, publicationId: existing.id }, reusedExistingPublication: true };
-    }
+  let existing: ExistingPublicationRow | null = null;
+  if (input.metadataSource === 'OPEN_LIBRARY' && input.externalEditionId) existing = await findPublicationByExternalId(db, 'OPEN_LIBRARY', input.externalEditionId);
+  if (!existing && input.metadataSource === 'OPEN_LIBRARY' && input.externalWorkId) existing = await findPublicationByExternalId(db, 'OPEN_LIBRARY', input.externalWorkId);
+  if (!existing && classified) existing = await findPublicationByIsbn13(db, classified.isbn13!);
+
+  if (existing) {
+    const alreadyInLibrary = await findLibraryEntryForPublication(db, userId, existing.id);
+    if (alreadyInLibrary) throw new ApiError(409, 'ALREADY_IN_LIBRARY', 'Você já tem este título na sua biblioteca.');
+    const statements = [buildRpgInsertStatement(db, { entryId, userId, input, publicationId: existing.id, now }), ...externalIdStatements(db, existing.id, input, now)];
+    return { statements, ids: { entryId, gameSystemId: existing.game_system_id, publicationId: existing.id }, reusedExistingPublication: true };
   }
 
   const gameSystemId = `gs_${crypto.randomUUID()}`;
   const publicationId = `pub_${crypto.randomUUID()}`;
+  const metadataSource = input.metadataSource ?? 'MANUAL';
   const statements = [
     db.prepare('INSERT INTO game_systems (id,name,normalized_name,publisher,description,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
       .bind(gameSystemId, input.title, normalizeLibraryName(input.title), '', '', now, now),
-    db.prepare(`INSERT INTO publications (id,game_system_id,publication_type,title,subtitle,edition,publisher,publication_year,language,isbn,isbn10,isbn13,description,cover_url,cover_source_url,cover_source_note,metadata_source,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(publicationId, gameSystemId, DEFAULT_PUBLICATION_TYPE, input.title, '', '', '', null, '', classified?.normalized ?? cleanNullable(input.isbn), classified?.isbn10 ?? null, classified?.isbn13 ?? null, '', cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), 'MANUAL', now, now),
+    db.prepare(`INSERT INTO publications (id,game_system_id,publication_type,title,subtitle,edition,publisher,publication_year,language,isbn,isbn10,isbn13,description,cover_url,cover_source_url,cover_source_note,authors,metadata_source,metadata_source_id,metadata_source_url,metadata_fetched_at,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(publicationId, gameSystemId, input.publicationType ?? DEFAULT_PUBLICATION_TYPE, input.title, cleanNullable(input.subtitle) ?? '', '', cleanNullable(input.publisher) ?? '',
+        input.publicationYear ?? null, cleanNullable(input.language) ?? '', classified?.normalized ?? cleanNullable(input.isbn), classified?.isbn10 ?? null, classified?.isbn13 ?? null, '',
+        cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), cleanNullable(input.authors) ?? '',
+        metadataSource, metadataSource === 'MANUAL' ? null : cleanNullable(input.metadataSourceId), metadataSource === 'MANUAL' ? null : cleanNullable(input.metadataSourceUrl),
+        metadataSource === 'MANUAL' ? null : cleanNullable(input.metadataFetchedAt), now, now),
     buildRpgInsertStatement(db, { entryId, userId, input, publicationId, now }),
+    ...externalIdStatements(db, publicationId, input, now),
   ];
   return { statements, ids: { entryId, gameSystemId, publicationId }, reusedExistingPublication: false };
 }
 
-const METADATA_FIELDS = ['title', 'isbn', 'coverUrl', 'coverSourceUrl', 'coverSourceNote'] as const;
+const METADATA_FIELDS = ['title', 'isbn', 'coverUrl', 'coverSourceUrl', 'coverSourceNote', 'subtitle', 'publisher', 'publicationYear', 'language', 'publicationType', 'authors'] as const;
 
-// LIB-003: metadata editorial (título/ISBN/capa) só pode ser alterada enquanto
-// a Publication tiver 1 única User Library Entry — ver
-// docs/library/PUBLICATION_IDENTITY.md ("Política de segurança para metadata
-// compartilhada"). Estado pessoal nunca é afetado por essa trava. ISBN
-// inalterado em relação ao valor já persistido pula a validação de checksum
-// (mesmo princípio do incidente de coverUrl — LIB-001, CLAUDE.md seção 18):
-// nunca torna um registro legado impossível de salvar por causa de um campo
-// que a pessoa nem tocou.
+// LIB-003/LIB-004: metadata editorial (título/ISBN/capa/subtítulo/editora/ano/
+// idioma/tipo/autores) só pode ser alterada enquanto a Publication tiver 1 única
+// User Library Entry — ver docs/library/PUBLICATION_IDENTITY.md ("Política de
+// segurança para metadata compartilhada"). Estado pessoal nunca é afetado por
+// essa trava. ISBN inalterado em relação ao persistido pula a validação de
+// checksum (mesmo princípio do incidente de coverUrl — LIB-001, CLAUDE.md seção
+// 18). PATCH nunca reatribui publication_id nem reescreve provenance/external
+// IDs (isso só acontece no CREATE) — editar um RPG existente nunca "rebusca"
+// nem troca a origem do dado.
 export async function buildUpdateLibraryEntryStatements(
   db: D1Database,
   params: { entryId: string; userId: string; publicationId: string; input: RpgInput; now: string },
 ): Promise<D1PreparedStatement[]> {
   const { entryId, userId, publicationId, input, now } = params;
-  const publication = await db.prepare('SELECT id,game_system_id,title,isbn,cover_url,cover_source_url,cover_source_note FROM publications WHERE id=?')
-    .bind(publicationId).first<ExistingPublicationRow>();
+  const publication = await db.prepare(`SELECT ${PUBLICATION_COLUMNS} FROM publications WHERE id=?`).bind(publicationId).first<ExistingPublicationRow>();
   if (!publication) {
     // Defensivo: não deveria acontecer (publication_id sempre resolvido no create/backfill).
     return [db.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
@@ -134,12 +173,25 @@ export async function buildUpdateLibraryEntryStatements(
     }
   }
 
+  const nextSubtitle = cleanNullable(input.subtitle) ?? '';
+  const nextPublisher = cleanNullable(input.publisher) ?? '';
+  const nextPublicationYear = input.publicationYear ?? null;
+  const nextLanguage = cleanNullable(input.language) ?? '';
+  const nextPublicationType = input.publicationType ?? publication.publication_type;
+  const nextAuthors = cleanNullable(input.authors) ?? '';
+
   const metadataChanged = {
     title: input.title !== publication.title,
     isbn: !isbnUnchanged,
     coverUrl: cleanNullable(input.coverUrl) !== publication.cover_url,
     coverSourceUrl: cleanNullable(input.coverSourceUrl) !== publication.cover_source_url,
     coverSourceNote: cleanNullable(input.coverSourceNote) !== publication.cover_source_note,
+    subtitle: nextSubtitle !== publication.subtitle,
+    publisher: nextPublisher !== publication.publisher,
+    publicationYear: nextPublicationYear !== publication.publication_year,
+    language: nextLanguage !== publication.language,
+    publicationType: nextPublicationType !== publication.publication_type,
+    authors: nextAuthors !== publication.authors,
   };
   const anyMetadataChanged = METADATA_FIELDS.some((field) => metadataChanged[field]);
 
@@ -159,10 +211,10 @@ export async function buildUpdateLibraryEntryStatements(
 
   const statements = [
     nextIsbn10 === undefined
-      ? db.prepare('UPDATE publications SET title=?,isbn=?,cover_url=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=?')
-          .bind(input.title, nextIsbn, cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), now, publicationId)
-      : db.prepare('UPDATE publications SET title=?,isbn=?,isbn10=?,isbn13=?,cover_url=?,cover_source_url=?,cover_source_note=?,updated_at=? WHERE id=?')
-          .bind(input.title, nextIsbn, nextIsbn10, nextIsbn13, cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), now, publicationId),
+      ? db.prepare(`UPDATE publications SET title=?,isbn=?,cover_url=?,cover_source_url=?,cover_source_note=?,subtitle=?,publisher=?,publication_year=?,language=?,publication_type=?,authors=?,updated_at=? WHERE id=?`)
+          .bind(input.title, nextIsbn, cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), nextSubtitle, nextPublisher, nextPublicationYear, nextLanguage, nextPublicationType, nextAuthors, now, publicationId)
+      : db.prepare(`UPDATE publications SET title=?,isbn=?,isbn10=?,isbn13=?,cover_url=?,cover_source_url=?,cover_source_note=?,subtitle=?,publisher=?,publication_year=?,language=?,publication_type=?,authors=?,updated_at=? WHERE id=?`)
+          .bind(input.title, nextIsbn, nextIsbn10, nextIsbn13, cleanNullable(input.coverUrl), cleanNullable(input.coverSourceUrl), cleanNullable(input.coverSourceNote), nextSubtitle, nextPublisher, nextPublicationYear, nextLanguage, nextPublicationType, nextAuthors, now, publicationId),
     db.prepare('UPDATE game_systems SET name=?,normalized_name=?,updated_at=? WHERE id=?')
       .bind(input.title, normalizeLibraryName(input.title), now, publication.game_system_id),
     db.prepare(`UPDATE rpgs SET title=?,category_id=?,subgenre_id=?,reading_status=?,has_played=?,wants_to_play=?,priority=?,
@@ -174,8 +226,9 @@ export async function buildUpdateLibraryEntryStatements(
 }
 
 // JOIN canônico de leitura: toda rota que precisa dos campos editoriais
-// (title/coverUrl/isbn/coverSourceUrl/coverSourceNote) de um User Library Entry
-// usa esta mesma junção — `publications` é a fonte de verdade para esses campos
-// desde LIB-002, não mais as colunas legadas homônimas em `rpgs` (mantidas
-// fisicamente por segurança de rollback, mas não lidas pelo app).
+// (title/coverUrl/isbn/coverSourceUrl/coverSourceNote/subtitle/publisher/...)
+// de um User Library Entry usa esta mesma junção — `publications` é a fonte de
+// verdade para esses campos desde LIB-002, não mais as colunas legadas
+// homônimas em `rpgs` (mantidas fisicamente por segurança de rollback, mas não
+// lidas pelo app).
 export const LIBRARY_ENTRY_JOIN = 'LEFT JOIN publications p ON p.id=r.publication_id';
