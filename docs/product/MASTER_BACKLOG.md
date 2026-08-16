@@ -154,6 +154,39 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   Books (preparado na interface, não implementado), merge/reatribuição
   automática de identidade fora do fluxo de CREATE.
 
+## LIB-004A — Qualidade da busca online / RPG-aware search
+
+- **Priority:** P0 (regressão funcional real em produção — busca
+  retornava um resultado incorreto)
+- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após CI verde,
+  migration remota + deploy + production proof confirmados nesta mesma
+  sessão (ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`).
+- **Dependencies:** LIB-004 (`DONE`)
+- **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **Bug relatado:** busca por "Rastro de Cthulhu" (RPG de Kenneth Hite/
+  Pelgrane Press) retornava "The Trail of Cthulhu", antologia de ficção de
+  August Derleth de 1945 — causa raiz reproduzida contra a API real e
+  documentada em `docs/library/METADATA_PROVIDERS.md`.
+- **Migrations:** `migrations/0019_publication_aliases.sql` (aditiva,
+  nova tabela), `migrations/0020_publication_metadata_source_open.sql`
+  (rebuild seguro de `publications` — relaxa `CHECK` de `metadata_source`,
+  preserva 100% dos dados, validado local com `PRAGMA foreign_key_check`).
+- **Docs:** `docs/library/METADATA_PROVIDERS.md` (reescrito — causa raiz +
+  pipeline completo), `docs/library/LIBRARY_ARCHITECTURE.md` (seção
+  "LIB-004A"), `docs/library/LIBRARY_CURRENT_STATE.md` (seção "Atualização
+  — LIB-004A"), `docs/library/PUBLICATION_IDENTITY.md` (seção
+  "Atualização — LIB-004A"), `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
+- **O que muda de comportamento:** busca ganha confiança/relevância
+  calculada localmente (`src/domain/rpg/search-relevance.ts`) — resultados
+  fracamente relacionados nunca mais aparecem como match; catálogo interno
+  (título + aliases confirmados) consultado antes da Open Library; novo
+  fallback `POST /rpgs/import-url` (importar de página oficial, com
+  proteção SSRF dedicada); `reusePublicationId` como identidade de maior
+  prioridade no create.
+- **Fora de escopo (deliberado):** UI de administração/confirmação de
+  aliases (schema pronto, escrita fica para um fluxo futuro), tradução
+  automática de títulos, upload/KV, archive, friends, maps, VTT.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0

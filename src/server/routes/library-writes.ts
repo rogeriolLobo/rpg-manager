@@ -51,6 +51,14 @@ async function findLibraryEntryForPublication(db: D1Database, userId: string, pu
   return db.prepare('SELECT id FROM rpgs WHERE user_id=? AND publication_id=?').bind(userId, publicationId).first<{ id: string }>();
 }
 
+// LIB-004A: resolve um `reusePublicationId` vindo do catálogo interno (seção 9
+// do pedido) — sempre revalidado contra o banco real, nunca confiado
+// cegamente (um ID inexistente/apagado simplesmente não é encontrado, e o
+// resto do pipeline de identidade continua normalmente a partir daí).
+async function findPublicationById(db: D1Database, id: string): Promise<ExistingPublicationRow | null> {
+  return db.prepare(`SELECT ${PUBLICATION_COLUMNS} FROM publications WHERE id=?`).bind(id).first<ExistingPublicationRow>();
+}
+
 // Reexportado para o import CSV (transfer.ts) montar a mesma classificação de
 // identidade linha a linha, sem duplicar a query — mesma camada canônica.
 export interface PublicationByIsbn { id: string; title: string; cover_url: string | null }
@@ -94,12 +102,15 @@ function externalIdStatements(db: D1Database, publicationId: string, input: RpgI
   return statements;
 }
 
-// LIB-003/LIB-004: identidade + dedup seguro. Prioridade de resolução (seção 4/17
-// do pedido LIB-003/004): (1) Edition ID externo, (2) Work ID externo, (3) ISBN-13
-// (direto ou derivado de ISBN-10). Encontrado em qualquer conta (publications não
-// têm dono, são catálogo compartilhado, mesmo modelo de categories/subgenres) ->
-// reaproveita, só cria a nova User Library Entry. Nada encontrado -> cria Game
-// System + Publication novos. Nunca deduplica por título.
+// LIB-003/LIB-004/LIB-004A: identidade + dedup seguro. Prioridade de resolução
+// (seção 4/17 do pedido LIB-003/004, seção 9 do pedido LIB-004A): (1)
+// reusePublicationId do catálogo interno — o usuário já viu e escolheu
+// explicitamente esta Publication existente; (2) Edition ID externo, (3) Work
+// ID externo, (4) ISBN-13 (direto ou derivado de ISBN-10). Encontrado em
+// qualquer conta (publications não têm dono, são catálogo compartilhado,
+// mesmo modelo de categories/subgenres) -> reaproveita, só cria a nova User
+// Library Entry. Nada encontrado -> cria Game System + Publication novos.
+// Nunca deduplica por título sozinho (só por identificador confiável).
 export async function buildCreateLibraryEntryStatements(
   db: D1Database,
   params: { entryId: string; userId: string; input: RpgInput; now: string },
@@ -108,7 +119,8 @@ export async function buildCreateLibraryEntryStatements(
   const classified = classifyIsbn(input.isbn ?? null);
 
   let existing: ExistingPublicationRow | null = null;
-  if (input.metadataSource === 'OPEN_LIBRARY' && input.externalEditionId) existing = await findPublicationByExternalId(db, 'OPEN_LIBRARY', input.externalEditionId);
+  if (input.reusePublicationId) existing = await findPublicationById(db, input.reusePublicationId);
+  if (!existing && input.metadataSource === 'OPEN_LIBRARY' && input.externalEditionId) existing = await findPublicationByExternalId(db, 'OPEN_LIBRARY', input.externalEditionId);
   if (!existing && input.metadataSource === 'OPEN_LIBRARY' && input.externalWorkId) existing = await findPublicationByExternalId(db, 'OPEN_LIBRARY', input.externalWorkId);
   if (!existing && classified) existing = await findPublicationByIsbn13(db, classified.isbn13!);
 

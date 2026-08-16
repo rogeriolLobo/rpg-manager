@@ -1213,3 +1213,24 @@ legend {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
+/* LIB-004A: origem do candidato (catálogo interno/Open Library/importado) — só um rótulo
+   discreto, não um selo de alerta; a decisão de confiabilidade já aconteceu no servidor
+   (resultados abaixo do limiar nunca chegam aqui). */
+.search-result-origin {
+  font-style: italic;
+}
+/* LIB-004A: "Importar de uma página oficial" — mesmo padrão visual do .search-box, com
+   label visível (o campo não é óbvio como a busca por título/ISBN). */
+.url-import-box {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.7rem;
+}
+.url-import-box label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}

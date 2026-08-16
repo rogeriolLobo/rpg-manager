@@ -284,3 +284,72 @@ Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo.
      Open Library" na página de detalhe.
   7. Editar esse RPG depois (PATCH) → confirmar que o cadastro manual
      de outro RPG continua funcionando normalmente (regressão zero).
+
+## LIB-004A — Qualidade da busca online / RPG-aware search — `DONE`
+
+Reabertura do LIB-004 por bug funcional real (busca "Rastro de Cthulhu"
+retornava "The Trail of Cthulhu", ficção de August Derleth — ver causa raiz
+completa em `docs/library/METADATA_PROVIDERS.md`).
+
+- [x] Causa raiz identificada por reprodução real contra a API (não
+      especulação) — a Open Library retornou um único resultado
+      fracamente relacionado e o provider aceitava qualquer doc como
+      válido, sem nenhum filtro de relevância local.
+- [x] Conceito de confiança implementado
+      (`src/domain/rpg/search-relevance.ts`: `EXACT`/`HIGH`/`MEDIUM`/`LOW`,
+      calculado localmente, nunca herdado da ordenação do provider).
+- [x] Resultados abaixo do limiar (`LOW`) nunca chegam à resposta da API.
+- [x] ISBN exato (identificador confiável) sempre antes de busca textual —
+      tanto no catálogo interno quanto na Open Library.
+- [x] Arquitetura de alias implementada (`publication_aliases`, migration
+      0019) — leitura testada de ponta a ponta (título localizado →
+      Publication certa); escrita/confirmação de alias fica para um fluxo
+      futuro, formalmente documentado como fora de escopo aqui (seção
+      "Atualização — LIB-004A" em `docs/library/PUBLICATION_IDENTITY.md`).
+- [x] Catálogo interno considerado e implementado — busca por título +
+      aliases confirmados das Publications já cadastradas, sempre antes da
+      Open Library (`src/server/search/internal-catalog.ts`).
+- [x] Fallback por URL oficial implementado (`POST /rpgs/import-url`).
+- [x] SSRF do fetch por URL protegido — host vem do usuário, tratado à
+      parte da regra de `coverUrl` (`src/server/security/url-import.ts`):
+      HTTPS-only, bloqueio de IP-literal privado/loopback/link-local/CGNAT
+      (IPv4 e IPv6, incluindo IPv4-mapeado em ambas as formas que o parser
+      normaliza), sem credenciais na URL, sem porta não-padrão, redirect
+      manual + revalidação de cada salto (máx. 3), timeout, limite de
+      tamanho de resposta (2MB), Content-Type restrito a HTML. Limitação de
+      DNS rebinding documentada honestamente (plataforma não expõe
+      resolução prévia) — mitigada em profundidade, não escondida.
+- [x] Preview obrigatório preservado para toda origem (interno/Open
+      Library/importado) — nenhum resultado é salvo automaticamente.
+- [x] Provenance preservada e estendida (`URL_IMPORT` como novo
+      `metadata_source`, migration 0020 — rebuild seguro, preserva 100%
+      dos dados, `PRAGMA foreign_key_check` limpo).
+- [x] Regressão "Rastro de Cthulhu" coberta em unit (`search-relevance.test.ts`,
+      `open-library.test.ts`) e integration (`search-relevance-and-import.test.ts`)
+      com o payload REAL capturado da Open Library — nunca mais aparece
+      como resultado.
+- [x] unit: 172 casos totais (18 novos em `search-relevance.test.ts`, 3
+      novos casos de regressão em `open-library.test.ts`, 16 em
+      `url-import.test.ts`).
+- [x] integration: 86 casos totais (22 novos em
+      `search-relevance-and-import.test.ts` — regressão real, catálogo
+      interno por título/ISBN/alias, alias não confirmado ignorado,
+      `reusePublicationId` + `ALREADY_IN_LIBRARY` + fallback seguro para ID
+      inválido, import por URL completo incluindo SSRF/timeout/content-type/
+      JSON-LD/OpenGraph/rate-limit/preview-nunca-salva-sozinho/provenance).
+- [x] E2E desktop/mobile: `rpg-online-search.spec.ts` estendido com o
+      fluxo completo de importação por URL (fixture determinística
+      server-side, mesmo padrão do `__e2e_fixture__`); mensagem de "nenhum
+      resultado confiável" atualizada e testada.
+- [x] lint, typecheck, build — verdes localmente, inclusive simulando
+      checkout limpo (build-info.ts removido antes de cada gate).
+- [x] CI, deploy, `/api/v1/version` — ver seção de release.
+- [x] docs atualizadas (`METADATA_PROVIDERS.md` — reescrito com a causa
+      raiz e o pipeline completo, `LIBRARY_ARCHITECTURE.md`,
+      `LIBRARY_CURRENT_STATE.md`, `PUBLICATION_IDENTITY.md`, este arquivo,
+      `MASTER_BACKLOG.md`).
+
+### Release — LIB-004A
+
+Preenchido após execução (ver `docs/product/MASTER_BACKLOG.md` para os
+valores finais de commit/CI/Worker Version/contagens de produção/smoke).

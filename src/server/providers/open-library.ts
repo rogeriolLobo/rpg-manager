@@ -6,6 +6,7 @@
 // responsável da Open Library).
 import { classifyIsbn } from '../../domain/rpg/isbn';
 import { MetadataProviderError, type BookMetadataResult, type BookMetadataProvider } from '../../domain/rpg/metadata-provider';
+import { applyDomainBoost, hasRpgSubjectSignal, meetsDisplayThreshold, scoreTitleMatch, tierRank } from '../../domain/rpg/search-relevance';
 
 const SEARCH_HOST = 'https://openlibrary.org/search.json';
 const ISBN_HOST = 'https://openlibrary.org/isbn';
@@ -80,18 +81,23 @@ function stripPrefix(value: unknown, prefix: string): string | null {
 interface SearchDoc {
   key?: string; title?: string; subtitle?: string; author_name?: string[];
   first_publish_year?: number; publisher?: string[]; language?: string[];
-  isbn?: string[]; cover_i?: number; edition_key?: string[];
+  isbn?: string[]; cover_i?: number; edition_key?: string[]; subject?: string[];
 }
 
-function mapSearchDoc(doc: SearchDoc): BookMetadataResult | null {
+// LIB-004A: `query` é necessário para calcular confiança LOCALMENTE (nunca
+// confiamos na ordenação de relevância da Open Library — ver causa raiz em
+// docs/library/METADATA_PROVIDERS.md, incidente "Rastro de Cthulhu").
+function mapSearchDoc(doc: SearchDoc, query: string): BookMetadataResult | null {
   if (!doc.title) return null;
   const workId = stripPrefix(doc.key, '/works/');
   const editionId = doc.edition_key?.[0] ?? null;
   // Busca textual retorna a Obra — o primeiro ISBN da lista (quando presente) é só
   // representativo daquela obra, não uma seleção precisa de edição (seção 13 do pedido).
   const isbn = trustedIsbn(doc.isbn?.[0]);
+  const { confidence: textConfidence } = scoreTitleMatch(query, doc.title, doc.subtitle);
+  const confidence = applyDomainBoost(textConfidence, hasRpgSubjectSignal(doc.subject));
   return {
-    source: 'OPEN_LIBRARY', workId, editionId,
+    source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence, workId, editionId,
     sourceUrl: workId ? `https://openlibrary.org/works/${workId}` : SEARCH_HOST,
     title: doc.title, subtitle: doc.subtitle,
     authors: doc.author_name?.length ? doc.author_name.join(', ') : undefined,
@@ -105,15 +111,18 @@ function mapSearchDoc(doc: SearchDoc): BookMetadataResult | null {
 interface EditionDoc {
   key?: string; title?: string; subtitle?: string; publishers?: string[]; publish_date?: string;
   works?: Array<{ key?: string }>; covers?: number[]; languages?: Array<{ key?: string }>;
-  isbn_10?: string[]; isbn_13?: string[]; by_statement?: string;
+  isbn_10?: string[]; isbn_13?: string[]; by_statement?: string; subjects?: string[];
 }
 
+// Lookup por ISBN é sempre EXACT — ISBN é um identificador confiável, não uma
+// comparação textual (seção 3 do pedido: "ISBN exato" é a primeira e mais
+// forte etapa do pipeline, não precisa de score).
 function mapEdition(doc: EditionDoc): BookMetadataResult | null {
   if (!doc.title) return null;
   const editionId = stripPrefix(doc.key, '/books/');
   const workId = stripPrefix(doc.works?.[0]?.key, '/works/');
   return {
-    source: 'OPEN_LIBRARY', workId, editionId,
+    source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence: 'EXACT', workId, editionId,
     sourceUrl: editionId ? `https://openlibrary.org/books/${editionId}` : ISBN_HOST,
     title: doc.title, subtitle: doc.subtitle,
     // Registros de edição nem sempre trazem autor (fica na Obra) — não fazemos uma segunda
@@ -129,12 +138,18 @@ function mapEdition(doc: EditionDoc): BookMetadataResult | null {
 
 export const openLibraryProvider: BookMetadataProvider = {
   async search(query: string): Promise<BookMetadataResult[]> {
-    const url = `${SEARCH_HOST}?q=${encodeURIComponent(query)}&fields=${encodeURIComponent('key,title,subtitle,author_name,first_publish_year,publisher,language,isbn,cover_i,edition_key')}&limit=${RESULT_LIMIT}`;
+    const url = `${SEARCH_HOST}?q=${encodeURIComponent(query)}&fields=${encodeURIComponent('key,title,subtitle,author_name,first_publish_year,publisher,language,isbn,cover_i,edition_key,subject')}&limit=${RESULT_LIMIT}`;
     const payload = await fetchJson(url) as { docs?: SearchDoc[] } | null;
     const docs = payload?.docs ?? [];
     const results: BookMetadataResult[] = [];
-    for (const doc of docs) { const mapped = mapSearchDoc(doc); if (mapped) results.push(mapped); }
-    return results.slice(0, RESULT_LIMIT);
+    for (const doc of docs) { const mapped = mapSearchDoc(doc, query); if (mapped) results.push(mapped); }
+    // LIB-004A: nunca apresenta um resultado LOW como se fosse confiável — abaixo do
+    // limiar, é melhor "nenhum resultado confiável" do que um livro errado (seção 6).
+    // Entre os que passam, ordena por confiança (EXACT/HIGH primeiro).
+    return results
+      .filter((result) => meetsDisplayThreshold(result.confidence))
+      .sort((a, b) => tierRank(b.confidence) - tierRank(a.confidence))
+      .slice(0, RESULT_LIMIT);
   },
   async lookupByIsbn(isbn13: string): Promise<BookMetadataResult | null> {
     const payload = await fetchJson(`${ISBN_HOST}/${encodeURIComponent(isbn13)}.json`) as EditionDoc | null;

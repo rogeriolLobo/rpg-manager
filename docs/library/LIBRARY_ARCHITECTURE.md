@@ -291,3 +291,53 @@ isso (streams de I/O são amarrados ao request que os criou). Correção:
 usar `mockImplementation(() => Promise.resolve(new Response(...)))` —
 cria a `Response` só quando `fetch()` é de fato chamado, dentro do
 request real. Ver `tests/integration/metadata-search.test.ts`.
+
+## LIB-004A — Qualidade da busca online / catálogo interno / import por URL (implementado)
+
+Reabertura do LIB-004: um bug funcional real em produção (busca por "Rastro
+de Cthulhu" retornava um livro de ficção completamente errado — ver
+`docs/library/METADATA_PROVIDERS.md` para a causa raiz completa, reproduzida
+contra a API real antes de qualquer mudança de código). Resumo do que muda:
+
+- **`src/domain/rpg/search-relevance.ts`** (novo, puro): normalização de
+  título para comparação (NFKD, remove diacríticos, stopwords curtas
+  pt/en/es), scoring por sobreposição de tokens (Jaccard) + contenção
+  textual, tiers `EXACT`/`HIGH`/`MEDIUM`/`LOW`. Abaixo de `MEDIUM` nunca é
+  exibido. Sinal de assunto (`subject` da Open Library, ex.: "Fantasy
+  games") amplifica `MEDIUM`→`HIGH`, nunca inventa relevância a partir do
+  zero nem promove a `EXACT` — nunca é uma allowlist de editoras.
+- **`BookMetadataResult` ganhou `origin`/`confidence`/`internalPublicationId`/
+  `matchedAlias`** (`src/domain/rpg/metadata-provider.ts`) — todo resultado,
+  de qualquer fonte, carrega uma confiança calculada localmente.
+- **`GET /rpgs/search-external` virou um pipeline de duas fontes**:
+  catálogo interno (`src/server/search/internal-catalog.ts` — título das
+  Publications já cadastradas + aliases confirmados) sempre primeiro, depois
+  Open Library (agora filtrada por confiança). Se a Open Library falhar mas o
+  catálogo interno tiver resultado, a busca não falha inteira.
+- **Migration `0019_publication_aliases.sql`** (aditiva, nova tabela): título
+  alternativo/localizado de uma Publication (ex.: "Rastro de Cthulhu" →
+  "Trail of Cthulhu"). Só aliases `confirmed=1` entram na busca — nunca
+  influenciam resultado de outro usuário por engano. Sem UI de administração
+  nesta tarefa (escrita fica para um fluxo de confirmação futuro); leitura
+  testada de ponta a ponta.
+- **`reusePublicationId`** (`rpgInputSchema`, `buildCreateLibraryEntryStatements`):
+  prioridade máxima na resolução de identidade (acima de external
+  ID/ISBN) — selecionar um resultado `INTERNAL` reaproveita a Publication
+  existente por ID, revalidado no servidor, nunca reescreve provenance.
+- **`POST /rpgs/import-url`** (novo): fallback "Importar de uma página
+  oficial" — único fluxo do domínio de metadata em que o host vem do
+  usuário. SSRF tratado à parte (`src/server/security/url-import.ts`, ver
+  `docs/library/METADATA_PROVIDERS.md`), extração via `HTMLRewriter` nativo
+  (JSON-LD > OpenGraph > meta comum), preview obrigatório, ISBN extraído
+  revalidado pelo checksum real antes de aceitar.
+- **Migration `0020_publication_metadata_source_open.sql`**: rebuild seguro
+  de `publications` (SQLite não permite `ALTER` de `CHECK` — técnica oficial
+  "nova tabela → copia linhas explicitamente por nome de coluna → drop →
+  rename → recria índices", preserva 100% dos dados, `PRAGMA
+  foreign_key_check` limpo antes de aplicar em produção) para aceitar
+  `URL_IMPORT` como `metadata_source` sem fechar a porta para futuros
+  providers com outra migration.
+- **`build-info.ts` deixou de ser rastreado no Git** nesta mesma janela de
+  trabalho (não é uma mudança do LIB-004A em si, mas afeta como qualquer
+  release — incluindo este — se verifica): ver
+  `docs/release/RELEASE_CHAIN_POLICY.md`.

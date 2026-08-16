@@ -13,7 +13,7 @@ function mockFetchOnce(body: unknown, init: { status?: number } = {}) {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('Open Library — search (LIB-004)', () => {
-  it('mapeia docs reais com todos os campos presentes', async () => {
+  it('mapeia docs reais com todos os campos presentes (query igual ao título -> EXACT)', async () => {
     mockFetchOnce({
       docs: [{
         key: '/works/OL31098762W', title: '100 Alien Plots', author_name: ['Donovan Corzo'],
@@ -21,9 +21,9 @@ describe('Open Library — search (LIB-004)', () => {
         isbn: ['9781958297520', '1958297526'], cover_i: 12345678, edition_key: ['OL42707574M', 'OL42727464M'],
       }],
     });
-    const results = await openLibraryProvider.search('alien rpg');
+    const results = await openLibraryProvider.search('100 Alien Plots');
     expect(results).toEqual([{
-      source: 'OPEN_LIBRARY', workId: 'OL31098762W', editionId: 'OL42707574M',
+      source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence: 'EXACT', workId: 'OL31098762W', editionId: 'OL42707574M',
       sourceUrl: 'https://openlibrary.org/works/OL31098762W',
       title: '100 Alien Plots', subtitle: undefined, authors: 'Donovan Corzo',
       publisher: 'Corzo Creations', publicationYear: 2022, language: 'eng',
@@ -34,9 +34,9 @@ describe('Open Library — search (LIB-004)', () => {
 
   it('não inventa campos ausentes (subtitle/author/publisher/cover faltando)', async () => {
     mockFetchOnce({ docs: [{ key: '/works/OL8382459W', title: 'Aliens: Enemies and Allies' }] });
-    const results = await openLibraryProvider.search('aliens');
+    const results = await openLibraryProvider.search('Aliens: Enemies and Allies');
     expect(results).toEqual([{
-      source: 'OPEN_LIBRARY', workId: 'OL8382459W', editionId: null,
+      source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence: 'EXACT', workId: 'OL8382459W', editionId: null,
       sourceUrl: 'https://openlibrary.org/works/OL8382459W',
       title: 'Aliens: Enemies and Allies', subtitle: undefined, authors: undefined,
       publisher: undefined, publicationYear: undefined, language: undefined,
@@ -53,14 +53,14 @@ describe('Open Library — search (LIB-004)', () => {
 
   it('descarta doc sem título (não é um resultado utilizável)', async () => {
     mockFetchOnce({ docs: [{ key: '/works/OL1W' }, { key: '/works/OL2W', title: 'Válido' }] });
-    const results = await openLibraryProvider.search('teste');
+    const results = await openLibraryProvider.search('Válido');
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe('Válido');
   });
 
   it('limita a 10 resultados mesmo se o provider devolver mais', async () => {
     mockFetchOnce({ docs: Array.from({ length: 25 }, (_, i) => ({ key: `/works/OL${i}W`, title: `Livro ${i}` })) });
-    const results = await openLibraryProvider.search('muitos resultados');
+    const results = await openLibraryProvider.search('Livro');
     expect(results).toHaveLength(10);
   });
 
@@ -68,10 +68,69 @@ describe('Open Library — search (LIB-004)', () => {
     mockFetchOnce({ docs: [] });
     expect(await openLibraryProvider.search('nada encontrado')).toEqual([]);
   });
+
+  // LIB-004A: regressão do bug real relatado em produção. Fixtures capturadas
+  // literalmente da resposta real da Open Library (ver docs/library/METADATA_PROVIDERS.md).
+  describe('regressão real: "Rastro de Cthulhu" (LIB-004A)', () => {
+    it('resultado único e fracamente relacionado (August Derleth, ficção) é filtrado — nunca aparece como match', async () => {
+      mockFetchOnce({
+        docs: [{
+          key: '/works/OL8265836W', title: 'The Trail of Cthulhu', author_name: ['August Derleth'],
+          first_publish_year: 1945, publisher: ['Carroll & Graf Publishers'], language: ['spa', 'eng'],
+          cover_i: 1289152, subject: ['Cthulhu (Fictitious character)', 'Fiction', 'Horror tales'],
+        }],
+      });
+      const results = await openLibraryProvider.search('Rastro de Cthulhu');
+      expect(results).toEqual([]);
+    });
+
+    it('o RPG correto (Kenneth Hite / Pelgrane Press) aparece com alta confiança quando a query bate', async () => {
+      mockFetchOnce({
+        docs: [{
+          key: '/works/OL19907627W', title: 'Trail of Cthulhu', author_name: ['Kenneth Hite'],
+          first_publish_year: 2008, publisher: ['Pelgrane Press'], language: ['eng'],
+          isbn: ['1934859079', '9781934859070'], cover_i: 8729054, edition_key: ['OL27092590M'],
+          subject: ['Fantasy games', 'Handbooks, manuals'],
+        }],
+      });
+      const results = await openLibraryProvider.search('Trail of Cthulhu Kenneth Hite');
+      expect(results).toHaveLength(1);
+      // Query inclui o autor além do título — não é uma igualdade textual literal
+      // (por isso HIGH, não EXACT), mas ainda assim bem acima do limiar de exibição,
+      // com o boost de assunto de RPG confirmando o sinal (seção 5 do pedido).
+      expect(results[0].confidence).toBe('HIGH');
+      expect(results[0].publisher).toBe('Pelgrane Press');
+      expect(results[0].isbn13).toBe('9781934859070');
+    });
+
+    it('quando ambos aparecem para "Trail of Cthulhu" (sem autor), o RPG (assunto de jogo) ordena antes da ficção parecida', async () => {
+      mockFetchOnce({
+        docs: [
+          {
+            key: '/works/OL8265836W', title: 'The Trail of Cthulhu', author_name: ['August Derleth'],
+            first_publish_year: 1945, publisher: ['Carroll & Graf Publishers'], language: ['eng'],
+            subject: ['Cthulhu (Fictitious character)', 'Fiction', 'Horror tales'],
+          },
+          {
+            key: '/works/OL19907627W', title: 'Trail of Cthulhu', author_name: ['Kenneth Hite'],
+            first_publish_year: 2008, publisher: ['Pelgrane Press'], language: ['eng'],
+            isbn: ['9781934859070'], edition_key: ['OL27092590M'],
+            subject: ['Fantasy games', 'Handbooks, manuals'],
+          },
+        ],
+      });
+      const results = await openLibraryProvider.search('Trail of Cthulhu');
+      expect(results).toHaveLength(2);
+      expect(results[0].publisher).toBe('Pelgrane Press');
+      expect(results[0].confidence).toBe('EXACT');
+      expect(results[1].publisher).toBe('Carroll & Graf Publishers');
+      expect(results[1].confidence).toBe('HIGH');
+    });
+  });
 });
 
 describe('Open Library — lookup por ISBN (LIB-004)', () => {
-  it('mapeia edição real (works/publishers/covers/languages/isbn_13)', async () => {
+  it('mapeia edição real (works/publishers/covers/languages/isbn_13) — lookup por ISBN é sempre EXACT', async () => {
     mockFetchOnce({
       key: '/books/OL25883754M', title: 'The Way of Kings', subtitle: 'Book One of the Stormlight Archive',
       publishers: ['Tor'], publish_date: 'August 31st 2010', works: [{ key: '/works/OL15358691W' }],
@@ -80,7 +139,7 @@ describe('Open Library — lookup por ISBN (LIB-004)', () => {
     });
     const result = await openLibraryProvider.lookupByIsbn('9780765326355');
     expect(result).toEqual({
-      source: 'OPEN_LIBRARY', workId: 'OL15358691W', editionId: 'OL25883754M',
+      source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence: 'EXACT', workId: 'OL15358691W', editionId: 'OL25883754M',
       sourceUrl: 'https://openlibrary.org/books/OL25883754M',
       title: 'The Way of Kings', subtitle: 'Book One of the Stormlight Archive', authors: undefined,
       publisher: 'Tor', publicationYear: 2010, language: 'eng',

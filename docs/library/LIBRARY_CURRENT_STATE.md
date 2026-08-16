@@ -259,3 +259,27 @@ Library deixa de ser `MISSING` — agora `COMPLETE` no escopo desta tarefa
   (preview obrigatório embutido, não uma tela separada).
 - Upload de capa (Workers KV) e archive de RPG continuam `MISSING` — fora
   de escopo do LIB-004 (F-008/F-011).
+
+## Atualização — LIB-004A implementado (`migrations/0019_publication_aliases.sql`, `migrations/0020_publication_metadata_source_open.sql`)
+
+Reabertura do LIB-004 por um bug funcional real (busca "Rastro de Cthulhu"
+retornava um livro errado — ver causa raiz completa em
+`docs/library/METADATA_PROVIDERS.md`). Ver
+`docs/library/LIBRARY_ARCHITECTURE.md` para o resumo técnico.
+
+- Busca online ganhou confiança/relevância calculada localmente
+  (`src/domain/rpg/search-relevance.ts`) — resultados fracamente
+  relacionados nunca mais são apresentados como match confiável.
+  RPG-aware: sinal de assunto (`subject` da Open Library) amplifica
+  confiança quando genuinamente presente, nunca inventa.
+- Catálogo interno (título + aliases confirmados) passa a ser consultado
+  **antes** da Open Library — `COMPLETE` (leitura testada de ponta a
+  ponta; escrita de aliases fica para um fluxo de confirmação futuro,
+  fora de escopo aqui).
+- Fallback "Importar de uma página oficial" (`POST /rpgs/import-url`) —
+  `COMPLETE`: SSRF tratado (host vem do usuário, único fluxo assim no
+  domínio de metadata), extração JSON-LD/OpenGraph via `HTMLRewriter`,
+  preview obrigatório, provenance própria (`URL_IMPORT`).
+- `publications.metadata_source` deixou de ter uma lista fechada de
+  valores no banco (rebuild seguro, migration 0020) — próximos providers
+  não exigem mais uma migration só para isso.

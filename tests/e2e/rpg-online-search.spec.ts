@@ -1,12 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// LIB-004: busca online (Open Library) — mockada via um seam determinístico
-// server-side (query com prefixo "__e2e_fixture__", travado atrás de
-// ENVIRONMENT !== production — ver src/server/routes/rpgs.ts). Playwright só
-// intercepta requests do NAVEGADOR; a busca é feita pelo servidor
-// (docs/library/PUBLICATION_IDENTITY.md — host fixo, nunca vindo do
-// cliente), então não há como usar page.route() aqui — nenhuma chamada real
-// à Open Library acontece neste arquivo.
+// LIB-004/LIB-004A: busca online (Open Library + catálogo interno + import por
+// URL) — mockada via seams determinísticos server-side (query com prefixo
+// "__e2e_fixture__" e hostname "e2e-fixture.rpg-manager.invalid", ambos
+// travados atrás de ENVIRONMENT !== production — ver src/server/routes/rpgs.ts).
+// Playwright só intercepta requests do NAVEGADOR; a busca/importação é feita
+// pelo servidor (docs/library/PUBLICATION_IDENTITY.md — host fixo, nunca
+// vindo do cliente para a busca; validado por SSRF para a importação por
+// URL), então não há como usar page.route() aqui — nenhuma chamada real à
+// Open Library ou a qualquer página externa acontece neste arquivo.
 
 async function registerFreshAccount(page: Page, label: string) {
   const email = `e2e-search-${label}-${Date.now()}@example.com`;
@@ -52,7 +54,7 @@ test("busca online: sem resultados mostra mensagem clara, sem travar a tela", as
   await page.getByRole("button", { name: "Buscar online" }).click();
   await page.getByLabel("Buscar livro por título, ISBN ou autor").fill("__e2e_fixture__no-results");
   await page.getByRole("button", { name: "Buscar" }).click();
-  await expect(page.getByText("Nenhum resultado para essa busca")).toBeVisible();
+  await expect(page.getByText("Nenhum resultado confiável encontrado")).toBeVisible();
   // Cadastro manual continua acessível a partir daqui.
   await page.getByRole("button", { name: "Cadastrar manualmente" }).click();
   await expect(page.getByLabel("Título", { exact: true })).toBeVisible();
@@ -103,4 +105,26 @@ test("cadastro manual continua funcionando sem nenhuma interação com busca onl
   // exact:true — "Manual" sem isso colide com o nome de usuário/e-mail do
   // teste ("Buscador manual-regressao", "...manual-regressao...@example.com").
   await expect(page.getByText("Manual", { exact: true })).toBeVisible();
+});
+
+// LIB-004A: "Importar de uma página oficial" — fallback dentro do mesmo painel
+// de busca, para quando a Open Library não tem o produto (era exatamente o
+// caso real do "Rastro de Cthulhu").
+test("busca online: importar de uma página oficial por URL cria o RPG com provenance de importação", async ({ page }) => {
+  test.setTimeout(60_000);
+  await registerFreshAccount(page, "url-import");
+
+  await page.goto("/app/library/new");
+  await page.getByRole("button", { name: "Buscar online" }).click();
+  await page.getByRole("button", { name: "Não encontrou? Importar de uma página oficial" }).click();
+  await page.getByLabel("URL da página oficial do produto").fill("https://e2e-fixture.rpg-manager.invalid/produto-fixture");
+  await page.getByRole("button", { name: "Importar" }).click();
+
+  // Preview obrigatório — mesmo formulário, aviso de origem específico de importação.
+  await expect(page.getByText("Dados importados de uma página externa.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue("Produto Importado de Teste");
+
+  await page.getByRole("button", { name: "Salvar RPG" }).click();
+  await expect(page.getByRole("heading", { name: "Produto Importado de Teste" })).toBeVisible();
+  await expect(page.getByText("Página importada")).toBeVisible();
 });

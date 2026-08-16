@@ -1,23 +1,41 @@
 import { Hono, type Context } from 'hono';
 import { classifyIsbn } from '../../domain/rpg/isbn';
-import { MetadataProviderError } from '../../domain/rpg/metadata-provider';
+import { MetadataProviderError, type BookMetadataResult } from '../../domain/rpg/metadata-provider';
 import { calculateRpgNextAction, calculateRpgReadiness, calculateRpgRecommendationScore, type RecommendationCandidate } from '../../domain/rpg/recommendation';
 import { openLibraryProvider } from '../providers/open-library';
-import { rpgInputSchema, rpgUpdateInputSchema } from '../../shared/validation/schemas';
+import { findInternalPublicationByIsbn13, searchInternalCatalog } from '../search/internal-catalog';
+import { UrlImportError, extractPageMetadata, fetchHtmlWithSsrfProtection, validateImportUrl } from '../security/url-import';
+import { isPublicHttpsUrl } from '../../shared/security/cover-url';
+import { rpgInputSchema, rpgUpdateInputSchema, urlImportSchema } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 import { LIBRARY_ENTRY_JOIN, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+const RESULT_LIMIT = 10;
+
 // LIB-004: fixture determinística para E2E — ver rota /search-external abaixo.
-const E2E_FIXTURE_RESULTS = [{
-  source: 'OPEN_LIBRARY', workId: 'OLE2EW', editionId: 'OLE2EM',
+const E2E_FIXTURE_RESULTS: BookMetadataResult[] = [{
+  source: 'OPEN_LIBRARY', origin: 'OPEN_LIBRARY', confidence: 'EXACT', workId: 'OLE2EW', editionId: 'OLE2EM',
   sourceUrl: 'https://openlibrary.org/books/OLE2EM',
   title: 'Aventuras de Teste', subtitle: 'Edição de Testes E2E', authors: 'Autora Fixture',
   publisher: 'Editora Fixture', publicationYear: 2024, language: 'por',
   isbn10: undefined, isbn13: '9783161484100', coverUrl: undefined,
 }];
+
+// LIB-004A: fixture determinística para E2E do fluxo "Importar de uma página
+// oficial" — mesma trava de ambiente (nunca alcançável em produção). Chave
+// pelo hostname (não pelo path/query), porque a validação de URL real roda
+// antes de checar a fixture (a URL ainda precisa ser HTTPS válida).
+const E2E_IMPORT_FIXTURE_HOST = 'e2e-fixture.rpg-manager.invalid';
+const E2E_IMPORT_FIXTURE_RESULT: BookMetadataResult = {
+  source: 'URL_IMPORT', origin: 'URL_IMPORT', confidence: 'HIGH', workId: null, editionId: null,
+  sourceUrl: `https://${E2E_IMPORT_FIXTURE_HOST}/produto-fixture`,
+  title: 'Produto Importado de Teste', subtitle: undefined, authors: 'Autora da Página Fixture',
+  publisher: 'Editora da Página Fixture', publicationYear: 2021, language: undefined,
+  isbn10: undefined, isbn13: undefined, coverUrl: undefined,
+};
 
 // LIB-002: title/coverUrl/isbn/coverSourceUrl/coverSourceNote vêm de `publications`
 // (p.*), a fonte de verdade editorial desde a normalização de domínio — não mais
@@ -88,14 +106,21 @@ rpgRoutes.get('/metadata', async (c) => {
   return c.json({ categories: categories.results, subgenres: subgenres.results, groups: groups.results });
 });
 
-// LIB-004: busca externa de Publication (Open Library). Host fixo no provider
-// (nunca aceita URL/host vindo do usuário — não é o mesmo fluxo de coverUrl
-// externo), autenticado (herdado de requireAuth em /api/v1/rpgs/*), rate
-// limit local (reaproveita DIRECTORY_RATE_LIMITER com chave própria — mesmo
-// binding zero-cost já provisionado, sem criar novo recurso Cloudflare),
-// timeout+erro amigável (nunca derruba a Biblioteca — seção 8 do pedido).
-// Não persiste nada — só devolve candidatos para o usuário revisar (preview
-// obrigatório antes de qualquer escrita, seção 18).
+// LIB-004/LIB-004A: busca de Publication — catálogo interno (nosso próprio
+// banco: título + aliases confirmados) SEMPRE primeiro (seção 9 do pedido),
+// depois Open Library (host fixo no provider — nunca aceita URL/host vindo do
+// usuário, diferente do fluxo de coverUrl externo). Autenticado (herdado de
+// requireAuth em /api/v1/rpgs/*), rate limit local (reaproveita
+// DIRECTORY_RATE_LIMITER com chave própria), timeout+erro amigável (nunca
+// derruba a Biblioteca). Não persiste nada — só devolve candidatos para o
+// usuário revisar (preview obrigatório antes de qualquer escrita).
+//
+// LIB-004A: cada candidato carrega uma `confidence` calculada LOCALMENTE
+// (nunca confiamos apenas na ordenação de relevância do provider — ver
+// src/domain/rpg/search-relevance.ts e o incidente real documentado em
+// docs/library/METADATA_PROVIDERS.md). Resultados abaixo do limiar de
+// confiança nunca chegam à resposta — "nenhum resultado confiável" é
+// preferível a apresentar um livro errado.
 rpgRoutes.get('/search-external', async (c) => {
   const query = (c.req.query('q') ?? '').trim();
   if (query.length < 2 || query.length > 200) throw new ApiError(422, 'INVALID_SEARCH_QUERY', 'Digite entre 2 e 200 caracteres para buscar.');
@@ -109,18 +134,69 @@ rpgRoutes.get('/search-external', async (c) => {
     if (query.includes('provider-error')) throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
     return c.json({ results: query.includes('no-results') ? [] : E2E_FIXTURE_RESULTS });
   }
+  const classified = classifyIsbn(query);
+  if (classified?.isbn13) {
+    // ISBN é o identificador mais forte (seção 3) — catálogo interno primeiro, senão Open Library.
+    const internal = await findInternalPublicationByIsbn13(c.env.DB, classified.isbn13);
+    if (internal) return c.json({ results: [internal] });
+    try {
+      const found = await openLibraryProvider.lookupByIsbn(classified.isbn13);
+      return c.json({ results: found ? [found] : [] });
+    } catch (error) {
+      if (!(error instanceof MetadataProviderError)) throw error;
+      console.error(JSON.stringify({ level: 'error', requestId: c.get('requestId'), operation: 'METADATA_SEARCH', provider: 'OPEN_LIBRARY', reason: error.reason }));
+      throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
+    }
+  }
+  const internalResults = await searchInternalCatalog(c.env.DB, query);
+  let externalResults: BookMetadataResult[] = [];
   try {
-    // ISBN detectado -> lookup exato (mais preciso, é uma Edition específica); senão, busca
-    // textual por título/autor (seção 11 do pedido).
-    const classified = classifyIsbn(query);
-    const results = classified?.isbn13
-      ? await openLibraryProvider.lookupByIsbn(classified.isbn13).then((found) => (found ? [found] : []))
-      : await openLibraryProvider.search(query);
-    return c.json({ results });
+    externalResults = await openLibraryProvider.search(query);
   } catch (error) {
     if (!(error instanceof MetadataProviderError)) throw error;
     console.error(JSON.stringify({ level: 'error', requestId: c.get('requestId'), operation: 'METADATA_SEARCH', provider: 'OPEN_LIBRARY', reason: error.reason }));
-    throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
+    // Catálogo interno já pode ter resultado útil mesmo com a Open Library fora do ar —
+    // só falha a busca inteira se não houver NADA para mostrar (seção 8 do pedido original).
+    if (!internalResults.length) throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
+  }
+  return c.json({ results: [...internalResults, ...externalResults].slice(0, RESULT_LIMIT) });
+});
+
+// LIB-004A: fallback "Importar de uma página oficial" (seção 10 do pedido) —
+// único endpoint do domínio de metadata em que o HOST vem do usuário, por
+// isso a validação SSRF dedicada (src/server/security/url-import.ts). Nunca
+// salva nada — só devolve um preview para revisão manual, mesmo contrato de
+// "preview obrigatório" do restante da busca.
+rpgRoutes.post('/import-url', async (c) => {
+  const input = await readJson(c, urlImportSchema);
+  const rateLimit = await c.env.DIRECTORY_RATE_LIMITER.limit({ key: `url-import:${c.get('user').id}` });
+  if (!rateLimit.success) throw new ApiError(429, 'RATE_LIMITED', 'Muitas importações. Aguarde antes de tentar novamente.');
+  const { url } = validateImportUrl(input.url);
+  if (c.env.ENVIRONMENT !== 'production' && url.hostname === E2E_IMPORT_FIXTURE_HOST) {
+    return c.json({ result: E2E_IMPORT_FIXTURE_RESULT });
+  }
+  try {
+    const html = await fetchHtmlWithSsrfProtection(url);
+    const extracted = await extractPageMetadata(html);
+    if (!extracted.title) throw new ApiError(422, 'IMPORT_NO_METADATA', 'Não encontramos dados suficientes nessa página. Você ainda pode cadastrar manualmente.');
+    const classified = classifyIsbn(extracted.isbn ?? null); // nunca confia cego no ISBN extraído da página.
+    let coverUrl: string | undefined;
+    if (extracted.coverUrl) {
+      const resolved = new URL(extracted.coverUrl, url).toString();
+      if (isPublicHttpsUrl(resolved)) coverUrl = resolved;
+    }
+    const result: BookMetadataResult = {
+      source: 'URL_IMPORT', origin: 'URL_IMPORT', confidence: 'HIGH', workId: null, editionId: null,
+      sourceUrl: url.toString(), title: extracted.title, subtitle: extracted.subtitle,
+      authors: extracted.authors, publisher: extracted.publisher, publicationYear: extracted.publicationYear,
+      isbn10: classified?.isbn10 ?? undefined, isbn13: classified?.isbn13 ?? undefined, coverUrl,
+    };
+    return c.json({ result });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (!(error instanceof UrlImportError)) throw error;
+    console.error(JSON.stringify({ level: 'error', requestId: c.get('requestId'), operation: 'URL_IMPORT', reason: error.reason }));
+    throw new ApiError(502, 'IMPORT_UNAVAILABLE', 'Não foi possível importar essa página agora. Você ainda pode cadastrar manualmente.');
   }
 });
 

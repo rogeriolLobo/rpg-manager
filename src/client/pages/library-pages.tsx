@@ -44,14 +44,19 @@ export interface Rpg {
   readiness: string;
   nextAction: string;
 }
-// LIB-004: resultado de busca externa (Open Library) — espelha
-// BookMetadataResult (src/domain/rpg/metadata-provider.ts) no formato que a
-// API expõe (achatado em JSON).
+// LIB-004/LIB-004A: resultado de busca (catálogo interno, Open Library ou
+// importação por URL) — espelha BookMetadataResult
+// (src/domain/rpg/metadata-provider.ts) no formato que a API expõe (achatado
+// em JSON).
 interface SearchResult {
-  source: string; workId: string | null; editionId: string | null; sourceUrl: string;
+  source: string; origin: "INTERNAL" | "OPEN_LIBRARY" | "URL_IMPORT"; confidence: "EXACT" | "HIGH" | "MEDIUM" | "LOW";
+  workId: string | null; editionId: string | null; internalPublicationId?: string; matchedAlias?: string; sourceUrl: string;
   title: string; subtitle?: string; authors?: string; publisher?: string;
   publicationYear?: number; language?: string; isbn10?: string; isbn13?: string; coverUrl?: string;
 }
+const ORIGIN_LABELS: Record<SearchResult["origin"], string> = {
+  INTERNAL: "Já no catálogo do RPG Manager", OPEN_LIBRARY: "Open Library", URL_IMPORT: "Página importada",
+};
 const PUBLICATION_TYPE_LABELS: Record<string, string> = {
   CORE_RULEBOOK: "Livro básico", PLAYER_GUIDE: "Guia do jogador", GM_GUIDE: "Guia do mestre",
   SUPPLEMENT: "Suplemento", SETTING: "Cenário", ADVENTURE: "Aventura", ONE_SHOT: "One-shot",
@@ -299,6 +304,54 @@ function CoverImage({ item, eager = false }: { item: Rpg; eager?: boolean }) {
 // explícita (submit do formulário: botão "Buscar" ou Enter) — nunca a cada
 // tecla, evita requests desnecessárias contra um provider público de baixo
 // volume (seção 5/9 do pedido).
+// LIB-004A: fallback "Importar de uma página oficial" (seção 10 do pedido) —
+// mesmo painel, sub-fluxo separado por ter seu próprio estado (URL + erro),
+// sempre entrega um único resultado (que ainda passa pelo preview obrigatório
+// como qualquer outro).
+function UrlImportPanel({ onImported }: { onImported: (result: SearchResult) => void }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [state, setState] = useState<{ status: "idle" } | { status: "loading" } | { status: "error"; message: string }>({ status: "idle" });
+  const runImport = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!url.trim()) return;
+    setState({ status: "loading" });
+    try {
+      const data = await postJson<{ result: SearchResult }>("/rpgs/import-url", { url: url.trim() });
+      onImported(data.result);
+    } catch (reason) {
+      setState({ status: "error", message: reason instanceof Error ? reason.message : "Não foi possível importar essa página agora." });
+    }
+  };
+  if (!open) {
+    return (
+      <button type="button" className="ghost-button" onClick={() => setOpen(true)}>
+        Não encontrou? Importar de uma página oficial
+      </button>
+    );
+  }
+  return (
+    <form className="url-import-box" onSubmit={(e) => void runImport(e)}>
+      <label>
+        URL da página oficial do produto (editora, loja…)
+        <input
+          type="url"
+          aria-label="URL da página oficial do produto"
+          placeholder="https://…"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          maxLength={2000}
+        />
+      </label>
+      {state.status === "error" && <p className="form-error">{state.message}</p>}
+      <div className="form-actions">
+        <button className="primary-button" type="submit" disabled={state.status === "loading"}>Importar</button>
+        <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
 function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchResult) => void; onCancel: () => void }) {
   const [query, setQuery] = useState("");
   const [state, setState] = useState<
@@ -337,12 +390,12 @@ function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchRe
         <p className="form-error">{state.message}</p>
       )}
       {state.status === "no-results" && (
-        <p className="section-note">Nenhum resultado para essa busca. Você pode tentar outros termos ou cadastrar manualmente.</p>
+        <p className="section-note">Nenhum resultado confiável encontrado. Você pode tentar outros termos, importar de uma página oficial ou cadastrar manualmente.</p>
       )}
       {state.status === "results" && (
         <ul className="search-results-list">
           {state.results.map((result, index) => (
-            <li key={`${result.editionId ?? result.workId ?? index}`} className="search-result-item">
+            <li key={`${result.internalPublicationId ?? result.editionId ?? result.workId ?? index}`} className="search-result-item">
               {result.coverUrl ? (
                 <img src={result.coverUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />
               ) : (
@@ -355,12 +408,17 @@ function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchRe
                   {[result.authors, result.publisher, result.publicationYear].filter(Boolean).join(" · ") || "Sem mais detalhes"}
                 </span>
                 {(result.isbn13 ?? result.isbn10) && <span className="search-result-meta">ISBN {result.isbn13 ?? result.isbn10}</span>}
+                <span className="search-result-meta search-result-origin">
+                  {ORIGIN_LABELS[result.origin]}
+                  {result.matchedAlias ? ` · encontrado via "${result.matchedAlias}"` : ""}
+                </span>
               </div>
               <button type="button" className="secondary-button" onClick={() => onSelect(result)}>Selecionar</button>
             </li>
           ))}
         </ul>
       )}
+      <UrlImportPanel onImported={onSelect} />
       <button type="button" className="ghost-button" onClick={onCancel}>Cadastrar manualmente</button>
     </div>
   );
@@ -396,6 +454,7 @@ const initial = {
   metadataFetchedAt: "",
   externalWorkId: "",
   externalEditionId: "",
+  reusePublicationId: "",
 };
 export function RpgFormPage() {
   const { id } = useParams();
@@ -451,7 +510,7 @@ function RpgFormFields({ id }: { id?: string }) {
           // Provenance nunca é reeditada no PATCH (ver library-writes.ts) — não precisa
           // ser carregada de volta no formulário, só exibida (RpgDetailPage).
           metadataSource: "", metadataSourceId: "", metadataSourceUrl: "", metadataFetchedAt: "",
-          externalWorkId: "", externalEditionId: "",
+          externalWorkId: "", externalEditionId: "", reusePublicationId: "",
         });
         setLoading(false);
       });
@@ -465,10 +524,13 @@ function RpgFormFields({ id }: { id?: string }) {
   );
   const update = (key: string, value: string | boolean) =>
     setForm((current) => ({ ...current, [key]: value }));
-  // LIB-004: seleção de um resultado de busca preenche o MESMO formulário usado pelo cadastro
-  // manual — a tela que aparece em seguida (mode="preview") já É a revisão obrigatória antes
-  // de salvar (seção 18 do pedido): mesmos campos, editáveis, mesmo botão "Salvar RPG".
+  // LIB-004/LIB-004A: seleção de um resultado de busca preenche o MESMO formulário usado pelo
+  // cadastro manual — a tela que aparece em seguida (mode="preview") já É a revisão obrigatória
+  // antes de salvar: mesmos campos, editáveis, mesmo botão "Salvar RPG". Um resultado INTERNAL
+  // (catálogo já conhecido) nunca grava provenance nova — só referencia a Publication existente
+  // por ID (reusePublicationId), preservando a origem/histórico real dela.
   const selectSearchResult = (result: SearchResult) => {
+    const isInternal = result.origin === "INTERNAL";
     setForm((current) => ({
       ...current,
       title: result.title,
@@ -479,14 +541,15 @@ function RpgFormFields({ id }: { id?: string }) {
       authors: result.authors ?? "",
       isbn: result.isbn13 ?? result.isbn10 ?? "",
       coverUrl: result.coverUrl ?? "",
-      coverSourceUrl: result.sourceUrl,
+      coverSourceUrl: isInternal ? String(current.coverSourceUrl) : result.sourceUrl,
       publicationType: String(current.publicationType) || "CORE_RULEBOOK",
-      metadataSource: "OPEN_LIBRARY",
-      metadataSourceId: result.editionId ?? result.workId ?? "",
-      metadataSourceUrl: result.sourceUrl,
-      metadataFetchedAt: new Date().toISOString(),
-      externalWorkId: result.workId ?? "",
-      externalEditionId: result.editionId ?? "",
+      metadataSource: isInternal ? "" : result.origin,
+      metadataSourceId: isInternal ? "" : (result.editionId ?? result.workId ?? ""),
+      metadataSourceUrl: isInternal ? "" : result.sourceUrl,
+      metadataFetchedAt: isInternal ? "" : new Date().toISOString(),
+      externalWorkId: isInternal ? "" : (result.workId ?? ""),
+      externalEditionId: isInternal ? "" : (result.editionId ?? ""),
+      reusePublicationId: isInternal ? (result.internalPublicationId ?? "") : "",
     }));
     setMode("preview");
   };
@@ -494,7 +557,7 @@ function RpgFormFields({ id }: { id?: string }) {
     event.preventDefault();
     setError("");
     setFieldErrors({});
-    const fromSearch = form.metadataSource === "OPEN_LIBRARY";
+    const fromSearch = form.metadataSource === "OPEN_LIBRARY" || form.metadataSource === "URL_IMPORT";
     const payload = {
       title: String(form.title),
       categoryId: form.categoryId || null,
@@ -520,13 +583,16 @@ function RpgFormFields({ id }: { id?: string }) {
       publicationType: form.publicationType || undefined,
       authors: form.authors || undefined,
       ...(fromSearch ? {
-        metadataSource: "OPEN_LIBRARY" as const,
+        metadataSource: form.metadataSource as "OPEN_LIBRARY" | "URL_IMPORT",
         metadataSourceId: form.metadataSourceId || undefined,
         metadataSourceUrl: form.metadataSourceUrl || undefined,
         metadataFetchedAt: form.metadataFetchedAt || undefined,
         externalWorkId: form.externalWorkId || undefined,
         externalEditionId: form.externalEditionId || undefined,
       } : {}),
+      // LIB-004A: catálogo interno — reaproveita a Publication existente por ID, sem
+      // reescrever provenance (ver buildCreateLibraryEntryStatements).
+      ...(form.reusePublicationId ? { reusePublicationId: String(form.reusePublicationId) } : {}),
     };
     try {
       const result = id
@@ -566,7 +632,11 @@ function RpgFormFields({ id }: { id?: string }) {
       />
       {mode === "preview" && (
         <p className="section-note online-search-banner">
-          Dados de: Open Library. Revise antes de salvar.{" "}
+          {form.reusePublicationId
+            ? "Já existe no catálogo do RPG Manager. Revise antes de salvar."
+            : form.metadataSource === "URL_IMPORT"
+              ? "Dados importados de uma página externa. Revise antes de salvar."
+              : "Dados de: Open Library. Revise antes de salvar."}{" "}
           <button type="button" className="ghost-button" onClick={() => setMode("search")}>Buscar outro</button>
         </p>
       )}
@@ -881,7 +951,7 @@ export function RpgDetailPage() {
             <div><dt>Tipo</dt><dd>{PUBLICATION_TYPE_LABELS[item.publicationType] ?? "Não classificado"}</dd></div>
             {item.isbn ? <div><dt>ISBN</dt><dd>{item.isbn}</dd></div> : null}
             {item.coverSourceUrl ? <div><dt>Fonte da capa</dt><dd><a href={item.coverSourceUrl} target="_blank" rel="noreferrer">Abrir fonte</a></dd></div> : null}
-            <div><dt>Origem do cadastro</dt><dd>{item.metadataSource === "OPEN_LIBRARY" ? "Open Library" : "Manual"}</dd></div>
+            <div><dt>Origem do cadastro</dt><dd>{item.metadataSource === "OPEN_LIBRARY" ? "Open Library" : item.metadataSource === "URL_IMPORT" ? "Página importada" : "Manual"}</dd></div>
           </dl>
           {item.coverSourceNote ? <p className="section-note">{item.coverSourceNote}</p> : null}
           <h2>Notas</h2>

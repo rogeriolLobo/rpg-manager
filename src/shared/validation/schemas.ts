@@ -81,7 +81,10 @@ export const rpgInputSchema = z.strictObject({
   language: trimmed(40).optional(),
   publicationType: z.enum(PUBLICATION_TYPES).optional(),
   authors: trimmed(500).optional(),
-  metadataSource: z.enum(['MANUAL', 'OPEN_LIBRARY']).optional(),
+  // LIB-004A: URL_IMPORT — importação por URL oficial (fallback dentro da mesma
+  // busca, seção 10 do pedido). Mesma trava de nunca aplicar automaticamente:
+  // preview obrigatório antes de qualquer POST.
+  metadataSource: z.enum(['MANUAL', 'OPEN_LIBRARY', 'URL_IMPORT']).optional(),
   metadataSourceId: trimmed(80).optional(),
   metadataSourceUrl: z.union([
     z.string().trim().max(1000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
@@ -90,6 +93,20 @@ export const rpgInputSchema = z.strictObject({
   metadataFetchedAt: z.iso.datetime().optional(),
   externalWorkId: trimmed(80).optional(),
   externalEditionId: trimmed(80).optional(),
+  // LIB-004A: catálogo interno primeiro (seção 9 do pedido) — quando o usuário
+  // seleciona um resultado que já é uma Publication conhecida (por título ou
+  // alias confirmado), reaproveita por ID em vez de recriar. Validado contra o
+  // catálogo real no servidor (nunca confia cegamente — mesmo princípio de
+  // ISBN/external ID); um ID inexistente/inválido é ignorado, nunca quebra o
+  // create (ver buildCreateLibraryEntryStatements).
+  reusePublicationId: trimmed(80).optional(),
+});
+
+// LIB-004A: "Importar de uma página oficial" — só a URL entra aqui; o preview
+// resultante passa pelo MESMO rpgInputSchema acima antes de qualquer escrita
+// (nunca salva automaticamente, seção 13 do pedido).
+export const urlImportSchema = z.strictObject({
+  url: z.string().trim().min(1).max(2000),
 });
 
 // LIB-003: variante usada só pelo PATCH de RPG — mesmo princípio do incidente

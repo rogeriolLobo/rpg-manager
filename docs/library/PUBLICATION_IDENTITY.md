@@ -232,3 +232,24 @@ compatibilidade para quem já tem backups da versão 6.
   ambíguo nos 30 registros reais — auditado, documentado acima).
 - Nenhuma reatribuição automática de `publication_id` no PATCH (só o
   CREATE resolve/reusa identidade).
+
+## Atualização — LIB-004A: `reusePublicationId` e aliases
+
+Duas adições à identidade/dedup, ambas ainda sem merge fuzzy por título:
+
+- **`reusePublicationId`** — quarta e mais alta prioridade de resolução em
+  `buildCreateLibraryEntryStatements`, acima de Edition/Work ID externo e de
+  ISBN. Usado quando o usuário seleciona explicitamente um resultado do
+  catálogo interno (`origin: INTERNAL`) na busca — o ID é sempre revalidado
+  contra `publications` no servidor (nunca confiado cegamente); se
+  inexistente/inválido, o pipeline simplesmente ignora e segue para a
+  próxima prioridade (Edition/Work/ISBN), nunca quebra o create.
+- **`publication_aliases`** (migration `0019`, aditiva) — títulos
+  alternativos/localizados de uma Publication, usados só para a BUSCA
+  encontrar (nunca para decidir dedup de identidade no CREATE — isso
+  continua sendo só ISBN/external ID/`reusePublicationId`). Só aliases
+  `confirmed=1` entram na busca. Ver `docs/library/METADATA_PROVIDERS.md`.
+
+Ver também `docs/library/METADATA_PROVIDERS.md` para o pipeline completo de
+busca (catálogo interno + Open Library + import por URL) introduzido no
+LIB-004A.
