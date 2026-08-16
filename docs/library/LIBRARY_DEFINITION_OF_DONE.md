@@ -242,23 +242,33 @@ Ver `docs/library/METADATA_PROVIDERS.md` para o desenho completo.
 
 ### Release — LIB-004
 
-- Git HEAD: `4dde623` (`origin/main` = `4dde623`, mesmo commit).
-- Commits da feature: `feat(library): LIB-004 busca online de publicações
-  (Open Library)`, mais dois fixes de causa raiz do CI (colisão de
-  substring `getByLabel("Título")`/`getByText("Manual")` e o
-  `AUTH_REGISTRATION_RATE_LIMITER` global-por-IP estourando com o suite
-  de E2E maior — ver commit `4dde623`).
-- CI: run `31928174310` — `success` (`validate` em 3m32s).
 - Migration `0018_publication_authors.sql` aplicada em produção
   (`rpg-manager-production`, remote) — aditiva, `ALTER TABLE
   publications ADD COLUMN authors`. Pré-contagem 30/30/30
   (rpgs/publications/game_systems) preservada, pós-contagem 30/30 —
   nenhum dado perdido.
-- Deploy: `wrangler deploy` — Worker Version ID
-  `fcef1f72-4a17-4ae4-be20-37c78b36790e`.
-- Produção via `/api/v1/version`: `{"commit":"4dde623","build":"2026-08-16T05:09:27.182Z","environment":"production"}`
-  — bate com Git HEAD e `origin/main`.
-- Smoke read-only: homepage `200`, `/login` `200`,
+- CI: run `31928174310` — `success` (`validate` em 3m32s), referente ao
+  commit de feature `4dde623` (código: provider + rota + dedup +
+  frontend + testes, mais os dois fixes de causa raiz do CI de colisão
+  de seletor e do `AUTH_REGISTRATION_RATE_LIMITER` global-por-IP).
+- **Correção de proveniência de deploy**: o primeiro deploy desta
+  sessão (Worker Version `fcef1f72-4a17-4ae4-be20-37c78b36790e`) foi
+  feito no commit de feature `4dde623`, mas em seguida foi commitada
+  documentação de release (`2c5646f`) **sem redeploy** — quebrando a
+  cadeia HEAD = origin/main = produção (relatado incorretamente como
+  fechado). Corrigido: deploy refeito em cima de `2c5646f` (HEAD real
+  no momento da correção).
+- Git HEAD = `origin/main` = **`2c5646f`**.
+- Deploy final: `wrangler deploy` — Worker Version ID
+  `ad007d91-2266-408e-9a9f-76e1366d950f`.
+- Produção via `/api/v1/version`: `{"commit":"2c5646f","build":"2026-08-16T11:45:17.544Z","environment":"production"}`
+  — bate exatamente com Git HEAD e `origin/main` no momento da
+  verificação.
+- Smoke read-only (após o redeploy): homepage `200`, `/login` `200`,
+  contagem de `rpgs` em produção inalterada (30) — nenhuma migration
+  neste segundo deploy, só sincronização de build.
+- Smoke read-only (verificação original, mesmos resultados):
+  homepage `200`, `/login` `200`,
   `GET /api/v1/rpgs/search-external` sem sessão → `401` (rota nova
   existe e exige autenticação, como esperado).
 - Smoke autenticado (Buscar online → selecionar → preview → salvar):

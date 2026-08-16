@@ -122,11 +122,16 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - **Migration:** `migrations/0018_publication_authors.sql` (aditiva —
   `ALTER TABLE publications ADD COLUMN authors`) — aplicada em produção,
   30/30 rpgs/publications preservados (pré e pós-contagem).
-- **Commit:** `4dde623` (`origin/main` = `4dde623`)
+- **Commit (feature, CI verde):** `4dde623`
 - **CI:** run `31928174310` — `success`
-- **Worker Version ID:** `fcef1f72-4a17-4ae4-be20-37c78b36790e`
-- **Production commit** (`/api/v1/version`): `4dde623`,
-  build `2026-08-16T05:09:27.182Z`, `environment: production`
+- **Commit (HEAD = origin/main = produção, verificado):** `2c5646f`
+  — nota: o deploy inicial foi feito em `4dde623`; a documentação de
+  release seguinte (`2c5646f`) foi commitada sem redeploy, quebrando
+  a cadeia HEAD=produção por um período. Corrigido com um segundo
+  deploy sobre `2c5646f` antes de fechar LIB-004 como `DONE`.
+- **Worker Version ID (final):** `ad007d91-2266-408e-9a9f-76e1366d950f`
+- **Production commit** (`/api/v1/version`): `2c5646f`,
+  build `2026-08-16T11:45:17.544Z`, `environment: production`
 - **Smoke:** read-only automatizado ok (homepage `200`, `/login` `200`,
   `search-external` sem sessão → `401`); fluxo autenticado completo é
   `MANUAL_SMOKE_REQUIRED` (Turnstile bloqueia registro/login
