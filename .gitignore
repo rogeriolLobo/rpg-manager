@@ -7,3 +7,11 @@ test-results/
 .dev.vars
 .env
 *.local
+
+# Gerado por scripts/generate-build-info.mjs a partir do HEAD atual em todo
+# dev/build/typecheck/test/deploy (ver hooks "pre*" no package.json). Nunca
+# rastrear: rastrear um build artifact que contém o próprio commit hash cria
+# uma defasagem estrutural de 1 commit a cada release (visto em LIB-002,
+# LIB-003 e LIB-004) — o arquivo commitado nunca pode conter o hash do
+# commit que o commita.
+src/server/build-info.ts
