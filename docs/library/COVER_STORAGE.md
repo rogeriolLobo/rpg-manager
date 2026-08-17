@@ -1,6 +1,6 @@
-# Capas de RPG — Arquitetura Atual e Futura (LIB-001)
+# Capas de RPG — URL Externa (LIB-001) + Upload (LIB-005)
 
-## Estado atual (em produção)
+## URL externa (LIB-001 — em produção)
 
 `coverUrl` é uma URL HTTPS pública, validada só sintaticamente
 (`isPublicHttpsUrl`, `src/shared/security/cover-url.ts`):
@@ -13,19 +13,17 @@
 - **sem allowlist de hosts** — qualquer editora/loja do mundo funciona.
 
 O **servidor nunca busca essa URL** — só o navegador, via `<img
-src={coverUrl}>` (`CoverImage`, `src/client/pages/library-pages.tsx`),
-com `loading="lazy"`/`"eager"`, `referrerPolicy="no-referrer"` e
-fallback (`onError`) para um placeholder com as iniciais do título,
-sem loop de requisição. Por isso a proteção contra SSRF de fetch
-remoto (que faria sentido se o servidor buscasse a URL) não se aplica
-a este fluxo — ela continua obrigatória em qualquer endpoint futuro que
-realmente faça fetch server-side (nenhum existe hoje para capas).
+src={...}>` (`CoverImage`, `src/client/pages/library-pages.tsx`), com
+`loading="lazy"`/`"eager"`, `referrerPolicy="no-referrer"` e fallback
+(`onError`) para um placeholder com as iniciais do título, sem loop de
+requisição. Por isso a proteção contra SSRF de fetch remoto (que faria
+sentido se o servidor buscasse a URL) não se aplica a este fluxo.
 
 A CSP (`img-src`, `src/server/security/headers.ts` e `public/_headers`)
 permite `'self' data: https:` — qualquer host HTTPS, mantendo
 `script-src`/`style-src` restritos como antes.
 
-## Por que não uma allowlist "melhor" em vez de removê-la
+### Por que não uma allowlist "melhor" em vez de removê-la
 
 Uma allowlist de hosts para capas de RPG não escala: o catálogo mundial
 de editoras, lojas e sites de referência (DriveThruRPG, lojas
@@ -37,73 +35,139 @@ pelo navegador" é sobre a **forma** da URL (protocolo seguro, sem
 IP/host privado, sem credenciais embutidas) — não sobre uma lista
 fechada de quem pode publicar imagens na internet.
 
-## Upload real de capa (zero-cost) — DESENHADO, NÃO IMPLEMENTADO
+## Upload de capa — LIB-005 (implementado, Zero Cost)
 
-Não implementado nesta sessão — ver `docs/product/MASTER_BACKLOG.md`
-(F-00X). Desenho:
+### Por que Workers KV Free (comparação de alternativas gratuitas)
 
-### D1 (aditivo)
+Antes de assumir KV, as alternativas gratuitas realmente disponíveis na
+conta (verificadas na documentação oficial da Cloudflare no momento da
+implementação) foram avaliadas para "guardar poucos KB-MB de bytes de
+imagem por Publication, servidos por ID":
+
+| Opção | Free tier | Veredito |
+|---|---|---|
+| **Workers KV** | 1 GB storage, 100k reads/dia, 1k writes/dia (chave diferente), 1 write/s (mesma chave), valor até 25 MiB, chave até 512 bytes, metadata até 1024 bytes | **Escolhida** — encaixa exatamente no padrão de acesso (poucas escritas, muitas leituras, por chave), sem cartão/billing configurado na conta |
+| **D1** | 5 GB storage, 5M rows read/dia, 100k rows written/dia | Tecnicamente possível (BLOB em coluna), mas D1 é relacional — misturar binário grande em linhas prejudica performance de leitura das tabelas principais e não é o uso pretendido do produto (fica só para os campos estruturados existentes) |
+| **R2** | Tem free tier próprio (10 GB-mês, 1M Class A ops/mês, 10M Class B ops/mês) | **Proibido por política do projeto independente de custo** (CLAUDE.md §14, `ZERO_COST_POLICY.md`) — não avaliado além disso |
+| **Durable Objects (SQLite-backed)** | Disponível no Free plan | Descartado por desalinhamento arquitetural, não por custo — DO é feito para coordenação/estado por objeto, não para servir blobs em massa por ID |
+| **Cache API** | Gratuita | Descartada — sem garantia de persistência (pode ser evictada a qualquer momento), inadequada para dado que o usuário espera que persista |
+| **Static Assets** | Gratuito, mas só em build/deploy | Descartada — não permite adicionar arquivos em runtime sem um redeploy completo |
+
+Conclusão: **Workers KV Free**, com falha controlada (erro claro ao
+usuário, nunca fallback automático para R2/pago) se a cota se esgotar —
+ver `docs/architecture/ZERO_COST_POLICY.md`, item 11.
+
+### D1 (aditivo — `migrations/0022_publication_cover_asset.sql`)
 
 ```sql
-ALTER TABLE rpgs ADD COLUMN cover_type TEXT NOT NULL DEFAULT 'NONE'
-  CHECK(cover_type IN ('NONE','EXTERNAL_URL','UPLOAD'));
-ALTER TABLE rpgs ADD COLUMN cover_asset_id TEXT; -- chave no KV, quando UPLOAD
--- cover_url existente passa a ser usado só quando cover_type='EXTERNAL_URL'
+ALTER TABLE publications ADD COLUMN cover_asset_id TEXT;
 ```
 
-### KV (Workers KV Free — 1 GB, 100k reads/dia, 1k writes/dia)
+A coluna vive em `publications` (não em `rpgs`) porque, desde o LIB-002,
+`publications` é a fonte de verdade para todo campo editorial
+compartilhado (título, ISBN, `cover_url`, etc. — ver
+`docs/library/LIBRARY_ARCHITECTURE.md`). Capa por upload é o mesmo tipo
+de dado editorial compartilhado, só armazenado de outra forma.
 
-- Chave: `cover/{uuid}`.
-- Valor: bytes da imagem já processada (ver processamento abaixo).
-- Metadata do KV (não o D1): `contentType`, `width`, `height`,
-  `uploadedAt`, `ownerUserId` — usados pelo endpoint de leitura para
-  cabeçalhos e checagem de posse.
-- **Nunca** salvar base64 em coluna D1 — D1 é relacional, não storage
-  de binário; KV é o lugar certo e já é zero-cost dentro do Free tier.
-- Se a quota gratuita de KV se esgotar: a escrita deve falhar
-  controladamente (`507` ou equivalente, mensagem clara "limite de
-  armazenamento de capas atingido"), nunca cair para R2/pago
-  automaticamente.
+Deliberadamente **sem** `cover_type`/`CHECK` constraint: a precedência
+entre "capa por upload" e "capa por URL externa" é só uma convenção de
+**leitura** (ver abaixo), nunca uma constraint de banco — isso evita por
+completo a necessidade de um rebuild de tabela (`DROP TABLE`) só para
+adicionar este campo, e com isso o risco documentado em
+`docs/architecture/DATABASE_MIGRATION_SAFETY.md` (incidente LIB-004B)
+nem chega a se aplicar aqui.
+
+`cover_url` (URL externa) **nunca é escrito** pelas rotas de upload —
+enviar uma capa não apaga nem sobrescreve uma URL externa já persistida;
+elas coexistem na mesma linha, e a apresentação decide qual mostrar.
+
+### KV (`COVERS_KV`, `wrangler.jsonc`)
+
+- Chave: `cover/{uuid}` (`coverAssetKvKey`, `src/domain/rpg/cover-asset.ts`).
+- Valor: bytes da imagem já processada pelo navegador.
+- Metadata do KV (não o D1): `contentType`, `uploadedAt`, `ownerUserId`.
+- Nunca base64 em coluna D1 — D1 é relacional, não storage de binário.
+- Ao trocar de capa, o asset anterior é removido do KV (best-effort,
+  não bloqueia a resposta de sucesso) — evita acumular lixo na cota
+  gratuita de 1 GB.
+- Se a escrita no KV falhar (quota esgotada ou qualquer outro erro), a
+  requisição falha com erro genérico tratado (500, mensagem em
+  português) — nunca cai automaticamente para outro storage.
 
 ### Processamento (browser-first, antes do upload)
 
-- Decodificar a imagem de verdade no navegador (`createImageBitmap`ou
-  `<canvas>`), nunca confiar só em `filename`/MIME declarado.
-- Aceitar apenas JPEG/PNG/WebP decodificáveis.
-- Redimensionar mantendo aspect ratio para uma resolução máxima
-  suficiente para card + detail (ex.: maior lado ≤ 1000px) — evita
-  guardar originais gigantes.
-- Reexportar como WebP (fallback JPEG) com qualidade otimizada antes de
-  enviar ao servidor.
-- Limite de tamanho pós-processamento (ex.: 500 KB) e de dimensão
-  aplicados no cliente **e** revalidados no servidor (nunca confiar só
-  no cliente).
+`processCoverImage`, `src/client/pages/library-pages.tsx`:
 
-### Endpoint de mídia
+- Decodifica a imagem de verdade via `createImageBitmap` (nunca confia
+  só em `filename`/MIME declarado do `File`).
+- Redimensiona mantendo aspect ratio para o maior lado ≤ 800px.
+- Reexporta como WebP (fallback JPEG) via `<canvas>.toBlob`.
+- Rejeita no cliente, com mensagem amigável, se o resultado ainda
+  exceder `MAX_COVER_ASSET_BYTES` (2 MB) mesmo após compressão.
+
+O servidor **nunca confia nesse processamento** — `POST
+/api/v1/rpgs/:id/cover` (`src/server/routes/rpgs.ts`) sempre revalida do
+zero: tamanho (`Content-Length` + tamanho real do arquivo) e formato
+real por "magic bytes" (`sniffCoverAssetContentType`,
+`src/domain/rpg/cover-asset.ts` — JPEG/PNG/WebP; qualquer outro
+conteúdo, mesmo com nome/extensão de imagem, é rejeitado com
+`422 INVALID_COVER_FORMAT`).
+
+### Endpoints
 
 ```
-GET /api/v1/media/covers/:id
+POST   /api/v1/rpgs/:id/cover    — envia/troca a capa (multipart/form-data, campo "cover")
+DELETE /api/v1/rpgs/:id/cover    — remove a capa enviada
+GET    /api/v1/media/covers/:id  — lê os bytes (usado como <img src>)
 ```
 
-- Busca no KV por `cover/{id}`.
-- Valida posse/visibilidade quando aplicável (mesma regra de
-  autorização do RPG dono da capa).
-- Cabeçalhos: `Content-Type` real (do KV metadata), `Cache-Control:
-  public, max-age=...` (capas não mudam de conteúdo no mesmo ID — pode
-  cachear agressivamente), `X-Content-Type-Options: nosniff`.
-- `:id` validado como UUID antes de qualquer lookup — sem path
-  traversal possível (KV não tem filesystem, mas a validação de forma
-  do parâmetro continua sendo boa prática defensiva).
+`POST`/`DELETE` (`rpgs.ts`) são ações **independentes** do formulário
+principal de edição — não passam por `rpgInputSchema`/`coverUrl`, para
+não interagir com o fluxo de URL externa já corrigido (LIB-001,
+CLAUDE.md §18). Ambas exigem posse do RPG (mesma checagem `user_id`
+usada no resto de `rpgs.ts`) e respeitam a mesma trava de metadata
+compartilhada do LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`,
+`assertSharedPublicationEditable` em `library-writes.ts`) — capa por
+upload é metadata editorial da Publication tanto quanto `cover_url`;
+uma Publication reaproveitada por 2+ contas (mesmo ISBN) não pode ter a
+capa trocada por uma única conta sem afetar as demais.
 
-### Fluxos de capa (visão do usuário)
+`GET /api/v1/media/covers/:id` (`media.ts`) é autenticado (herda
+`requireAuth` do grupo `/api/v1/media/*` em `index.ts`) — GET é método
+seguro, isento de CSRF, por isso funciona normalmente num `<img src>`.
+`:id` é validado como UUID antes de qualquer lookup no KV; um ID
+mal-formado ou de um asset já removido cai em `404 NOT_FOUND` — nunca
+distingue "não existe" de "não autorizado". `Cache-Control: private,
+max-age=31536000, immutable` (cada upload gera um UUID novo, nunca
+reaproveitado para conteúdo diferente).
 
-A) Upload de imagem do computador.
-B) URL externa (já implementado).
-C) Buscar via metadata provider (ver `METADATA_PROVIDERS.md`) e, se
-   viável tecnicamente, salvar cópia local (upload) da capa encontrada.
-D) Remover capa (já implementado — `cover_type` volta a `NONE`).
-E) Trocar capa (já implementado para URL externa; upload seguiria o
-   mesmo PATCH, trocando `cover_type`/`cover_asset_id`).
+### Apresentação (precedência de leitura)
 
-Nenhum desses exige URL manual obrigatória — o usuário pode ficar sem
-capa (placeholder) indefinidamente.
+`present()` em `rpgs.ts` expõe `coverAssetId` como campo próprio (nunca
+mistura com `coverUrl`). O cliente decide a URL efetiva de exibição
+(`effectiveCoverSrc`, `CoverImage`, `library-pages.tsx`):
+
+```
+coverAssetId presente → /api/v1/media/covers/{coverAssetId}
+caso contrário         → coverUrl (URL externa, ou null → placeholder)
+```
+
+O campo `coverUrl` do formulário de edição continua vinculado
+exclusivamente à URL externa, sem qualquer mudança de comportamento —
+abrir "Editar" num RPG com capa por upload mostra o campo "URL da capa"
+vazio (ou com a URL externa antiga, se houver) exatamente como antes; a
+capa por upload é gerenciada só pelos botões dedicados na página de
+detalhe.
+
+### Fluxos de capa (visão do usuário) — estado atual
+
+A) Upload de imagem do computador — **implementado** (botão "Enviar
+   capa"/"Trocar capa" na página de detalhe).
+B) URL externa — implementado (LIB-001, formulário de edição).
+C) Buscar via metadata provider (`METADATA_PROVIDERS.md`) e usar a URL
+   encontrada como `coverUrl` — implementado (LIB-004); salvar cópia
+   local (upload automático) da capa encontrada **não** foi
+   implementado nesta vertical — fora de escopo do LIB-005.
+D) Remover capa enviada — implementado (botão "Remover capa").
+E) Trocar capa enviada — implementado (novo upload substitui e remove
+   o asset anterior do KV).

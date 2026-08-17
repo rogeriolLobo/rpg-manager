@@ -1,5 +1,5 @@
 import { BookOpen, Grid2X2, List, Plus, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Link,
   useNavigate,
@@ -7,6 +7,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api, ClientApiError, deleteApi, patchJson, postJson } from "../api/client";
+import { MAX_COVER_ASSET_BYTES } from "../../domain/rpg/cover-asset";
 import { Badge, Empty, Loading, PageHeader } from "./dashboard-page";
 import { displayLabel } from "../labels";
 
@@ -32,6 +33,10 @@ export interface Rpg {
   isbn: string | null;
   coverSourceUrl: string | null;
   coverSourceNote: string | null;
+  // LIB-005: capa por upload (Zero Cost — KV). Quando presente, tem prioridade
+  // sobre coverUrl na exibição (ver effectiveCoverSrc abaixo) — coverUrl (URL
+  // externa) continua intocado, para não interferir no fluxo já existente.
+  coverAssetId: string | null;
   // LIB-004: campos editoriais adicionais + provenance.
   subtitle: string;
   authors: string;
@@ -277,26 +282,144 @@ function BookCard({ item }: { item: Rpg }) {
   );
 }
 
+// LIB-005: capa enviada por upload tem prioridade sobre a URL externa — mesmo
+// critério de leitura do servidor (present() em rpgs.ts). coverUrl nunca é
+// alterado por essa prioridade, só a exibição.
+function effectiveCoverSrc(item: Rpg): string | null {
+  if (item.coverAssetId) return `/api/v1/media/covers/${item.coverAssetId}`;
+  return item.coverUrl;
+}
+
 function CoverImage({ item, eager = false }: { item: Rpg; eager?: boolean }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  if (!item.coverUrl || failedUrl === item.coverUrl) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const src = effectiveCoverSrc(item);
+  if (!src || failedSrc === src) {
     const initials = item.title.split(/\s+/u).filter(Boolean).slice(0,2).map((word)=>word[0]).join('').toLocaleUpperCase('pt-BR');
     return <div className="cover-placeholder"><BookOpen aria-hidden="true"/><strong aria-hidden="true">{initials||'RPG'}</strong><span>{item.categoryName ?? "RPG"}</span></div>;
   }
   return <img
-    src={item.coverUrl}
+    src={src}
     alt={`Capa de ${item.title}`}
     loading={eager ? "eager" : "lazy"}
     referrerPolicy="no-referrer"
     onError={() => {
-      setFailedUrl(item.coverUrl);
+      setFailedSrc(src);
       if (import.meta.env.DEV) {
         let host = "inválido";
-        try { host = new URL(item.coverUrl!).hostname; } catch { /* URL já validada no servidor. */ }
+        try { host = new URL(src, window.location.origin).hostname; } catch { /* URL já validada no servidor. */ }
         console.warn("Falha ao carregar capa de RPG.", { host });
       }
     }}
   />;
+}
+
+// LIB-005: processamento de imagem no navegador antes do upload — decodifica,
+// redimensiona (lado maior <= COVER_MAX_DIMENSION) e reexporta como
+// WebP/JPEG. O servidor NUNCA confia nisso (valida bytes reais do zero — ver
+// rpgs.ts), é só para reduzir o custo de armazenamento/transferência (política
+// Zero Cost, KV Free tem 1GB no total).
+const COVER_MAX_DIMENSION = 800;
+const COVER_ENCODE_QUALITY = 0.85;
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function processCoverImage(file: File): Promise<Blob> {
+  if (!file.type.startsWith("image/")) throw new Error("Selecione um arquivo de imagem.");
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error("Não foi possível ler essa imagem.");
+  }
+  try {
+    const scale = Math.min(1, COVER_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Não foi possível processar essa imagem neste navegador.");
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const webp = await canvasToBlob(canvas, "image/webp", COVER_ENCODE_QUALITY);
+    const blob = webp ?? (await canvasToBlob(canvas, "image/jpeg", COVER_ENCODE_QUALITY));
+    if (!blob) throw new Error("Não foi possível gerar a imagem para envio.");
+    if (blob.size > MAX_COVER_ASSET_BYTES) throw new Error("Imagem muito grande mesmo após compactação. Tente uma imagem menor.");
+    return blob;
+  } finally {
+    bitmap.close();
+  }
+}
+
+// LIB-005: upload/remoção de capa — ação independente do formulário principal
+// (não usa coverUrl/rpgUpdateInputSchema), disponível na página de detalhe.
+// Preserva a capa por URL externa sem qualquer alteração: enviar uma capa não
+// mexe em coverUrl, só some por cima na exibição (ver effectiveCoverSrc).
+function CoverUploadControls({ item, onChange }: { item: Rpg; onChange: (next: Rpg) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const blob = await processCoverImage(file);
+      const formData = new FormData();
+      formData.append("cover", blob, "cover");
+      const { item: updated } = await api<{ item: Rpg }>(`/rpgs/${item.id}/cover`, { method: "POST", body: formData });
+      onChange(updated);
+    } catch (err) {
+      setError(err instanceof ClientApiError ? err.message : err instanceof Error ? err.message : "Não foi possível enviar a imagem.");
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm("Remover a capa enviada?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { item: updated } = await api<{ item: Rpg }>(`/rpgs/${item.id}/cover`, { method: "DELETE" });
+      onChange(updated);
+    } catch (err) {
+      setError(err instanceof ClientApiError ? err.message : "Não foi possível remover a capa.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="cover-upload-controls">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        id={`cover-upload-${item.id}`}
+        disabled={busy}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void upload(file);
+        }}
+      />
+      <div className="button-row">
+        <label htmlFor={`cover-upload-${item.id}`} className="secondary-button link-button" aria-disabled={busy}>
+          {busy ? "Enviando…" : item.coverAssetId ? "Trocar capa" : "Enviar capa"}
+        </label>
+        {item.coverAssetId && (
+          <button type="button" className="ghost-button" onClick={remove} disabled={busy}>
+            Remover capa
+          </button>
+        )}
+      </div>
+      {error && <p className="field-error">{error}</p>}
+    </div>
+  );
 }
 
 // LIB-004: painel de busca externa (Open Library) — estados idle/loading/
@@ -924,6 +1047,7 @@ export function RpgDetailPage() {
           <div className="book-cover large">
             <CoverImage item={item} eager />
           </div>
+          <CoverUploadControls item={item} onChange={(next) => setData((current) => (current ? { ...current, item: next } : current))} />
           <strong>{item.recommendationScore} pontos</strong>
           <span>{item.nextAction}</span>
         </aside>

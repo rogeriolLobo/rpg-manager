@@ -270,6 +270,58 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - **Fora de escopo (deliberado):** upload/KV, archive, friends, maps,
   VTT (LIB-005 continua não iniciado).
 
+## LIB-005 — Cover assets / upload de capa (Zero Cost)
+
+- **Priority:** P2 (evolução funcional da Biblioteca, não regressão)
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmando produção antes de
+  parar (ver relatório da sessão).
+- **Dependencies:** LIB-001 (capa por URL externa), LIB-002 (domínio
+  `publications`), LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`)
+- **Definition of Done:** ver `docs/library/COVER_STORAGE.md` (design
+  completo, incluindo comparação de storage gratuito).
+- **Storage:** Workers KV Free, escolhido após comparação explícita com
+  D1, R2 (proibido por política independente de custo), Durable Objects
+  e Cache API — ver `docs/library/COVER_STORAGE.md`, seção "Por que
+  Workers KV Free". Namespace `COVERS_KV` provisionado
+  (`wrangler kv namespace create`), binding em `wrangler.jsonc`.
+- **D1:** migration aditiva `0022_publication_cover_asset.sql`
+  (`publications.cover_asset_id`, nullable, sem `CHECK` — nunca precisa
+  de rebuild de tabela).
+- **Backend:** `POST`/`DELETE /api/v1/rpgs/:id/cover` (upload/remoção,
+  multipart, magic-bytes real validado no servidor — nunca confia no
+  Content-Type do cliente), `GET /api/v1/media/covers/:id` (leitura
+  autenticada, `Cache-Control` imutável). Reutiliza a trava
+  `SHARED_PUBLICATION_METADATA_LOCKED` do LIB-003
+  (`assertSharedPublicationEditable`, extraída para função comum).
+- **Frontend:** processamento da imagem no navegador antes do upload
+  (`createImageBitmap` + `<canvas>` → WebP/JPEG, redimensionado),
+  controles "Enviar capa"/"Trocar capa"/"Remover capa" na página de
+  detalhe do RPG — ação independente do formulário principal de edição
+  (não toca em `coverUrl`, sem risco de regressão no fluxo já corrigido
+  do LIB-001).
+- **Segurança:** validação de bytes reais (magic bytes JPEG/PNG/WebP) no
+  servidor, limite de tamanho (2 MB) reforçado no servidor mesmo com
+  compressão no cliente, IDOR coberto (upload/remoção exigem posse do
+  RPG), `:id` de leitura validado como UUID (404 uniforme, sem vazar
+  existência).
+- **Documentação adicional:** `docs/architecture/DATABASE_MIGRATION_SAFETY.md`
+  (novo — regra de segurança para rebuild de tabelas D1/SQLite
+  referenciadas por FK, extraída do incidente real LIB-004B, referenciada
+  também em `CLAUDE.md` §15).
+- **Testes:** unit (`tests/unit/cover-asset.test.ts` — magic bytes,
+  validação de ID, path traversal), integração
+  (`tests/integration/cover-upload.test.ts` — upload/leitura/remoção,
+  IDOR, formato inválido, tamanho excedido, troca remove asset anterior
+  do KV, `SHARED_PUBLICATION_METADATA_LOCKED`, preservação de capa
+  externa), E2E (`tests/e2e/rpg-cover-upload.spec.ts` — fluxo real de
+  upload/troca/remoção pela UI, independência do formulário de edição).
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit
+  final único, code+tests+docs, antes do deploy).
+- **Fora de escopo (deliberado):** archive, friends, maps, VTT,
+  processamento de imagem no servidor (fica só no navegador),
+  redimensionamento configurável pelo usuário.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0

@@ -18,6 +18,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "COVERS_KV",
+      "id": "53c20ff6578a4badb295757917885535"
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_LOGIN_RATE_LIMITER",

@@ -432,3 +432,20 @@ DROP TABLE _fk_backup;
 tabela normal removida ao final da mesma migration.) Testado e comprovado em
 `tests/integration/library-list-cover-regression.test.ts`. Nenhuma migration
 futura que recrie uma tabela referenciada por outra deve pular esse passo.
+
+Regra formalizada como documento próprio (LIB-005):
+`docs/architecture/DATABASE_MIGRATION_SAFETY.md` — referenciado também em
+`CLAUDE.md` §15.
+
+## LIB-005 — Upload de capa (Zero Cost, Workers KV)
+
+Alternativa à capa por URL externa (LIB-001): o usuário pode enviar uma
+imagem do próprio computador, processada no navegador e guardada no Workers
+KV Free. Coluna aditiva `publications.cover_asset_id` (sem `CHECK`
+constraint — nunca precisa de rebuild de tabela), endpoints dedicados
+(`POST`/`DELETE /api/v1/rpgs/:id/cover`, `GET
+/api/v1/media/covers/:id`), independentes do formulário principal de edição
+(não tocam em `coverUrl`). Respeita a mesma trava de metadata compartilhada
+do LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`). Detalhe completo,
+incluindo a comparação de alternativas de storage gratuito que motivou a
+escolha do KV: `docs/library/COVER_STORAGE.md`.

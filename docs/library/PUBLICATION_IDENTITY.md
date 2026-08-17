@@ -166,6 +166,12 @@ de aceitar qualquer alteração nos campos editoriais.
   simplesmente protegido pela trava acima.
 - Nenhum endpoint novo expõe `publications`/`game_systems` diretamente —
   a única superfície continua sendo `/rpgs` (seção 19 do pedido).
+- LIB-005: a mesma checagem foi extraída para uma função reutilizável
+  (`assertSharedPublicationEditable`, `library-writes.ts`) e passou a ser
+  usada também pelos endpoints de capa por upload (`POST`/`DELETE
+  /api/v1/rpgs/:id/cover`) — capa por upload é metadata editorial da
+  Publication tanto quanto `coverUrl`, mesma trava, mesmo critério
+  (`COUNT(*) > 1`). Ver `docs/library/COVER_STORAGE.md`.
 
 **Por que isso é seguro contra IDOR/escalada:** o bloqueio não depende de
 quem é "dono" da Publication (não existe dono — é catálogo compartilhado,

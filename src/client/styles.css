@@ -657,6 +657,15 @@ legend {
 .detail-cover {
   text-align: center;
 }
+.cover-upload-controls {
+  margin-top: 0.8rem;
+}
+.cover-upload-controls .button-row {
+  justify-content: center;
+}
+.cover-upload-controls .field-error {
+  text-align: center;
+}
 .detail-cover strong,
 .detail-cover span {
   display: block;

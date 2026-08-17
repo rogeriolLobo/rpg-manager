@@ -1,0 +1,11 @@
+-- LIB-005: capa via upload (Zero Cost — Workers KV Free), alternativa à capa por
+-- URL externa já existente (cover_url). Ver docs/library/COVER_STORAGE.md e
+-- docs/architecture/DATABASE_MIGRATION_SAFETY.md.
+--
+-- Coluna aditiva e nullable, sem CHECK constraint e sem NOT NULL/DEFAULT
+-- complexo — ALTER TABLE ADD COLUMN nesse formato nunca exige rebuild de
+-- tabela no SQLite/D1 (ver o incidente e a regra documentados acima). A
+-- exclusividade entre cover_asset_id (upload) e cover_url (externa) é só uma
+-- convenção de leitura no servidor (cover_asset_id tem prioridade quando
+-- presente) — nunca imposta por constraint de banco.
+ALTER TABLE publications ADD COLUMN cover_asset_id TEXT;

@@ -152,6 +152,19 @@ export async function buildCreateLibraryEntryStatements(
 
 const METADATA_FIELDS = ['title', 'isbn', 'coverUrl', 'coverSourceUrl', 'coverSourceNote', 'subtitle', 'publisher', 'publicationYear', 'language', 'publicationType', 'authors'] as const;
 
+// LIB-003/LIB-005: checagem única da trava de metadata compartilhada —
+// reutilizada pelo update de RPG (campos editoriais em geral) e pelo upload/
+// remoção de capa (LIB-005, src/server/routes/rpgs.ts), que é uma mudança
+// editorial da mesma Publication por uma via diferente do formulário
+// principal. `fields` define a mensagem por campo específica de cada
+// chamador — o critério (COUNT(*) > 1) é sempre o mesmo.
+export async function assertSharedPublicationEditable(db: D1Database, publicationId: string, fields: Record<string, string[]>): Promise<void> {
+  const referenceCount = await db.prepare('SELECT COUNT(*) total FROM rpgs WHERE publication_id=?').bind(publicationId).first<{ total: number }>();
+  if (Number(referenceCount?.total ?? 1) > 1) {
+    throw new ApiError(422, 'SHARED_PUBLICATION_METADATA_LOCKED', 'Este título é compartilhado com outras bibliotecas.', fields);
+  }
+}
+
 // LIB-003/LIB-004: metadata editorial (título/ISBN/capa/subtítulo/editora/ano/
 // idioma/tipo/autores) só pode ser alterada enquanto a Publication tiver 1 única
 // User Library Entry — ver docs/library/PUBLICATION_IDENTITY.md ("Política de
@@ -208,13 +221,10 @@ export async function buildUpdateLibraryEntryStatements(
   const anyMetadataChanged = METADATA_FIELDS.some((field) => metadataChanged[field]);
 
   if (anyMetadataChanged) {
-    const referenceCount = await db.prepare('SELECT COUNT(*) total FROM rpgs WHERE publication_id=?').bind(publicationId).first<{ total: number }>();
-    if (Number(referenceCount?.total ?? 1) > 1) {
-      const fields = Object.fromEntries(
-        METADATA_FIELDS.filter((field) => metadataChanged[field]).map((field) => [field, ['Este título é compartilhado com outras bibliotecas; não é possível alterar os dados editoriais por aqui.']]),
-      );
-      throw new ApiError(422, 'SHARED_PUBLICATION_METADATA_LOCKED', 'Este título é compartilhado com outras bibliotecas.', fields);
-    }
+    const fields = Object.fromEntries(
+      METADATA_FIELDS.filter((field) => metadataChanged[field]).map((field) => [field, ['Este título é compartilhado com outras bibliotecas; não é possível alterar os dados editoriais por aqui.']]),
+    );
+    await assertSharedPublicationEditable(db, publicationId, fields);
   }
 
   const nextIsbn = isbnUnchanged ? publication.isbn : (classified?.normalized ?? null);

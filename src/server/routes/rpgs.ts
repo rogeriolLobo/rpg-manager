@@ -6,10 +6,11 @@ import { openLibraryProvider } from '../providers/open-library';
 import { findInternalPublicationByIsbn13, searchInternalCatalog } from '../search/internal-catalog';
 import { UrlImportError, extractPageMetadata, fetchHtmlWithSsrfProtection, validateImportUrl } from '../security/url-import';
 import { isPublicHttpsUrl } from '../../shared/security/cover-url';
+import { coverAssetKvKey, MAX_COVER_ASSET_BYTES, sniffCoverAssetContentType } from '../../domain/rpg/cover-asset';
 import { rpgInputSchema, rpgUpdateInputSchema, urlImportSchema } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
-import { LIBRARY_ENTRY_JOIN, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
+import { LIBRARY_ENTRY_JOIN, assertSharedPublicationEditable, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -47,6 +48,10 @@ interface RpgRow {
   play_group_notes: string; planned_play_date: string | null; table_status: RecommendationCandidate['tableStatus']; game_master: string; notes: string;
   play_group_id: string | null; play_group_name: string | null; cover_url: string | null; isbn: string | null;
   cover_source_url: string | null; cover_source_note: string | null; created_at: string; updated_at: string;
+  // LIB-005: capa por upload (Zero Cost — KV) — quando presente, tem prioridade
+  // sobre cover_url na apresentação (ver present() abaixo). Nunca lido/escrito
+  // pelo schema de coverUrl (rpgInputSchema) — mutação própria (rotas .../cover).
+  cover_asset_id: string | null;
   // LIB-004: campos editoriais adicionais, sempre de `publications` (fonte de verdade).
   subtitle: string; authors: string; publisher: string; publication_year: number | null; language: string;
   publication_type: string; metadata_source: string;
@@ -63,7 +68,7 @@ function present(row: RpgRow) {
     subgenreName: row.subgenre_name, readingStatus: row.reading_status, hasPlayed: candidate.hasPlayed, wantsToPlay: candidate.wantsToPlay,
     priority: row.priority, playGroupId: row.play_group_id, playGroupName: row.play_group_name, playGroupNotes: row.play_group_notes, plannedPlayDate: row.planned_play_date, tableStatus: row.table_status,
     gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, isbn: row.isbn, coverSourceUrl: row.cover_source_url,
-    coverSourceNote: row.cover_source_note, createdAt: row.created_at, updatedAt: row.updated_at,
+    coverSourceNote: row.cover_source_note, coverAssetId: row.cover_asset_id, createdAt: row.created_at, updatedAt: row.updated_at,
     subtitle: row.subtitle, authors: row.authors, publisher: row.publisher, publicationYear: row.publication_year, language: row.language,
     publicationType: row.publication_type, metadataSource: row.metadata_source,
     recommendationScore: calculateRpgRecommendationScore(candidate), readiness: calculateRpgReadiness(candidate), nextAction: calculateRpgNextAction(candidate),
@@ -73,6 +78,7 @@ function present(row: RpgRow) {
 const SELECT = `SELECT r.id,r.publication_id,COALESCE(p.title,r.title) title,r.category_id,c.name category_name,r.subgenre_id,s.name subgenre_name,
   r.reading_status,r.has_played,r.wants_to_play,r.priority,r.play_group_notes,r.play_group_id,g.name play_group_name,r.planned_play_date,r.table_status,
   r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note,
+  p.cover_asset_id cover_asset_id,
   COALESCE(p.subtitle,'') subtitle,COALESCE(p.authors,'') authors,COALESCE(p.publisher,'') publisher,p.publication_year publication_year,
   COALESCE(p.language,'') language,COALESCE(p.publication_type,'CORE_RULEBOOK') publication_type,COALESCE(p.metadata_source,'MANUAL') metadata_source,
   r.created_at,r.updated_at FROM rpgs r
@@ -296,4 +302,80 @@ rpgRoutes.delete('/:id', async (c) => {
     if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
   } catch (error) { if (String(error).includes('FOREIGN KEY')) throw new ApiError(409, 'RPG_HAS_CAMPAIGNS', 'Exclua ou reassocie as campanhas antes de excluir este RPG.'); throw error; }
   return c.body(null, 204);
+});
+
+async function loadOwnedEntryPublication(c: Context<{ Bindings: Env; Variables: AppVariables }>, entryId: string): Promise<string> {
+  const user = c.get('user');
+  const existing = await c.env.DB.prepare('SELECT id,publication_id FROM rpgs WHERE id=? AND user_id=?').bind(entryId, user.id).first<{ id: string; publication_id: string | null }>();
+  if (!existing) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
+  // Defensivo: publication_id sempre presente após o backfill do LIB-002 (ver PATCH acima).
+  if (!existing.publication_id) throw new ApiError(409, 'PUBLICATION_MISSING', 'Este RPG ainda não tem uma publicação associada.');
+  return existing.publication_id;
+}
+
+const SHARED_COVER_LOCK_FIELDS = { cover: ['Este título é compartilhado com outras bibliotecas; não é possível alterar a capa por aqui.'] };
+
+// LIB-005: upload de capa (Zero Cost — Workers KV Free, ver
+// docs/library/COVER_STORAGE.md). Ação independente do formulário principal de
+// edição — não passa por rpgInputSchema/coverUrl, para não interagir com o
+// fluxo de URL externa já corrigido (LIB-001, CLAUDE.md seção 18). Mesma trava
+// de metadata compartilhada do resto do domínio editorial (LIB-003):
+// só é permitido enquanto a Publication tiver 1 única User Library Entry.
+//
+// O cliente já reprocessa a imagem (decodifica/redimensiona/reexporta) antes
+// de enviar (ver src/client/pages/library-pages.tsx), mas o servidor nunca
+// confia nisso: valida bytes reais (magic bytes) e tamanho aqui, do zero.
+rpgRoutes.post('/:id/cover', async (c) => {
+  const entryId = c.req.param('id');
+  const publicationId = await loadOwnedEntryPublication(c, entryId);
+  await assertSharedPublicationEditable(c.env.DB, publicationId, SHARED_COVER_LOCK_FIELDS);
+
+  const contentLength = Number(c.req.header('Content-Length') ?? '0');
+  if (contentLength > MAX_COVER_ASSET_BYTES) throw new ApiError(413, 'COVER_TOO_LARGE', 'Imagem maior que o limite permitido (2MB).');
+
+  let formData: FormData;
+  try {
+    formData = await c.req.formData();
+  } catch {
+    throw new ApiError(422, 'INVALID_UPLOAD', 'Envio inválido.');
+  }
+  const file = formData.get('cover');
+  if (!(file instanceof File)) throw new ApiError(422, 'INVALID_UPLOAD', 'Selecione um arquivo de imagem.');
+  if (file.size === 0) throw new ApiError(422, 'INVALID_UPLOAD', 'Arquivo vazio.');
+  if (file.size > MAX_COVER_ASSET_BYTES) throw new ApiError(413, 'COVER_TOO_LARGE', 'Imagem maior que o limite permitido (2MB).');
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentType = sniffCoverAssetContentType(bytes);
+  if (!contentType) throw new ApiError(422, 'INVALID_COVER_FORMAT', 'Envie uma imagem JPEG, PNG ou WebP.');
+
+  const publication = await c.env.DB.prepare('SELECT cover_asset_id FROM publications WHERE id=?').bind(publicationId).first<{ cover_asset_id: string | null }>();
+  const previousAssetId = publication?.cover_asset_id ?? null;
+  const assetId = crypto.randomUUID();
+  const now = nowIso();
+
+  await c.env.COVERS_KV.put(coverAssetKvKey(assetId), bytes, { metadata: { contentType, uploadedAt: now, ownerUserId: c.get('user').id } });
+  await c.env.DB.prepare('UPDATE publications SET cover_asset_id=?,updated_at=? WHERE id=?').bind(assetId, now, publicationId).run();
+  // Best-effort: libera o asset anterior do KV (evita acumular lixo na cota gratuita).
+  // Se falhar, não bloqueia a resposta — o asset novo já está corretamente vinculado.
+  if (previousAssetId) {
+    try { await c.env.COVERS_KV.delete(coverAssetKvKey(previousAssetId)); } catch { /* limpeza best-effort */ }
+  }
+
+  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, c.get('user').id).first<RpgRow>();
+  return c.json({ item: present(row!) });
+});
+
+rpgRoutes.delete('/:id/cover', async (c) => {
+  const entryId = c.req.param('id');
+  const publicationId = await loadOwnedEntryPublication(c, entryId);
+  await assertSharedPublicationEditable(c.env.DB, publicationId, SHARED_COVER_LOCK_FIELDS);
+
+  const publication = await c.env.DB.prepare('SELECT cover_asset_id FROM publications WHERE id=?').bind(publicationId).first<{ cover_asset_id: string | null }>();
+  if (!publication?.cover_asset_id) throw new ApiError(404, 'NOT_FOUND', 'Este RPG não tem capa enviada.');
+
+  await c.env.DB.prepare('UPDATE publications SET cover_asset_id=NULL,updated_at=? WHERE id=?').bind(nowIso(), publicationId).run();
+  try { await c.env.COVERS_KV.delete(coverAssetKvKey(publication.cover_asset_id)); } catch { /* limpeza best-effort */ }
+
+  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, c.get('user').id).first<RpgRow>();
+  return c.json({ item: present(row!) });
 });

@@ -647,6 +647,12 @@ novas estruturas aditivas
 
 Sempre preservar compatibilidade com dados existentes.
 
+Antes de qualquer migration que precise recriar (DROP TABLE + CREATE TABLE)
+uma tabela referenciada por foreign keys de outras tabelas (ex.: mudança de
+CHECK constraint), seguir a regra documentada em
+docs/architecture/DATABASE_MIGRATION_SAFETY.md — PRAGMA foreign_keys = OFF
+não protege dados no D1 (incidente real: LIB-004B).
+
 ---
 
 # 16. SEGURANÇA
