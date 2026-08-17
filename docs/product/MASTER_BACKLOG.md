@@ -192,9 +192,15 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 
 - **Priority:** P0 (regressão de dados real em produção, causada pela
   própria migration 0020 do LIB-004A)
-- **Status:** `IN_PROGRESS` — preenchido para `DONE` só após CI verde,
-  migration remota + deploy + production proof confirmados nesta mesma
-  sessão.
+- **Status:** `DONE` — CI verde (`31952566395`), migration `0021`
+  confirmada aplicada em produção (`wrangler d1 migrations list
+  --remote` → "No migrations to apply", `SELECT` direto: 0/30 linhas de
+  `rpgs` com `publication_id` nulo), deploy publicado (Version
+  `d43a16de-a2a4-4447-841f-d318ed6a2ebf`) e `GET /api/v1/version`
+  confirmando `commit: "44f9105"` — HEAD local == origin/main == build
+  == produção, verificado nesta análise (o commit em si não alterava
+  `src/`, só migration+testes+docs; a lacuna era só o Worker publicado
+  ainda estar na versão anterior — fechada agora).
 - **Dependencies:** LIB-004A
 - **Definition of Done:** ver `docs/library/LIBRARY_DEFINITION_OF_DONE.md`
 - **Causa raiz:** `migrations/0020_publication_metadata_source_open.sql`
