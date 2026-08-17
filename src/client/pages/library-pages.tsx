@@ -475,6 +475,10 @@ function RpgFormFields({ id }: { id?: string }) {
   // sendo o modo padrão/imediatamente visível: não pode quebrar quem já usa o cadastro manual
   // nem os fluxos E2E existentes que preenchem o formulário direto.
   const [mode, setMode] = useState<"manual" | "search" | "preview">("manual");
+  // LIB-004C (seção 19 do pedido): não apresentar um import por URL parcial como se fosse
+  // completo. Só relevante para URL_IMPORT — Open Library/catálogo interno já tendem a ser mais
+  // ricos e não são o escopo deste ajuste.
+  const [sparseImport, setSparseImport] = useState(false);
   useEffect(() => {
     // O guard `active` evita que uma resposta lenta ainda em voo sobrescreva os dados corretos
     // caso o componente seja desmontado (troca de RPG) antes dela chegar.
@@ -531,6 +535,12 @@ function RpgFormFields({ id }: { id?: string }) {
   // por ID (reusePublicationId), preservando a origem/histórico real dela.
   const selectSearchResult = (result: SearchResult) => {
     const isInternal = result.origin === "INTERNAL";
+    if (result.origin === "URL_IMPORT") {
+      const enrichedFieldCount = [result.subtitle, result.authors, result.publisher, result.publicationYear, result.language, result.isbn13 ?? result.isbn10, result.coverUrl].filter(Boolean).length;
+      setSparseImport(enrichedFieldCount < 2);
+    } else {
+      setSparseImport(false);
+    }
     setForm((current) => ({
       ...current,
       title: result.title,
@@ -612,7 +622,7 @@ function RpgFormFields({ id }: { id?: string }) {
   if (!id && mode === "search") {
     return (
       <div className="page narrow">
-        <PageHeader eyebrow="Novo RPG" title="Buscar online" description="Busca pública na Open Library — poucos resultados, você escolhe e revisa antes de salvar." />
+        <PageHeader eyebrow="Novo RPG" title="Buscar publicação" description="Catálogo do RPG Manager, Open Library e páginas oficiais — poucos resultados, você escolhe e revisa antes de salvar." />
         <OnlineSearchPanel onSelect={selectSearchResult} onCancel={() => setMode("manual")} />
       </div>
     );
@@ -638,6 +648,11 @@ function RpgFormFields({ id }: { id?: string }) {
               ? "Dados importados de uma página externa. Revise antes de salvar."
               : "Dados de: Open Library. Revise antes de salvar."}{" "}
           <button type="button" className="ghost-button" onClick={() => setMode("search")}>Buscar outro</button>
+        </p>
+      )}
+      {mode === "preview" && sparseImport && (
+        <p className="form-error" role="alert">
+          Encontramos apenas parte dos dados desta página. Revise e complete antes de salvar.
         </p>
       )}
       <form className="panel form-grid" onSubmit={submit}>

@@ -193,15 +193,22 @@ servidor).
 - Rate limit local: `DIRECTORY_RATE_LIMITER` reaproveitado, chave
   `url-import:{userId}`.
 
-### Extração de metadata (`extractPageMetadata`)
+### Extração de metadata (`extractPageMetadata`) — atualizada em LIB-004C
 
-Prioridade JSON-LD > OpenGraph > `<title>`/`<meta name="description">`,
-usando `HTMLRewriter` (API nativa de Workers, sem dependência nova):
+Mesclagem **por campo** (não por documento inteiro), usando
+`HTMLRewriter` (API nativa de Workers, sem dependência nova). Prioridade
+por campo: JSON-LD > OpenGraph > `<title>`/`<meta name="description">`.
 
 1. `<script type="application/ld+json">` — procura um nó `@type: Book` ou
    `Product` (schema.org), inclusive dentro de `@graph`; extrai
    `name`/`author`/`publisher`/`datePublished`/`isbn`/`image`/`description`.
-2. Sem JSON-LD utilizável: `og:title`/`og:image`/`og:description`.
+   Também procura, separadamente, `inLanguage` num nó `WebPage` (presente em
+   boa parte da web WordPress via plugins de SEO como Yoast, mesmo quando
+   não há nenhum nó Book/Product).
+2. `og:title`/`og:image`/`og:description`/`twitter:image` (fallback de
+   `og:image`) — usados campo a campo para preencher o que o JSON-LD não
+   trouxe, nunca descartados só porque o JSON-LD retornou *algo* (ver bug
+   real corrigido abaixo).
 3. Nenhuma metadata reconhecível: `422 IMPORT_NO_METADATA`, mensagem
    amigável — nunca crasha, cadastro manual continua disponível.
 
@@ -210,6 +217,91 @@ usado — nunca confiado cegamente, mesmo princípio da Open Library.
 `confidence` de um resultado importado é sempre `HIGH` (é uma escolha
 direcionada do usuário para uma página específica, não uma busca textual
 ambígua) — o preview continua obrigatório de qualquer forma.
+
+## LIB-004C — enriquecimento da extração (causa raiz + correção)
+
+Smoke manual em `https://retropunk.com.br/editora/roleplaying/rastro_de_cthulhu/`
+extraiu praticamente só o título, deixando autor/editora/ano/ISBN/capa/
+idioma vazios — apesar de a página conter, em texto visível, "Rastro de
+Cthulhu é escrito por Kenneth Hite...".
+
+### Reprodução factual (antes de qualquer mudança de código)
+
+Página buscada diretamente (fora do app) e auditada campo a campo:
+
+- HTTP 200, `Content-Type: text/html; charset=UTF-8`.
+- **JSON-LD**: 1 bloco, `@graph` com `WebPage`/`BreadcrumbList`/`WebSite`
+  — **sem nó `Book`/`Product`**. `WebPage.inLanguage = "pt-BR"` presente,
+  mas não extraído (o código só olhava dentro de um nó Book/Product).
+- **OpenGraph**: `og:title` presente (por isso o título já funcionava);
+  `og:description=""` — **tag presente, valor vazio**, não ausente; sem
+  `og:image`.
+- **`meta[name="author"]` = "Daniel Martins"** — autor do post do blog da
+  editora, **não** o autor do RPG (o texto visível da própria página diz
+  "escrito por Kenneth Hite").
+- Sem `meta[name="description"]`, sem `meta[name="publisher"]`, sem ISBN
+  em lugar nenhum da página, sem `twitter:image`, sem `link[rel=image_src]`.
+- Existe uma imagem plausível de capa (`600x600_rdc.png`) solta entre 4
+  `<img>` de logo do site — sem nenhum sinal semântico que a distinga de
+  qualquer outra imagem da página.
+
+### Bugs reais corrigidos
+
+1. **Fallback de documento inteiro, não por campo.** `extractFromJsonLd(...)
+   ?? extractFromOpenGraph(...)` — como o JSON-LD desta página retorna um
+   objeto (mesmo sem nenhum nó Book/Product, o código anterior tentava e
+   às vezes "achava" algo parcial), o `??` nunca acionava o fallback para
+   OpenGraph, mesmo quando o OpenGraph tinha dados que o JSON-LD não tinha
+   (ex.: `og:image`). Corrigido: mesclagem por campo
+   (`mergeByField`), prioridade JSON-LD > OpenGraph mantida, mas campo a
+   campo — reproduzido e coberto por teste antes da correção.
+2. **String vazia tratada como valor presente.** `og['og:description'] ??
+   fallback` não troca de fonte quando o valor é `""` (só `??` reage a
+   `null`/`undefined`). Corrigido: toda string extraída (JSON-LD, OpenGraph,
+   meta) passa por normalização que trata vazio/só-espaço como ausente.
+3. **`WebPage.inLanguage` nunca extraído.** Sinal seguro e genérico (não
+   específico de nenhum site), agora capturado separadamente do idioma de
+   um eventual nó Book/Product (que tem prioridade quando presente).
+4. **`twitter:image` como fallback adicional de capa**, no mesmo nível de
+   confiança de `og:image` (convenção igualmente semântica).
+
+### Deliberadamente NÃO implementado (com evidência real, não especulação)
+
+- **`meta[name="author"]`/`article:author` → `authors`**: comprovadamente
+  errado nesta página real (autor do post ≠ autor do livro). Autor só vem
+  de JSON-LD Book/Product estruturado.
+- **`WebSite.name`/`og:site_name` → `publisher`**: mesma armadilha do
+  incidente LIB-001 original — não confundir o site onde a página está
+  hospedada com a editora do livro.
+- **`WebPage.datePublished`/`dateModified` → `publicationYear`**: é a data
+  do post do blog (2017), não o ano de publicação do livro (a edição
+  original em inglês é de 2011) — especialmente enganoso para
+  traduções/relançamentos.
+- **Parsing de prosa livre** ("Rastro de Cthulhu é escrito por Kenneth
+  Hite..."): existe só como texto sem nenhuma marcação semântica. Um
+  regex para esse padrão de frase em português seria exatamente o
+  "scraper hardcoded" que este domínio evita desde o LIB-004A — funcionaria
+  só nesta página, quebraria com qualquer variação de fraseado, arriscaria
+  capturar texto errado em outras páginas. Sem uma forma genérica
+  confiável, o campo fica vazio — não inventado.
+- **Mineração de `<img>` fora de og:image/twitter:image/JSON-LD image**:
+  nenhum sinal semântico confiável nesta página distingue a capa dos
+  `<img>` de logo do tema. Escolher por posição/nome de arquivo seria
+  heurística frágil, explicitamente fora de escopo.
+
+### UX (seção 19 do pedido)
+
+Quando um resultado de `URL_IMPORT` traz menos de 2 campos enriquecidos
+(além do título), a tela de preview mostra "Encontramos apenas parte dos
+dados desta página. Revise e complete antes de salvar." — nunca
+apresenta um import parcial como completo.
+
+### Terminologia (seção 20 do pedido)
+
+A tela deixou de se apresentar como "Busca pública na Open Library"
+(agora "Buscar publicação") — já cobre catálogo interno, Open Library e
+import por URL oficial; cada resultado já identificava sua origem
+individualmente (sem mudança nessa parte).
 
 ## Fluxo de busca (implementado)
 

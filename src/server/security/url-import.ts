@@ -171,6 +171,7 @@ export async function fetchHtmlWithSsrfProtection(startUrl: URL): Promise<string
 interface RawExtractedFields {
   jsonLd: string[];
   og: Record<string, string>;
+  twitterImage?: string;
   title?: string;
   description?: string;
 }
@@ -200,6 +201,13 @@ async function extractRawFields(html: string): Promise<RawExtractedFields> {
     .on('meta[name="description"]', {
       element(el) { const content = el.getAttribute('content'); if (content) collected.description = content; },
     })
+    // LIB-004C (seção 10 do pedido): twitter:image como fallback de capa no
+    // mesmo nível de confiança de og:image — convenção igualmente semântica
+    // ("esta é a imagem que representa a página"), não uma imagem qualquer do
+    // corpo do conteúdo.
+    .on('meta[name="twitter:image"]', {
+      element(el) { const content = el.getAttribute('content'); if (content) collected.twitterImage = content; },
+    })
     .on('title', { text(chunk) { titleParts.push(chunk.text); } });
   const transformed = rewriter.transform(new Response(html, { headers: { 'Content-Type': 'text/html' } }));
   await transformed.text(); // drena o stream — HTMLRewriter só dispara handlers durante o consumo.
@@ -209,16 +217,26 @@ async function extractRawFields(html: string): Promise<RawExtractedFields> {
 
 export interface ImportedPageMetadata {
   title?: string; subtitle?: string; authors?: string; publisher?: string;
-  publicationYear?: number; isbn?: string; coverUrl?: string; description?: string;
+  publicationYear?: number; language?: string; isbn?: string; coverUrl?: string; description?: string;
 }
 
+// Normaliza qualquer valor extraído (JSON-LD, OpenGraph ou meta comum) para
+// `undefined` quando vazio/só-espaço — LIB-004C: um `og:description=""` (tag
+// presente, mas vazia — caso real observado em produção) não pode "vencer" a
+// prioridade e impedir a mesclagem cair para a próxima fonte; `??` sozinho
+// não cobre isso porque só reage a `null`/`undefined`, não a string vazia.
+function cleanString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 function firstString(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'string') return cleanString(value);
   if (Array.isArray(value)) { for (const item of value) { const found = firstString(item); if (found) return found; } }
   return undefined;
 }
 function authorName(value: unknown): string | undefined {
-  if (typeof value === 'string') return value.trim() || undefined;
+  if (typeof value === 'string') return cleanString(value);
   if (Array.isArray(value)) return value.map(authorName).filter(Boolean).join(', ') || undefined;
   if (value && typeof value === 'object' && 'name' in value) return firstString((value as { name: unknown }).name);
   return undefined;
@@ -252,7 +270,55 @@ function findBookLikeNode(parsed: unknown): Record<string, unknown> | null {
   return null;
 }
 
-function extractFromJsonLd(blocks: string[]): ImportedPageMetadata | null {
+// LIB-004C: `inLanguage` costuma existir no nó WebPage (gerado por plugins de
+// SEO como Yoast, presente em boa parte da web WordPress) mesmo quando não há
+// nenhum nó Book/Product — sinal seguro e genérico, não específico de nenhum
+// site. Procurado separadamente do nó Book (que também pode ter seu próprio
+// `inLanguage`, com prioridade sobre o da WebPage — ver `extractFromJsonLd`).
+function findWebPageLanguage(parsed: unknown): string | undefined {
+  const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const node = candidate as Record<string, unknown>;
+    if (typeIncludes(node['@type'], 'webpage')) { const lang = cleanString(node.inLanguage); if (lang) return lang; }
+    if (Array.isArray(node['@graph'])) {
+      const found = findWebPageLanguage(node['@graph']);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+// LIB-004C: deliberadamente NÃO extraído, com evidência real (reprodução
+// contra https://retropunk.com.br/editora/roleplaying/rastro_de_cthulhu/):
+//
+// - `meta[name="author"]` / `article:author`: nessa página vale "Daniel
+//   Martins" (quem escreveu o POST do blog da editora), não "Kenneth Hite"
+//   (quem escreveu o RPG em si — confirmado no texto visível da página).
+//   Mapear isso para `authors` produziria um dado ERRADO, não incompleto —
+//   pior que deixar vazio. Autor da publicação só vem de JSON-LD Book/Product
+//   estruturado (`node.author`), nunca de metadata de autoria de conteúdo web.
+// - `WebSite.name` / `og:site_name`: nessa página vale "RetroPunk" (o site),
+//   não a editora do livro (que pode nem ser a RetroPunk — é só onde a
+//   página está hospedada). Mesma armadilha do incidente LIB-001 original
+//   (não confundir host/site com dado editorial).
+// - `WebPage.datePublished`/`dateModified`: são a data do POST do blog
+//   (2017), não o ano de publicação do livro (edição original em inglês é
+//   2011) — especialmente enganoso para traduções/relançamentos.
+// - Autor em prosa livre ("Rastro de Cthulhu é escrito por Kenneth Hite..."):
+//   existe só como texto sem nenhuma marcação semântica. Um regex específico
+//   para essa frase em português seria exatamente o "scraper hardcoded"
+//   proibido — funcionaria só nesta página, quebraria com qualquer variação
+//   de fraseado, e arriscaria capturar texto errado em outras páginas. Sem
+//   uma forma genérica confiável, o campo fica vazio (não inventado) — ver
+//   docs/library/METADATA_PROVIDERS.md.
+// - Mineração de `<img>` fora de og:image/twitter:image: a página não tem
+//   nenhum sinal semântico de capa; os primeiros `<img>` são o logo do site
+//   repetido (classes "transparent-logo"/"dark-scheme-logo"/etc.). Escolher
+//   "a próxima imagem depois dos logos" ou por nome de arquivo seria
+//   heurística frágil e explicitamente proibida (seção 10 do pedido).
+function extractFromJsonLd(blocks: string[]): ImportedPageMetadata {
+  const language = blocks.map((block) => { try { return findWebPageLanguage(JSON.parse(block)); } catch { return undefined; } }).find(Boolean);
   for (const block of blocks) {
     let parsed: unknown;
     try { parsed = JSON.parse(block); } catch { continue; }
@@ -263,24 +329,46 @@ function extractFromJsonLd(blocks: string[]): ImportedPageMetadata | null {
       authors: authorName(node.author) ?? authorName(node.creator),
       publisher: firstString(node.publisher) ?? authorName(node.publisher),
       publicationYear: yearFrom(node.datePublished),
+      language: cleanString(node.inLanguage) ?? language,
       isbn: firstString(node.isbn),
       coverUrl: firstString(node.image),
       description: firstString(node.description),
     };
   }
-  return null;
+  return { language };
 }
 
-function extractFromOpenGraph(og: Record<string, string>, fallbackTitle?: string, fallbackDescription?: string): ImportedPageMetadata {
+function extractFromOpenGraph(og: Record<string, string>, twitterImage: string | undefined, fallbackTitle: string | undefined, fallbackDescription: string | undefined): ImportedPageMetadata {
   return {
-    title: og['og:title'] ?? fallbackTitle,
-    coverUrl: og['og:image'],
-    description: og['og:description'] ?? fallbackDescription,
+    title: cleanString(og['og:title']) ?? cleanString(fallbackTitle),
+    coverUrl: cleanString(og['og:image']) ?? cleanString(twitterImage),
+    description: cleanString(og['og:description']) ?? cleanString(fallbackDescription),
   };
 }
 
-// Ordem de prioridade da seção 12 do pedido: JSON-LD > OpenGraph > metadata HTML comum.
+// LIB-004C: mescla POR CAMPO, não por documento inteiro — um bloco JSON-LD
+// que só tem `name` (ex.: WebPage sem nenhum Book/Product) não pode "vencer"
+// e descartar um `og:image`/`og:title` que só existe no OpenGraph (bug real:
+// a versão anterior fazia `extractFromJsonLd(...) ?? extractFromOpenGraph(...)`,
+// um fallback de documento inteiro via `??`, nunca acionado quando o JSON-LD
+// retornava QUALQUER objeto, mesmo vazio na maioria dos campos).
+// Prioridade por campo: JSON-LD > OpenGraph > meta/título genérico — seção 13
+// do pedido.
+function mergeByField(sources: ImportedPageMetadata[]): ImportedPageMetadata {
+  const keys: Array<keyof ImportedPageMetadata> = ['title', 'subtitle', 'authors', 'publisher', 'publicationYear', 'language', 'isbn', 'coverUrl', 'description'];
+  const merged: ImportedPageMetadata = {};
+  for (const key of keys) {
+    for (const source of sources) {
+      const value = source[key];
+      if (value !== undefined) { (merged as Record<string, unknown>)[key] = value; break; }
+    }
+  }
+  return merged;
+}
+
 export async function extractPageMetadata(html: string): Promise<ImportedPageMetadata> {
   const raw = await extractRawFields(html);
-  return extractFromJsonLd(raw.jsonLd) ?? extractFromOpenGraph(raw.og, raw.title, raw.description);
+  const fromJsonLd = extractFromJsonLd(raw.jsonLd);
+  const fromOpenGraph = extractFromOpenGraph(raw.og, raw.twitterImage, raw.title, raw.description);
+  return mergeByField([fromJsonLd, fromOpenGraph]);
 }

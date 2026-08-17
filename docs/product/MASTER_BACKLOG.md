@@ -233,6 +233,43 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   (external cover), LIB-003 (metadata compartilhada) ou LIB-004A
   (relevância/aliases/catálogo interno/Open Library/import por URL).
 
+## LIB-004C — Enriquecimento da importação por URL oficial
+
+- **Priority:** P1 (deficiência funcional real, não regressão de dados)
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmando produção antes de
+  parar (ver relatório da sessão).
+- **Dependencies:** LIB-004A (`DONE`)
+- **Definition of Done:** ver `docs/library/METADATA_PROVIDERS.md`,
+  seção "LIB-004C" (reprodução factual, causa raiz, o que foi e o que
+  deliberadamente não foi implementado, com evidência real).
+- **Reproduzido antes de qualquer mudança:** página real
+  (`retropunk.com.br`) buscada e auditada campo a campo — sem nó
+  Book/Product em JSON-LD, `og:description` vazio (não ausente),
+  `meta[name=author]` apontando para o autor do post do blog (não do
+  RPG), sem nenhum sinal semântico de capa.
+- **Bugs corrigidos:** mesclagem de metadata por campo (era fallback de
+  documento inteiro — JSON-LD parcial descartava OpenGraph útil); string
+  vazia (`""`) tratada como valor presente em vez de ausente;
+  `WebPage.inLanguage` (JSON-LD) nunca extraído; `twitter:image` como
+  fallback adicional de capa.
+- **Deliberadamente não implementado, com evidência real:**
+  `meta[name=author]`→autor, `og:site_name`/`WebSite.name`→editora,
+  `datePublished`→ano de publicação, parsing de prosa livre para autor,
+  mineração heurística de `<img>` para capa — todos comprovadamente
+  errados ou inseguros na própria página real usada como reprodução.
+- **UX:** aviso explícito quando um import por URL traz poucos campos
+  ("Encontramos apenas parte dos dados desta página..."); tela renomeada
+  de "Busca pública na Open Library" para "Buscar publicação".
+- **Testes:** 5 novos (integração) — RetroPunk reduzido, merge por
+  campo, JSON-LD `Product`, JSON-LD malformado, `twitter:image`.
+  Confirmado TEST FIRST (3 das 5 asserções falhavam no código anterior,
+  via `git stash` temporário).
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit
+  final único, code+tests+docs, antes do deploy).
+- **Fora de escopo (deliberado):** upload/KV, archive, friends, maps,
+  VTT (LIB-005 continua não iniciado).
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0

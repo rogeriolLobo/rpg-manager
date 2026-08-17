@@ -189,6 +189,7 @@ rpgRoutes.post('/import-url', async (c) => {
       source: 'URL_IMPORT', origin: 'URL_IMPORT', confidence: 'HIGH', workId: null, editionId: null,
       sourceUrl: url.toString(), title: extracted.title, subtitle: extracted.subtitle,
       authors: extracted.authors, publisher: extracted.publisher, publicationYear: extracted.publicationYear,
+      language: extracted.language, // LIB-004C: WebPage.inLanguage (JSON-LD) — sinal seguro, novo.
       isbn10: classified?.isbn10 ?? undefined, isbn13: classified?.isbn13 ?? undefined, coverUrl,
     };
     return c.json({ result });

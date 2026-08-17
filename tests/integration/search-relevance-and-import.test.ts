@@ -322,4 +322,98 @@ describe('LIB-004A: POST /rpgs/import-url', () => {
     const item = ((await created.json()) as { item: { metadataSource: string } }).item;
     expect(item.metadataSource).toBe('URL_IMPORT');
   });
+
+  // LIB-004C: reprodução real do smoke manual — HTML reduzido, mas fiel à
+  // estrutura de https://retropunk.com.br/editora/roleplaying/rastro_de_cthulhu/
+  // (capturada e auditada campo a campo antes de qualquer mudança de código —
+  // ver docs/library/METADATA_PROVIDERS.md, seção "LIB-004C").
+  const retropunkLikeHtml = `<!doctype html><html><head>
+    <title>Rastro de Cthulhu - RetroPunk</title>
+    <meta name="author" content="Daniel Martins"/>
+    <meta property="og:title" content="Rastro de Cthulhu"/>
+    <meta property="og:description" content=""/>
+    <meta property="og:type" content="article"/>
+    <meta property="og:site_name" content="RetroPunk"/>
+    <script type="application/ld+json">${JSON.stringify({
+    '@context': 'https://schema.org', '@graph': [
+      { '@type': 'WebPage', name: 'Rastro de Cthulhu - RetroPunk', datePublished: '2017-01-23T19:44:47+00:00', inLanguage: 'pt-BR' },
+      { '@type': 'WebSite', name: 'RetroPunk', url: 'https://retropunk.com.br/editora/' },
+    ],
+  })}</script>
+  </head><body><p>Rastro de Cthulhu é escrito por Kenneth Hite e ilustrado por Jérôme Huguenin.</p></body></html>`;
+
+  it('LIB-004C: página sem nó Book/Product extrai título + idioma (WebPage.inLanguage), nunca inventa autor/editora/ano do conteúdo do site', async () => {
+    const a = await register('import-retropunk');
+    mockUpstreamHtml(retropunkLikeHtml);
+    const response = await request('/rpgs/import-url', 'POST', { url: 'https://retropunk.com.br/editora/roleplaying/rastro_de_cthulhu/' }, a.cookie, a.csrf);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { result: Record<string, unknown> };
+    expect(body.result.title).toBe('Rastro de Cthulhu');
+    expect(body.result.language).toBe('pt-BR'); // LIB-004C: novo — WebPage.inLanguage, sinal seguro.
+    // Nunca inventado a partir de dado que não é bibliográfico:
+    expect(body.result.authors).toBeUndefined(); // meta[name=author] é o autor do POST do blog (Daniel Martins), não do RPG.
+    expect(body.result.publisher).toBeUndefined(); // og:site_name/WebSite.name é o site (RetroPunk), não necessariamente a editora do livro.
+    expect(body.result.publicationYear).toBeUndefined(); // WebPage.datePublished é a data do post, não do livro.
+    expect(body.result.description).toBeUndefined(); // og:description="" (vazio, não ausente) não pode "vencer" e virar um valor vazio persistido.
+    expect(body.result.coverUrl).toBeUndefined(); // sem og:image/twitter:image/JSON-LD image — nenhuma mineração de <img> solto.
+  });
+
+  it('mescla POR CAMPO: JSON-LD com só "name" não descarta og:image (bug real corrigido — antes era fallback de documento inteiro)', async () => {
+    const a = await register('import-merge-fields');
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Book', name: 'Só Título Via JSON-LD' })}</script>
+      <meta property="og:image" content="https://www.example-publisher.com/capa-via-og.jpg" />
+      <meta property="og:description" content="Descrição só existe no OpenGraph." />
+    </head><body></body></html>`;
+    mockUpstreamHtml(html);
+    const response = await request('/rpgs/import-url', 'POST', { url: 'https://www.example-publisher.com/produto-misto' }, a.cookie, a.csrf);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { result: { title: string; coverUrl: string } };
+    expect(body.result.title).toBe('Só Título Via JSON-LD'); // do JSON-LD
+    expect(body.result.coverUrl).toBe('https://www.example-publisher.com/capa-via-og.jpg'); // do OpenGraph — não descartado
+  });
+
+  it('JSON-LD @type Product (não só Book) é reconhecido', async () => {
+    const a = await register('import-product-type');
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">${JSON.stringify({
+      '@context': 'https://schema.org', '@type': 'Product', name: 'Produto Genérico',
+      author: ['Autor Um', 'Autor Dois'], publisher: 'Editora Exemplo', image: 'https://www.example-publisher.com/produto.jpg',
+    })}</script>
+    </head><body></body></html>`;
+    mockUpstreamHtml(html);
+    const response = await request('/rpgs/import-url', 'POST', { url: 'https://www.example-publisher.com/produto-generico' }, a.cookie, a.csrf);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { result: { title: string; authors: string; publisher: string; coverUrl: string } };
+    expect(body.result.title).toBe('Produto Genérico');
+    expect(body.result.authors).toBe('Autor Um, Autor Dois'); // array de strings, não só de objetos Person
+    expect(body.result.publisher).toBe('Editora Exemplo'); // publisher como string simples, não só Organization
+    expect(body.result.coverUrl).toBe('https://www.example-publisher.com/produto.jpg');
+  });
+
+  it('JSON-LD malformado (erro de sintaxe) não derruba a importação — cai para OpenGraph', async () => {
+    const a = await register('import-malformed-jsonld');
+    const html = `<!doctype html><html><head>
+      <script type="application/ld+json">{ "@type": "Book", "name": "Livro Quebrado", }</script>
+      <meta property="og:title" content="Título Via OpenGraph (fallback)" />
+    </head><body></body></html>`;
+    mockUpstreamHtml(html);
+    const response = await request('/rpgs/import-url', 'POST', { url: 'https://www.example-publisher.com/produto-quebrado' }, a.cookie, a.csrf);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { result: { title: string } };
+    expect(body.result.title).toBe('Título Via OpenGraph (fallback)');
+  });
+
+  it('twitter:image é usado quando não há og:image', async () => {
+    const a = await register('import-twitter-image');
+    const html = `<!doctype html><html><head>
+      <meta property="og:title" content="Produto Com Twitter Card" />
+      <meta name="twitter:image" content="https://www.example-publisher.com/capa-twitter.jpg" />
+    </head><body></body></html>`;
+    mockUpstreamHtml(html);
+    const response = await request('/rpgs/import-url', 'POST', { url: 'https://www.example-publisher.com/produto-twitter' }, a.cookie, a.csrf);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { result: { coverUrl: string } };
+    expect(body.result.coverUrl).toBe('https://www.example-publisher.com/capa-twitter.jpg');
+  });
 });

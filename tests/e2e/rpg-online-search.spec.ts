@@ -29,7 +29,9 @@ test("busca online: buscar, selecionar, revisar em preview e confirmar cria o RP
 
   await page.goto("/app/library/new");
   await page.getByRole("button", { name: "Buscar online" }).click();
-  await expect(page.getByRole("heading", { name: "Buscar online" })).toBeVisible();
+  // LIB-004C (seção 20 do pedido): a tela deixou de se apresentar como
+  // "Busca pública na Open Library" — já cobre catálogo interno e import por URL.
+  await expect(page.getByRole("heading", { name: "Buscar publicação" })).toBeVisible();
 
   await page.getByLabel("Buscar livro por título, ISBN ou autor").fill("__e2e_fixture__ aventuras");
   await page.getByRole("button", { name: "Buscar" }).click();
