@@ -273,9 +273,20 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## LIB-005 — Cover assets / upload de capa (Zero Cost)
 
 - **Priority:** P2 (evolução funcional da Biblioteca, não regressão)
-- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
-  deploy publicado, `GET /api/v1/version` confirmando produção antes de
-  parar (ver relatório da sessão).
+- **Status:** `IN_PROGRESS` — código+testes+docs no commit `261fb85`, CI
+  verde, deploy publicado, `GET /api/v1/version` confirmado. Manual
+  smoke humano em produção (Blue Rose) reportou os controles de upload
+  ausentes na página de detalhe. Investigação factual (ver seção
+  "Diagnóstico do smoke manual" abaixo) não encontrou defeito de código:
+  bundle de produção é byte-idêntico ao build local testado (SHA-256
+  igual), contém as strings "Enviar capa"/"Trocar capa"/"Remover capa",
+  e um novo teste E2E reproduzindo exatamente os dados reais do Blue
+  Rose (`coverUrl` externa persistida, `coverAssetId` nulo, 1 única
+  referência, dono autenticado) passa em desktop e mobile — o botão
+  aparece normalmente. Hipótese mais provável: sessão do navegador com o
+  bundle antigo em memória (aba aberta antes do deploy), não código
+  defeituoso. Aguardando reteste humano com F5/Ctrl+F5 antes de marcar
+  `DONE` — ver relatório da sessão para o diagnóstico completo.
 - **Dependencies:** LIB-001 (capa por URL externa), LIB-002 (domínio
   `publications`), LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`)
 - **Definition of Done:** ver `docs/library/COVER_STORAGE.md` (design
@@ -315,9 +326,15 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   IDOR, formato inválido, tamanho excedido, troca remove asset anterior
   do KV, `SHARED_PUBLICATION_METADATA_LOCKED`, preservação de capa
   externa), E2E (`tests/e2e/rpg-cover-upload.spec.ts` — fluxo real de
-  upload/troca/remoção pela UI, independência do formulário de edição).
+  upload/troca/remoção pela UI, independência do formulário de edição;
+  reteste do smoke reportado adicionado — RPG criado já com `coverUrl`
+  externa persistida e `coverAssetId` nulo precisa mostrar "Enviar
+  capa"; remover o asset depois de enviado precisa voltar para a
+  `coverUrl` externa original, não para o placeholder — desktop e
+  mobile).
 - **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit
-  final único, code+tests+docs, antes do deploy).
+  final único, code+tests+docs, antes do deploy). Commit de
+  investigação do smoke: ver relatório desta rodada.
 - **Fora de escopo (deliberado):** archive, friends, maps, VTT,
   processamento de imagem no servidor (fica só no navegador),
   redimensionamento configurável pelo usuário.
