@@ -58,29 +58,34 @@ test("buscar uma Publication já arquivada mostra 'Arquivado na sua Biblioteca' 
   test.setTimeout(60_000);
   await register(page, `e2e-archive-search-${Date.now()}@example.com`);
 
+  // ISBN próprio deste teste (não o "9783161484100" usado pela fixture determinística de
+  // rpg-online-search.spec.ts) — Publications são um catálogo global compartilhado entre TODOS
+  // os arquivos E2E na mesma execução; reaproveitar a mesma identidade colidiria com aquele
+  // outro teste (a Publication seria criada aqui, sem os dados de Open Library que ele espera).
+  const title = "RPG Buscável Arquivado";
+  const isbn = "9782999000018";
   await page.goto("/app/library/new");
-  await page.getByLabel("Título", { exact: true }).fill("Aventuras de Teste");
-  await page.getByLabel("ISBN (opcional)").fill("9783161484100");
+  await page.getByLabel("Título", { exact: true }).fill(title);
+  await page.getByLabel("ISBN (opcional)").fill(isbn);
   await page.getByRole("button", { name: "Salvar RPG" }).click();
-  await expect(page.getByRole("heading", { name: "Aventuras de Teste" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Arquivar RPG" }).click();
   await expect(page.getByRole("button", { name: "Restaurar RPG" })).toBeVisible();
 
-  // Mesma fixture E2E determinística de rpg-online-search.spec.ts — mas agora o ISBN já é
-  // uma Library Entry arquivada do usuário: a busca externa real (ISBN) é a que enxerga isso
-  // (não a fixture de texto livre), então buscamos direto pelo ISBN.
+  // Agora o ISBN já é uma Library Entry arquivada do usuário: a busca externa real (ISBN) é a
+  // que enxerga isso (não a fixture de texto livre), então buscamos direto pelo ISBN.
   await page.goto("/app/library/new");
   await page.getByRole("button", { name: "Buscar online" }).click();
-  await page.getByLabel("Buscar livro por título, ISBN ou autor").fill("9783161484100");
+  await page.getByLabel("Buscar livro por título, ISBN ou autor").fill(isbn);
   await page.getByRole("button", { name: "Buscar" }).click();
   await expect(page.getByText("Arquivado na sua Biblioteca")).toBeVisible();
   await page.getByRole("button", { name: "Restaurar" }).click();
   await expect(page).toHaveURL(/\/app\/library\/[^/]+$/u);
   await expect(page.getByRole("button", { name: "Arquivar RPG" })).toBeVisible();
 
-  // Sem duplicata: só um "Aventuras de Teste" na Biblioteca ativa.
+  // Sem duplicata: só um "RPG Buscável Arquivado" na Biblioteca ativa.
   await page.goto("/app/library");
-  await expect(page.getByText("Aventuras de Teste")).toHaveCount(1);
+  await expect(page.getByText(title)).toHaveCount(1);
 });
