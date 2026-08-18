@@ -418,6 +418,14 @@ td {
 .empty-state h3 {
   margin: 0.7rem 0 0.25rem;
 }
+/* RPG-1.0-BATCH4: mesma base visual do .empty-state (já responsiva/tema-aware), só troca o
+   tom do ícone para sinalizar erro em vez de "vazio". Ver src/client/components/resource-state.tsx. */
+.error-state svg {
+  color: var(--danger);
+}
+.error-state button {
+  margin-top: 0.5rem;
+}
 .loading {
   min-height: 50vh;
   display: grid;

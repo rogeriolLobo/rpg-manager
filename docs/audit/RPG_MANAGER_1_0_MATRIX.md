@@ -218,22 +218,72 @@ ciclo.
   (`idx_external_resources_world`, `idx_map_pins_map`,
   `idx_world_maps_world`), sem N+1. Bindings do Worker seguem só D1/KV/
   Rate Limiters gratuitos — nenhum serviço pago introduzido.
-- **UX (item 14) → achado real, registrado para o próximo ciclo de
-  hardening (não corrigido agora, para não introduzir uma mudança
-  ampla e arriscada sob prazo):** ao menos 14 páginas em
-  `src/client/pages/` carregam dados iniciais com
-  `useEffect(() => { void api(...).then(setState) }, [...])` sem
-  `.catch`. Se a chamada falhar (ex.: 404 de `authorizedWorld`/
-  `ownedWorld` para um recurso inexistente ou não autorizado), a
-  promise rejeitada fica sem tratamento e a página trava
-  indefinidamente em `<Loading/>`, sem mensagem de erro — não é uma
-  falha de segurança (a autorização do backend continua correta, o
-  dado nunca chega ao cliente), é uma UX ruim num caminho raro (link
-  inválido/desatualizado ou tentativa de acesso não autorizado).
-  Proposta de correção mínima para o próximo ciclo: um handler global
-  de `unhandledrejection` que reconhece `ClientApiError` com status
-  404/403 e mostra um estado amigável, sem precisar alterar as 14
-  páginas individualmente.
+- **UX (item 14) → corrigido no RPG-1.0-BATCH4, não mais adiado.** Ver
+  seção própria abaixo (`## Atualização — RPG-1.0-BATCH4`).
 - Suíte completa revalidada em estado limpo (`rm -rf .wrangler/state`)
   após a integração de Cartografia+GM Tools: 44 E2E (desktop+mobile),
   192 unit, 135 integration — todos verdes, sem regressão.
+
+## Atualização — RPG-1.0-BATCH4 (UX error handling — ver `docs/product/MASTER_BACKLOG.md#RPG-1.0-BATCH4`)
+
+- **Status:** `DONE`. O achado de UX do BATCH3 (páginas presas em
+  "Carregando…" para sempre quando o load inicial falha) foi corrigido
+  com uma solução estrutural, não com `.catch` manual espalhado nem
+  com um `unhandledrejection` global ingênuo.
+- **Arquitetura:** hook `src/client/api/use-resource.ts` (`useResource`)
+  + componente `src/client/components/resource-state.tsx`
+  (`ResourceFallback`/`ErrorState`) substituem o padrão
+  `useEffect(() => { void api(...).then(setState) }, [dep])` sem
+  tratamento de erro em todas as páginas que faziam isso. Estados
+  cobertos: loading (inicial ou quando `path` muda para outro
+  recurso), success, 404 ("Não encontrado" — mesma mensagem para
+  recurso inexistente OU sem autorização, deliberadamente, para não
+  vazar existência), 403 (tratado por completude, ainda que o backend
+  nunca emita hoje), 401 (sessão expirada — ver abaixo), 5xx/falha de
+  rede (mensagem genérica + "Tentar novamente", nunca expõe o texto
+  cru do erro).
+- **401 / sessão expirada — mecanismo dedicado, não o `useResource`:**
+  `src/client/api/client.ts` dispara um evento global só quando
+  `code==='UNAUTHENTICATED'` (nunca por `status` sozinho — login e
+  troca de senha também usam 401, mas com `code=INVALID_CREDENTIALS`,
+  que nunca pode derrubar a sessão). `AuthProvider` escuta o evento e
+  desloga, e `<Protected/>` já redireciona para `/login` sozinho.
+- **Dois bugs reais de corrida encontrados e corrigidos durante a
+  implementação (nenhum dos dois existia antes desta mudança — foram
+  introduzidos e corrigidos na mesma sessão, achados via E2E, não
+  chegaram a produção):**
+  1. Um evento de "sessão expirada" de uma requisição ANTIGA (ex.: a
+     checagem inicial e anônima de sessão, feita quando o app carrega
+     em `/login`/`/register`) podia resolver DEPOIS de o usuário já
+     ter logado/registrado, deslogando-o incorretamente. Corrigido com
+     `src/client/api/session-epoch.ts`: cada requisição carrega o
+     "epoch" da sessão no momento em que foi enviada; só reage ao 401
+     se o epoch não mudou entre o envio e a resposta.
+  2. `reload()` resetava o estado para "loading" a cada chamada,
+     desmontando a página inteira a cada mutação (ex.: adicionar um
+     membro a um grupo) — um teste E2E existente (`core-flow.spec.ts`)
+     pegou isso: o texto digitado num formulário vizinho era apagado
+     porque o React desmontava e remontava a árvore no meio da
+     digitação. Corrigido: `reload()` mantém os dados antigos visíveis
+     até a resposta nova chegar (stale-while-revalidate) — só mostra
+     loading na carga inicial ou quando o recurso (`path`) muda de
+     fato.
+- **TEST FIRST:** `tests/e2e/error-states.spec.ts` (3 cenários: 404 de
+  recurso inexistente, 404 por autorização/outsider, sessão expirada
+  em navegação SPA) foi escrito e confirmado FALHANDO contra o código
+  anterior antes de qualquer correção.
+- **Migração:** ~20 pontos de carregamento em 13 páginas
+  (`dashboard-page.tsx`, `library-pages.tsx`, `cartography-pages.tsx`,
+  `external-resources-pages.tsx`, `group-pages.tsx`,
+  `relations-pages.tsx`, `vault-pages.tsx`, `world-knowledge-pages.tsx`,
+  `world-pages.tsx`, `campaign-pages.tsx`, `timeline-pages.tsx`,
+  `bestiary-page.tsx`) migrados para `useResource`/`ResourceFallback`
+  onde o carregamento travava a página inteira; formulários que só
+  pré-preenchem campos (edição, sem gate de carregamento) ganharam
+  apenas `.catch` com mensagem de erro, sem reescrever a página
+  inteira — risco proporcional ao problema real.
+- **Suíte completa revalidada em estado limpo:** 50 E2E (desktop
+  +mobile, incluindo os 3 novos cenários), 192 unit, 135 integration —
+  todos verdes.
+- **Sem migration, sem mudança de backend** — puramente frontend,
+  compatível com todos os contratos de API existentes.

@@ -596,6 +596,71 @@ qualquer gap, execução contínua sem parar entre itens.
   deliberadamente para não entregar uma versão apressada e de baixa
   qualidade sob pressão de prazo.
 
+## RPG-1.0-BATCH4 — UX error handling estrutural (obrigatório para 1.0)
+
+- **Status:** `DONE`. Puramente frontend — sem migration, sem mudança
+  de contrato de API.
+- **Causa/objetivo:** achado do BATCH3 (não deveria ficar para depois,
+  conforme correção de direção do usuário): ≥14 páginas carregavam
+  dados iniciais sem tratar falha — um 404/401/5xx deixava a página
+  presa em "Carregando…" para sempre.
+- **Arquitetura (auditada antes de implementar, não foi aplicado
+  `unhandledrejection` global por conveniência):**
+  - `src/client/api/use-resource.ts` — hook `useResource<T>(path,
+    fetcher?)`, estado `loading | success | error` derivado (loading
+    só na carga inicial ou quando `path` muda de recurso — nunca
+    forçado a cada `reload()`, ver bug 2 abaixo), `mutate()` para
+    atualização local otimista pós-mutação (substitui os antigos
+    `setData((current) => ...)`).
+  - `src/client/components/resource-state.tsx` —
+    `ResourceFallback`/`ErrorState`: 404 ("Não encontrado", mesma
+    mensagem para inexistente OU não autorizado — deliberado, não
+    vaza existência, ver Seção 17 do CLAUDE.md), 403 (tratado por
+    completude, backend não emite hoje), 401 (ponte visual — quem
+    resolve de verdade é o mecanismo de sessão abaixo), 5xx/rede
+    (mensagem genérica + "Tentar novamente", nunca expõe o erro cru).
+  - 401/sessão expirada é tratado à parte, não pelo `useResource`:
+    `src/client/api/client.ts` dispara um evento só quando
+    `code==='UNAUTHENTICATED'` (nunca por `status` sozinho — login e
+    troca de senha também usam 401 com `code=INVALID_CREDENTIALS`, que
+    nunca pode derrubar a sessão de quem já está logado).
+    `AuthProvider` escuta e desloga; `<Protected/>` já redireciona
+    para `/login`.
+- **TEST FIRST:** `tests/e2e/error-states.spec.ts` (3 cenários) escrito
+  e confirmado FALHANDO contra o código anterior antes de qualquer
+  correção.
+- **Dois bugs de corrida introduzidos e corrigidos na própria
+  implementação (achados via E2E antes de qualquer deploy — nunca
+  chegaram a produção):**
+  1. `src/client/api/session-epoch.ts` — uma checagem de sessão antiga
+     (ex.: anônima, feita ao carregar `/login`/`/register`) podia
+     resolver DEPOIS do login/registro e deslogar o usuário
+     incorretamente. Corrigido com um "epoch" de sessão: só reage ao
+     401 se nada mudou a identidade da sessão entre o envio da
+     requisição e a resposta.
+  2. `reload()` resetava para "loading" a cada chamada, desmontando a
+     página inteira a cada mutação — `core-flow.spec.ts` (teste já
+     existente, não novo) pegou isso: texto digitado num formulário
+     vizinho era apagado no meio da digitação. Corrigido para
+     stale-while-revalidate (mantém dados antigos visíveis até a
+     resposta nova chegar).
+- **Migração:** ~20 pontos de carregamento em 13 páginas
+  (`dashboard-page.tsx`, `library-pages.tsx`, `cartography-pages.tsx`,
+  `external-resources-pages.tsx`, `group-pages.tsx`,
+  `relations-pages.tsx`, `vault-pages.tsx`, `world-knowledge-pages.tsx`,
+  `world-pages.tsx`, `campaign-pages.tsx`, `timeline-pages.tsx`,
+  `bestiary-page.tsx`). Formulários de edição que só pré-preenchem
+  campos (sem gate de carregamento) ganharam apenas `.catch` com
+  mensagem de erro — risco proporcional ao problema real, sem reescrita
+  desnecessária.
+- **Testes:** `tests/e2e/error-states.spec.ts` (3 cenários novos) +
+  suíte completa revalidada em estado limpo: 50 E2E (desktop+mobile),
+  192 unit, 135 integration — todos verdes, sem regressão.
+- **Auditoria complementar deste batch (itens 4 do pedido de
+  finalização acelerada):** varredura de links/rotas mortos
+  (`grep` de todos os `to="..."` contra as rotas definidas em
+  `app.tsx`) — nenhum link morto encontrado.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0

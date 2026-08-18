@@ -7,12 +7,13 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
+import { useResource } from "../api/use-resource";
+import { ResourceFallback } from "../components/resource-state";
 import type { Rpg } from "./library-pages";
 import {
   Badge,
   Empty,
   formatDate,
-  Loading,
   PageHeader,
 } from "./dashboard-page";
 import { displayLabel } from "../labels";
@@ -68,12 +69,9 @@ interface CampaignEntity { id:string;entityType:string;name:string;summary:strin
 interface AdventureOption { id:string;name:string }
 export function CampaignsPage() {
   const [search] = useSearchParams(); const worldId = search.get('worldId');
-  const [items, setItems] = useState<Campaign[]>();
-  useEffect(() => {
-    void api<{ items: Campaign[] }>(`/campaigns${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`).then((result) =>
-      setItems(result.items),
-    );
-  }, [worldId]);
+  const resource = useResource<{ items: Campaign[] }>(`/campaigns${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`);
+  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const items = resource.data.items;
   return (
     <div className="page">
       <PageHeader
@@ -87,9 +85,7 @@ export function CampaignsPage() {
           </Link>
         }
       />
-      {!items ? (
-        <Loading />
-      ) : items.length === 0 ? (
+      {items.length === 0 ? (
         <Empty
           title="Nenhuma campanha planejada"
           text="Escolha um RPG da estante e reúna o grupo."
@@ -169,7 +165,7 @@ export function CampaignFormPage() {
   });
   const [error, setError] = useState("");
   useEffect(() => {
-    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);});
+    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);}).catch(()=>{});
     if (id)
       void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) => {
         setForm({
@@ -194,9 +190,9 @@ export function CampaignFormPage() {
         if (item.rpgArchived) {
           void api<{ item: Rpg }>(`/rpgs/${item.rpgId}`).then(({ item: rpg }) =>
             setRpgs((current) => (current.some((existing) => existing.id === rpg.id) ? current : [...current, rpg])),
-          );
+          ).catch(()=>{});
         }
-      });
+      }).catch((reason:unknown)=>setError(reason instanceof Error?reason.message:'Não foi possível carregar esta campanha.'));
   }, [id,worldId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -379,22 +375,15 @@ export function CampaignFormPage() {
 export function CampaignDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [data, setData] = useState<{
+  const resource = useResource<{
     item: Campaign;
     members: Member[];
     sessions: GameSession[];
     entities: CampaignEntity[];
-  }>();
-  const load = () =>
-    api<{ item: Campaign; members: Member[]; sessions: GameSession[]; entities:CampaignEntity[] }>(
-      `/campaigns/${id}`,
-    ).then(setData);
-  useEffect(() => {
-    void api<{ item: Campaign; members: Member[]; sessions: GameSession[];entities:CampaignEntity[] }>(
-      `/campaigns/${id}`,
-    ).then(setData);
-  }, [id]);
-  if (!data) return <Loading />;
+  }>(id ? `/campaigns/${id}` : null);
+  const load = async () => { resource.reload(); };
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
   const addMember = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -580,14 +569,15 @@ export function SessionFormPage() {
     nextHooks: "",
     attendeeMemberIds: [] as string[],
   });
+  const [error, setError] = useState("");
   useEffect(() => {
-    void api<{ members: Member[] }>(`/campaigns/${id}`).then(setCampaign);
+    void api<{ members: Member[] }>(`/campaigns/${id}`).then(setCampaign).catch(()=>{});
     if (sessionId)
       void api<{ item: typeof form }>(
         `/campaigns/${id}/sessions/${sessionId}`,
       ).then(({ item }) =>
         setForm({ ...item, playedAt: item.playedAt.slice(0, 10) }),
-      );
+      ).catch((reason:unknown)=>setError(reason instanceof Error?reason.message:'Não foi possível carregar esta sessão.'));
   }, [id, sessionId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -612,6 +602,7 @@ export function SessionFormPage() {
         title={sessionId ? "Editar sessão" : "Registrar sessão"}
         description="O número e os contadores são calculados no servidor."
       />
+      {error && <p className="form-error">{error}</p>}
       <form className="panel form-grid" onSubmit={submit}>
         <label>
           Título
@@ -691,13 +682,11 @@ export function SessionFormPage() {
 export function SessionDetailPage() {
   const { id, sessionId } = useParams();
   const navigate = useNavigate();
-  const [item, setItem] = useState<GameSession>();
-  useEffect(() => {
-    void api<{ item: GameSession }>(
-      `/campaigns/${id}/sessions/${sessionId}`,
-    ).then((result) => setItem(result.item));
-  }, [id, sessionId]);
-  if (!item) return <Loading />;
+  const resource = useResource<{ item: GameSession }>(
+    id && sessionId ? `/campaigns/${id}/sessions/${sessionId}` : null,
+  );
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const item = resource.data.item;
   return (
     <div className="page narrow">
       <PageHeader

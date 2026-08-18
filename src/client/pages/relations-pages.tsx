@@ -8,12 +8,14 @@ import {
   type Node,
 } from '@xyflow/react';
 import { GitFork, List, Plus, RotateCcw, Search, Trash2, UsersRound } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { RELATION_TYPES, type RelationDirection, type RelationType } from '../../domain/content/types';
-import { api, deleteApi, patchJson, postJson } from '../api/client';
+import { deleteApi, patchJson, postJson } from '../api/client';
+import { useResource } from '../api/use-resource';
+import { ResourceFallback } from '../components/resource-state';
 import { displayLabel } from '../labels';
-import { Empty, Loading, PageHeader } from './dashboard-page';
+import { Empty, PageHeader } from './dashboard-page';
 
 interface RelationNodeData {
   id: string;
@@ -188,7 +190,6 @@ export function WorldRelationsPage() {
   const relationType = searchParams.get('type') ?? '';
   const archive = searchParams.get('archive') ?? 'active';
   const includeDisconnected = searchParams.get('disconnected') !== 'false';
-  const [data, setData] = useState<RelationsData>();
   const [editing, setEditing] = useState<RelationItem | 'new' | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -198,11 +199,12 @@ export function WorldRelationsPage() {
     if (relationType) params.set('type', relationType);
     return params.toString();
   }, [archive, includeDisconnected, relationType, search]);
-  const load = useCallback(async () => setData(await api<RelationsData>(`/relations/worlds/${worldId}?${query}`)), [query, worldId]);
-  useEffect(() => { void api<RelationsData>(`/relations/worlds/${worldId}?${query}`).then(setData); }, [query, worldId]);
-  const elements = useMemo(() => data ? graphElements(data, view, selectedNodeId) : { nodes: [], edges: [] }, [data, selectedNodeId, view]);
+  const resource = useResource<RelationsData>(`/relations/worlds/${worldId}?${query}`);
+  const load = async () => { resource.reload(); };
+  const elements = useMemo(() => resource.status === 'success' ? graphElements(resource.data, view, selectedNodeId) : { nodes: [], edges: [] }, [resource, selectedNodeId, view]);
   const update = (key: string, value: string) => setSearchParams((current) => { const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); return next; });
-  if (!data) return <Loading/>;
+  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
   const closeEditor = () => setEditing(null);
   const saved = async () => { closeEditor(); await load(); };
   const deleteRelation = async (relation: RelationItem) => {

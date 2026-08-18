@@ -7,6 +7,8 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { api, ClientApiError, patchJson, postJson } from "../api/client";
+import { useResource } from "../api/use-resource";
+import { ResourceFallback } from "../components/resource-state";
 import { MAX_COVER_ASSET_BYTES } from "../../domain/rpg/cover-asset";
 import { Badge, Empty, Loading, PageHeader } from "./dashboard-page";
 import { displayLabel } from "../labels";
@@ -76,25 +78,24 @@ interface Metadata {
   subgenres: Array<{ id: string; categoryId: string; name: string }>;
   groups: Array<{ id: string; name: string; gameMasterName?: string | null }>;
 }
+interface LibraryListResult {
+  items: Rpg[];
+  pagination: { page: number; pageSize: number; total: number };
+  metadata: Metadata;
+}
 export function LibraryPage() {
   const [params, setParams] = useSearchParams();
-  const [result, setResult] = useState<{
-    items: Rpg[];
-    pagination: { page: number; pageSize: number; total: number };
-  }>();
-  const [metadata, setMetadata] = useState<Metadata>();
   const [view, setView] = useState<"cards" | "table">("cards");
   const [search, setSearch] = useState(params.get("search") ?? "");
   const query = params.toString();
-  useEffect(() => {
-    void Promise.all([
-      api<{ items: Rpg[]; pagination: { page: number; pageSize: number; total: number } }>(`/rpgs?${query}`),
+  const resource = useResource<LibraryListResult>(query, (q) =>
+    Promise.all([
+      api<{ items: Rpg[]; pagination: { page: number; pageSize: number; total: number } }>(`/rpgs?${q}`),
       api<Metadata>("/rpgs/metadata"),
-    ]).then(([data, meta]) => {
-      setResult(data);
-      setMetadata(meta);
-    });
-  }, [query]);
+    ]).then(([data, meta]) => ({ items: data.items, pagination: data.pagination, metadata: meta })),
+  );
+  const result = resource.status === "success" ? { items: resource.data.items, pagination: resource.data.pagination } : undefined;
+  const metadata = resource.status === "success" ? resource.data.metadata : undefined;
   const set = useCallback((key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
@@ -222,9 +223,9 @@ export function LibraryPage() {
           </button>
         </div>
       </section>
-      {!result ? (
-        <Loading />
-      ) : result.items.length === 0 ? (
+      {resource.status !== "success" ? (
+        <ResourceFallback state={resource} onRetry={resource.reload}/>
+      ) : result!.items.length === 0 ? (
         <Empty
           title={showingArchived ? "Nenhum RPG arquivado" : "Nenhum RPG encontrado"}
           text={showingArchived ? "RPGs arquivados aparecem aqui — seus dados continuam preservados." : "Ajuste os filtros ou adicione um novo título."}
@@ -233,7 +234,7 @@ export function LibraryPage() {
         />
       ) : view === "cards" ? (
         <div className="book-grid">
-          {result.items.map((item) => (
+          {result!.items.map((item) => (
             <BookCard item={item} key={item.id} />
           ))}
         </div>
@@ -251,7 +252,7 @@ export function LibraryPage() {
               </tr>
             </thead>
             <tbody>
-              {result.items.map((item) => (
+              {result!.items.map((item) => (
                 <tr key={item.id}>
                   <td>
                     <Link to={`/app/library/${item.id}`}>{item.title}</Link>
@@ -626,6 +627,11 @@ function RpgFormFields({ id }: { id?: string }) {
   // na Biblioteca do usuário — ver submit() abaixo.
   const [archivedConflictEntryId, setArchivedConflictEntryId] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(id));
+  // RPG-1.0-BATCH4: sem isto, um 404/401/5xx no load do RPG existente deixava o formulário
+  // permanentemente desabilitado (`loading` nunca virava false) e sem nenhuma mensagem —
+  // mesma classe do achado de UX da auditoria, só que aqui o sintoma é "formulário morto"
+  // em vez de spinner infinito.
+  const [loadError, setLoadError] = useState<unknown>(null);
   // LIB-004: só relevante para cadastro novo — editar um RPG existente nunca reabre busca
   // (o PATCH não reatribui identidade/provenance, ver library-writes.ts). "manual" continua
   // sendo o modo padrão/imediatamente visível: não pode quebrar quem já usa o cadastro manual
@@ -673,7 +679,7 @@ function RpgFormFields({ id }: { id?: string }) {
           externalWorkId: "", externalEditionId: "", reusePublicationId: "",
         });
         setLoading(false);
-      });
+      }).catch((reason: unknown) => { if (active) { setLoadError(reason); setLoading(false); } });
     return () => { active = false; };
   }, [id]);
   const category = String(form.categoryId);
@@ -682,6 +688,9 @@ function RpgFormFields({ id }: { id?: string }) {
       metadata?.subgenres.filter((item) => item.categoryId === category) ?? [],
     [metadata, category],
   );
+  // Precisa vir depois de todos os Hooks acima (Rules of Hooks: um early return não pode
+  // pular useState/useMemo/useEffect em algumas renderizações e não em outras).
+  if (id && loadError) return <ResourceFallback state={{ status: "error", error: loadError }} />;
   const update = (key: string, value: string | boolean) =>
     setForm((current) => ({ ...current, [key]: value }));
   // LIB-004/LIB-004A: seleção de um resultado de busca preenche o MESMO formulário usado pelo
@@ -1065,17 +1074,12 @@ function RpgFormFields({ id }: { id?: string }) {
 
 export function RpgDetailPage() {
   const { id } = useParams();
-  const [data, setData] = useState<{
+  const resource = useResource<{
     item: Rpg;
     campaigns: Array<{ id: string; name: string; status: string }>;
-  }>();
-  useEffect(() => {
-    void api<{
-      item: Rpg;
-      campaigns: Array<{ id: string; name: string; status: string }>;
-    }>(`/rpgs/${id}`).then(setData);
-  }, [id]);
-  if (!data) return <Loading />;
+  }>(id ? `/rpgs/${id}` : null);
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload} />;
+  const data = resource.data;
   const { item } = data;
   // LIB-006: arquivar substitui excluir como ação normal da Biblioteca ativa (seção 5/18 do
   // pedido) — nunca DELETE físico. Idempotente no servidor; aqui só atualiza o estado local em
@@ -1087,7 +1091,7 @@ export function RpgDetailPage() {
     if (!confirm(`Arquivar “${item.title}”? Ele será removido da Biblioteca ativa, mas seus dados serão preservados e poderá ser restaurado depois.${campaignNote}`)) return;
     try {
       const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/archive`, {});
-      setData((current) => (current ? { ...current, item: updated } : current));
+      resource.mutate((current) => ({ ...current, item: updated }));
     } catch (reason) {
       alert(reason instanceof Error ? reason.message : "Não foi possível arquivar este RPG.");
     }
@@ -1095,7 +1099,7 @@ export function RpgDetailPage() {
   const restore = async () => {
     try {
       const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/restore`, {});
-      setData((current) => (current ? { ...current, item: updated } : current));
+      resource.mutate((current) => ({ ...current, item: updated }));
     } catch (reason) {
       alert(reason instanceof Error ? reason.message : "Não foi possível restaurar este RPG.");
     }
@@ -1128,7 +1132,7 @@ export function RpgDetailPage() {
           <div className="book-cover large">
             <CoverImage item={item} eager />
           </div>
-          <CoverUploadControls item={item} onChange={(next) => setData((current) => (current ? { ...current, item: next } : current))} />
+          <CoverUploadControls item={item} onChange={(next) => resource.mutate((current) => ({ ...current, item: next }))} />
           <strong>{item.recommendationScore} pontos</strong>
           <span>{item.nextAction}</span>
         </aside>

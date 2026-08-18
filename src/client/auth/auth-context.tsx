@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, postJson } from "../api/client";
+import { bumpSessionEpoch } from "../api/session-epoch";
 
 export interface User {
   id: string;
@@ -30,6 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const authVersion = useRef(0);
   const setUser = useCallback((nextUser: User | null) => {
     authVersion.current += 1;
+    // Toda troca de identidade de sessão (login, registro, logout, expiração) invalida
+    // requisições em voo emitidas ANTES dela — ver session-epoch.ts.
+    bumpSessionEpoch();
     setUserState(nextUser);
     setLoading(false);
   }, []);
@@ -58,6 +62,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (authVersion.current === requestVersion) setLoading(false);
       });
   }, []);
+  // RPG-1.0-BATCH4: qualquer chamada de API em qualquer página que receba 401
+  // UNAUTHENTICATED (ver src/client/api/client.ts) derruba a sessão aqui, uma vez, de forma
+  // centralizada — a rota <Protected/> (src/client/app.tsx) já redireciona para /login
+  // assim que `user` vira null. Sem isto, uma sessão expirada em segundo plano deixava a
+  // página presa em "Carregando…" para sempre (a chamada falhava, ninguém tratava o erro).
+  useEffect(() => {
+    const onExpired = () => setUser(null);
+    window.addEventListener('rpg:unauthenticated', onExpired);
+    return () => window.removeEventListener('rpg:unauthenticated', onExpired);
+  }, [setUser]);
   const logout = useCallback(async () => {
     await postJson("/auth/logout", {});
     setUser(null);

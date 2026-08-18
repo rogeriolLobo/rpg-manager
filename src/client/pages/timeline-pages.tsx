@@ -1,10 +1,12 @@
 import { CalendarDays, Clock3, History, Plus, Save, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TEMPORAL_PRECISIONS, type TemporalPrecision } from '../../domain/content/types';
 import { api, deleteApi, patchJson, postJson, putJson } from '../api/client';
+import { useResource } from '../api/use-resource';
+import { ResourceFallback } from '../components/resource-state';
 import { displayLabel } from '../labels';
-import { Empty, Loading, PageHeader } from './dashboard-page';
+import { Empty, PageHeader } from './dashboard-page';
 
 interface Era { id: string; name: string; description: string; sortOrder: number }
 interface CalendarConfig {
@@ -124,14 +126,19 @@ function eventDateLabel(event: TimelineEvent, calendar: CalendarConfig | null): 
   return event.temporal.historicalDate || 'Data ainda não definida';
 }
 
+interface TimelineResource { timeline: TimelineData; relations: Relation[] }
 export function WorldTimelinePage() {
   const { id: worldId = '' } = useParams(); const [searchParams, setSearchParams] = useSearchParams();
-  const [data, setData] = useState<TimelineData>(); const [relations, setRelations] = useState<Relation[]>([]); const [editing, setEditing] = useState<TimelineEvent | null>(null);
+  const [editing, setEditing] = useState<TimelineEvent | null>(null);
   const query = useMemo(() => { const params = new URLSearchParams(); for (const key of ['search', 'eraId', 'precision']) { const value = searchParams.get(key); if (value) params.set(key, value); } return params.toString(); }, [searchParams]);
-  const load = useCallback(async () => { const [timeline, graph] = await Promise.all([api<TimelineData>(`/timeline/worlds/${worldId}?${query}`), api<{ relations: Relation[] }>(`/relations/worlds/${worldId}?includeDisconnected=false`)]); setData(timeline); setRelations(graph.relations); }, [query, worldId]);
-  useEffect(() => { void Promise.all([api<TimelineData>(`/timeline/worlds/${worldId}?${query}`), api<{ relations: Relation[] }>(`/relations/worlds/${worldId}?includeDisconnected=false`)]).then(([timeline, graph]) => { setData(timeline); setRelations(graph.relations); }); }, [query, worldId]);
+  const resource = useResource<TimelineResource>(`${worldId}?${query}`, () =>
+    Promise.all([api<TimelineData>(`/timeline/worlds/${worldId}?${query}`), api<{ relations: Relation[] }>(`/relations/worlds/${worldId}?includeDisconnected=false`)])
+      .then(([timeline, graph]) => ({ timeline, relations: graph.relations })));
+  const load = async () => { resource.reload(); };
   const update = (key: string, value: string) => setSearchParams((current) => { const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); return next; });
-  if (!data) return <Loading/>;
+  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const { relations } = resource.data;
+  const data = resource.data.timeline;
   const relatedTo = (eventId: string) => relations.filter((relation) => relation.source.id === eventId || relation.target.id === eventId).map((relation) => relation.source.id === eventId ? relation.target : relation.source);
   return <div className="page timeline-page"><PageHeader eyebrow="Cronologia do World" title={data.world.name} description="Eventos históricos e calendários fictícios, separados das datas reais das sessões." action={data.world.isOwner ? <Link className="primary-button link-button" to={`/app/vault/new?worldId=${worldId}&type=EVENT`}><Plus size={17}/>Novo evento</Link> : undefined}/>
     {data.world.isOwner && <div className="timeline-settings"><EraManager worldId={worldId} eras={data.eras} onSaved={load}/><CalendarEditor key={data.calendar?.id ?? 'new'} worldId={worldId} calendar={data.calendar} onSaved={load}/></div>}

@@ -2,7 +2,9 @@ import { MapPin, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, deleteApi, postJson } from "../api/client";
-import { Empty, Loading, PageHeader } from "./dashboard-page";
+import { useResource } from "../api/use-resource";
+import { ResourceFallback } from "../components/resource-state";
+import { Empty, PageHeader } from "./dashboard-page";
 
 // F-002 (Cartografia): mapas (imagem externa) + pins (coordenadas normalizadas 0-100),
 // escopados por World. Versão 1.0 deliberadamente simples — NÃO é VTT (sem tokens em tempo
@@ -16,14 +18,12 @@ const blankMapForm = { title: "", imageUrl: "", notes: "" };
 
 export function WorldCartographyPage() {
   const { id } = useParams();
-  const [maps, setMaps] = useState<MapSummary[]>();
+  const resource = useResource<{ items: MapSummary[] }>(id ? `/cartography/${id}` : null);
   const [form, setForm] = useState(blankMapForm);
   const [error, setError] = useState("");
 
-  const load = () => api<{ items: MapSummary[] }>(`/cartography/${id}`).then((result) => setMaps(result.items));
-  useEffect(() => { void api<{ items: MapSummary[] }>(`/cartography/${id}`).then((result) => setMaps(result.items)); }, [id]);
-
-  if (!maps) return <Loading/>;
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const maps = resource.data.items;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -31,7 +31,7 @@ export function WorldCartographyPage() {
     try {
       await postJson(`/cartography/${id}`, form);
       setForm(blankMapForm);
-      await load();
+      resource.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível salvar o mapa.");
     }
@@ -76,18 +76,20 @@ const blankPinForm = { label: "", notes: "", x: "50", y: "50", entityId: "" };
 
 export function WorldMapDetailPage() {
   const { id, mapId } = useParams();
-  const [data, setData] = useState<MapDetail>();
+  const resource = useResource<MapDetail>(id && mapId ? `/cartography/${id}/${mapId}` : null);
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [form, setForm] = useState(blankPinForm);
   const [error, setError] = useState("");
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
-  const load = () => api<MapDetail>(`/cartography/${id}/${mapId}`).then(setData);
-  useEffect(() => { void api<MapDetail>(`/cartography/${id}/${mapId}`).then(setData); }, [id, mapId]);
-  useEffect(() => { void api<{ items: Array<{ id: string; name: string }> }>(`/vault?worldId=${id}&pageSize=50`).then((result) => setEntities(result.items)); }, [id]);
+  // Lista de entidades para o seletor "vincular pin" é auxiliar, não bloqueante — se falhar,
+  // o seletor só fica vazio (o mapa/pins continuam visíveis via `resource` acima).
+  useEffect(() => { void api<{ items: Array<{ id: string; name: string }> }>(`/vault?worldId=${id}&pageSize=50`).then((result) => setEntities(result.items)).catch(() => setEntities([])); }, [id]);
 
-  if (!data) return <Loading/>;
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
+  const load = () => resource.reload();
 
   // Clicar na imagem preenche X/Y automaticamente (conveniência) — o usuário ainda pode
   // ajustar os números manualmente. Sem drag-and-drop nesta versão (ver seção 9 do pedido).

@@ -1,8 +1,10 @@
 import { ExternalLink, Link as LinkIcon, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { api, deleteApi, postJson } from "../api/client";
-import { Empty, Loading, PageHeader } from "./dashboard-page";
+import { deleteApi, postJson } from "../api/client";
+import { useResource } from "../api/use-resource";
+import { ResourceFallback } from "../components/resource-state";
+import { Empty, PageHeader } from "./dashboard-page";
 
 // F-003 (External Resources): referência externa (link HTTPS) zero-cost, escopada por World —
 // ver src/server/routes/external-resources.ts para a justificativa de não ser um Vault Entity.
@@ -22,14 +24,12 @@ const blankForm = { title: "", url: "", description: "", resourceType: "ARTICLE"
 
 export function WorldExternalResourcesPage() {
   const { id } = useParams();
-  const [data, setData] = useState<ExternalResourcesData>();
+  const resource = useResource<ExternalResourcesData>(id ? `/external-resources/${id}` : null);
   const [form, setForm] = useState(blankForm);
   const [error, setError] = useState("");
 
-  const load = () => api<ExternalResourcesData>(`/external-resources/${id}`).then(setData);
-  useEffect(() => { void api<ExternalResourcesData>(`/external-resources/${id}`).then(setData); }, [id]);
-
-  if (!data) return <Loading/>;
+  if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -37,7 +37,7 @@ export function WorldExternalResourcesPage() {
     try {
       await postJson(`/external-resources/${id}`, form);
       setForm(blankForm);
-      await load();
+      resource.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível salvar o recurso.");
     }
@@ -47,7 +47,7 @@ export function WorldExternalResourcesPage() {
     if (!confirm("Remover este recurso externo?")) return;
     try {
       await deleteApi(`/external-resources/${id}/${resourceId}`);
-      await load();
+      resource.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível remover o recurso.");
     }

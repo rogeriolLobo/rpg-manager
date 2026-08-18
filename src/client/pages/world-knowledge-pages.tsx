@@ -2,6 +2,8 @@ import { BookOpen, Copy, FilePlus2, FolderPlus, KeyRound, Plus, Search, Tags, Tr
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
+import { useResource } from '../api/use-resource';
+import { ResourceFallback } from '../components/resource-state';
 import { useAuth } from '../auth/auth-context';
 import { ENTITY_TYPES } from '../../domain/content/types';
 import { displayLabel } from '../labels';
@@ -29,13 +31,14 @@ function OrganizationEditor({ item, data, onSaved }: { item: WikiItem; data: Wik
 }
 
 export function WorldWikiPage({ portal = false }: { portal?: boolean }) {
-  const { id } = useParams(); const [searchParams, setSearchParams] = useSearchParams(); const [data, setData] = useState<WikiData>(); const [error, setError] = useState('');
+  const { id } = useParams(); const [searchParams, setSearchParams] = useSearchParams(); const [error, setError] = useState('');
   const [folderName, setFolderName] = useState(''); const [tagName, setTagName] = useState('');
   const query = searchParams.toString();
-  const load = async () => setData(await api<WikiData>(`/knowledge/${id}?${query}`));
-  useEffect(() => { let active = true; void api<WikiData>(`/knowledge/${id}?${query}`).then((result) => { if (active) setData(result); }); return () => { active = false; }; }, [id, query]);
+  const resource = useResource<WikiData>(id ? `/knowledge/${id}?${query}` : null);
+  const load = async () => { resource.reload(); };
   const update = (key: string, value: string) => setSearchParams((current) => { const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); next.delete('page'); return next; });
-  if (!data) return <Loading/>;
+  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
   const pageCount = Math.max(1, Math.ceil(data.pagination.total / data.pagination.pageSize));
   const createFolder = async (event: FormEvent) => { event.preventDefault(); setError(''); try { await postJson(`/knowledge/${id}/folders`, { name: folderName, parentFolderId: null }); setFolderName(''); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Não foi possível criar a pasta.'); } };
   const createTag = async (event: FormEvent) => { event.preventDefault(); setError(''); try { await postJson(`/knowledge/${id}/tags`, { name: tagName }); setTagName(''); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Não foi possível criar a tag.'); } };
@@ -56,11 +59,12 @@ function JournalEditor({ worldId, page, folders, onSaved, onDeleted, setError }:
 }
 
 export function WorldJournalPage() {
-  const { id } = useParams(); const [searchParams, setSearchParams] = useSearchParams(); const [data, setData] = useState<JournalData>(); const [folderName, setFolderName] = useState(''); const [error, setError] = useState('');
-  const selectedId = searchParams.get('page'); const selected = data?.pages.find((page) => page.id === selectedId) ?? data?.pages[0];
-  const load = async () => setData(await api<JournalData>(`/journal/${id}`));
-  useEffect(() => { void api<JournalData>(`/journal/${id}`).then(setData); }, [id]);
-  if (!data) return <Loading/>;
+  const { id } = useParams(); const [searchParams, setSearchParams] = useSearchParams(); const [folderName, setFolderName] = useState(''); const [error, setError] = useState('');
+  const resource = useResource<JournalData>(id ? `/journal/${id}` : null);
+  const load = async () => { resource.reload(); };
+  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
+  const data = resource.data;
+  const selectedId = searchParams.get('page'); const selected = data.pages.find((page) => page.id === selectedId) ?? data.pages[0];
   const choose = (pageId: string) => setSearchParams({ page: pageId });
   const createPage = async () => { const result = await postJson<{ item: JournalPage }>(`/journal/${id}/pages`, { title: 'Nova página', content: '', folderId: null }); await load(); choose(result.item.id); };
   const createFolder = async (event: FormEvent) => { event.preventDefault(); await postJson(`/journal/${id}/folders`, { name: folderName, parentFolderId: null }); setFolderName(''); await load(); };
@@ -71,7 +75,7 @@ interface Invite { id: string; codeHint: string; expiresAt: string; maxUses: num
 export function WorldInvitesPanel({ worldId }: { worldId: string }) {
   const [invites, setInvites] = useState<Invite[]>([]); const [link, setLink] = useState(''); const [error, setError] = useState('');
   const load = async () => setInvites((await api<{ items: Invite[] }>(`/world-invites/${worldId}`)).items);
-  useEffect(() => { void api<{ items: Invite[] }>(`/world-invites/${worldId}`).then((result) => setInvites(result.items)); }, [worldId]);
+  useEffect(() => { void api<{ items: Invite[] }>(`/world-invites/${worldId}`).then((result) => setInvites(result.items)).catch(() => setInvites([])); }, [worldId]);
   const create = async () => { setError(''); try { const result = await postJson<{ item: { code: string } }>(`/world-invites/${worldId}`, { expiresInDays: 7, maxUses: 1 }); setLink(`${location.origin}/invite/${result.item.code}`); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Não foi possível criar o convite.'); } };
   return <section className="panel world-invites"><div className="section-heading"><div><h2><KeyRound size={19}/>Convites por link</h2><p className="section-note">O link expira em 7 dias e pode ser usado uma vez. O World precisa estar visível para membros convidados.</p></div><button className="secondary-button" onClick={() => void create()}><Plus size={16}/>Criar convite</button></div>{link && <div className="invite-link"><input readOnly value={link}/><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(link)}><Copy size={16}/>Copiar</button></div>}{error && <p className="form-error">{error}</p>}<ul className="clean-list">{invites.map((invite) => <li key={invite.id}><span><strong>Código …{invite.codeHint}</strong><small>{invite.useCount}/{invite.maxUses} usos · expira {new Date(invite.expiresAt).toLocaleDateString('pt-BR')}{invite.revokedAt ? ' · revogado' : ''}</small></span>{!invite.revokedAt && <button className="ghost-button" onClick={async () => { await deleteApi(`/world-invites/${worldId}/${invite.id}`); await load(); }}>Revogar</button>}</li>)}</ul></section>;
 }
