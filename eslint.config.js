@@ -31,7 +31,13 @@ export default tseslint.config(
             "vitest.integration.config.ts",
             "tests/integration/*.ts",
           ],
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
+          // LIB-007: 16 batia certinho com a contagem de arquivos de integration test do
+          // momento em que este limite foi definido — não era uma escolha à prova de
+          // crescimento natural da suíte. Cada nova vertical da Library adiciona pelo menos
+          // um arquivo novo em tests/integration/, e o lint quebra com um erro de config (não
+          // um bug de código) toda vez que esse teto é ultrapassado. Ajustado para dar folga
+          // real, evitando repetir esse ajuste a cada poucas tarefas.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 40,
         },
         tsconfigRootDir: import.meta.dirname,
       },
