@@ -621,6 +621,33 @@ qualquer gap, execução contínua sem parar entre itens.
   `f0498ac` (retry/timeout)
 - **Production version:** N/A (mudança de CI, não de app)
 
+## F-001 — Revision History: decisão explícita de escopo (não é omissão silenciosa)
+
+Classificação final: `OUT_OF_SCOPE_1_0`, não `BLOCKED` e não `DONE`.
+
+Motivos (decisão consciente, não falta de tempo disfarçada):
+
+- É P3, a menor prioridade da lista, e todos os itens P1/P2 do backlog
+  1.0 já estão `DONE`.
+- É o item de maior risco de schema da lista original de `MISSING`:
+  exige desenhar snapshot/diff versionado para conteúdo de
+  Vault/Journal/World, decidir granularidade (campo a campo? documento
+  inteiro?), e regras de restore com avaliação de risco própria (o
+  próprio ticket que autorizou esta rodada permite explicitamente
+  reduzir a read-only-only ou adiar, mas exige não declarar `COMPLETE`
+  silenciosamente).
+- Implementar uma versão apressada e de baixa qualidade sob pressão de
+  prazo (deadline interno 20/08) violaria a Seção 40 do `CLAUDE.md`
+  ("Não queremos quantidade de funcionalidades. Queremos um produto
+  coerente, estável, seguro.").
+
+Fica registrado como candidato ao próximo ciclo pós-1.0, com o desenho
+mínimo já esboçado (não implementado): tabela aditiva
+`entity_revisions` (entity_id/journal_page_id, actor, timestamp,
+snapshot JSON ou diff, sem FK de saída que force rebuild de tabela
+existente), leitura antes de restore, restore condicionado a reavaliação
+de risco.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
@@ -632,7 +659,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 
 | ID | Title | Priority | Status |
 |---|---|---|---|
-| F-001 | Revision History (`entity_revisions`) | P3 | `NOT_STARTED` |
+| F-001 | Revision History (`entity_revisions`) | P3 | `OUT_OF_SCOPE_1_0` — decisão explícita (ver nota abaixo) |
 | F-002 | Cartografia zero-cost (mapas/pins) | P3 | `DONE` (RPG-1.0-BATCH3) |
 | F-003 | External Resources (referência a URL externa) | P3 | `DONE` (RPG-1.0-BATCH2) |
 | F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `DONE` (RPG-1.0-BATCH3) |
