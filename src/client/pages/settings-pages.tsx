@@ -23,9 +23,14 @@ export function SettingsPage() {
         <section className="panel setting-card">
           <FileSpreadsheet />
           <h2>Importar catálogo</h2>
+          {/* LIB-007: texto anterior dizia "CSV exportado da aba Catálogo de Livros", mas o CSV
+              gerado por "Exportar meus dados" usa colunas em inglês (title, category, ...) —
+              formato diferente do exigido aqui (Sistema / Jogo, Categoria, ...). Corrigido para
+              descrever o formato realmente aceito, sem prometer um round-trip que não existe. */}
           <p>
-            CSV exportado da aba “Catálogo de Livros”. Nada é gravado antes da
-            confirmação.
+            Planilha CSV com as colunas Sistema / Jogo, Categoria, Subgênero e
+            Status da leitura (ISBN e capa são opcionais). Nada é gravado
+            antes da confirmação.
           </p>
           <ImportForm kind="catalog" />
         </section>
@@ -33,7 +38,9 @@ export function SettingsPage() {
           <FileSpreadsheet />
           <h2>Importar campanhas</h2>
           <p>
-            CSV exportado da aba “Campanhas”. Importe o catálogo primeiro.
+            Planilha CSV com as colunas Campanha, RPG / Sistema e Status.
+            Importe o catálogo primeiro — a campanha é vinculada pelo título
+            do RPG.
           </p>
           <ImportForm kind="campaigns" />
         </section>
@@ -143,8 +150,13 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
       const previewPath=kind==="catalog"?"/import/preview":"/import/campaigns/preview";
       const result = await postJson<NonNullable<typeof preview>>(previewPath, { csv: await file.text() });
       setPreview(result);
+      // LIB-007: EXISTING_PUBLICATION já era aprovável/processável pelo backend desde LIB-003
+      // (reaproveita a Publication existente, cria só a User Library Entry — ver
+      // buildCreateLibraryEntryStatements) mas nunca era tratado como "actionable" aqui: a
+      // linha ficava sempre com o checkbox desabilitado e nunca pré-selecionada. Mesmo critério
+      // de segurança/aditividade de NOVO/ATUALIZACAO — sem risco de duplicar.
       setApprovedRows(kind === "catalog" ? result.items
-        .filter((item) => item.row && (item.classification === "NOVO" || item.classification === "ATUALIZACAO"))
+        .filter((item) => item.row && (item.classification === "NOVO" || item.classification === "ATUALIZACAO" || item.classification === "EXISTING_PUBLICATION"))
         .map((item) => item.row!) : []);
     } catch (reason) {
       setMessage(reason instanceof Error?reason.message:"Falha inesperada.");
@@ -176,12 +188,15 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
         <div className="import-preview">
           <strong>{preview.count} linhas analisadas</strong>
           {kind === "catalog" && preview.summary ? <span>
-            {preview.summary.NOVO ?? 0} novos · {preview.summary.ATUALIZACAO ?? 0} atualizações · {preview.summary.IGNORADO ?? 0} ignorados · {preview.summary.ERRO ?? 0} erros
+            {preview.summary.NOVO ?? 0} novos · {preview.summary.ATUALIZACAO ?? 0} atualizações
+            {(preview.summary.EXISTING_PUBLICATION ?? 0) > 0 ? ` · ${preview.summary.EXISTING_PUBLICATION} já no catálogo` : ""}
+            {' · '}{preview.summary.IGNORADO ?? 0} ignorados · {preview.summary.ERRO ?? 0} erros
+            {(preview.summary.ALREADY_IN_LIBRARY ?? 0) > 0 ? ` · ${preview.summary.ALREADY_IN_LIBRARY} já na biblioteca` : ""}
             {(preview.summary.ARCHIVED_IN_LIBRARY ?? 0) > 0 ? ` · ${preview.summary.ARCHIVED_IN_LIBRARY} arquivados` : ""}
           </span> : null}
           {kind === "catalog" ? <div className="table-wrap"><table><thead><tr><th>Aprovar</th><th>Linha</th><th>Classificação</th><th>RPG</th><th>Resultado</th></tr></thead><tbody>
             {preview.items.map((item) => {
-              const actionable = item.classification === "NOVO" || item.classification === "ATUALIZACAO";
+              const actionable = item.classification === "NOVO" || item.classification === "ATUALIZACAO" || item.classification === "EXISTING_PUBLICATION";
               return <tr key={`${item.row}-${item.title}`}>
                 <td><input type="checkbox" aria-label={`Aprovar linha ${item.row}`} disabled={!actionable} checked={Boolean(item.row && approvedRows.includes(item.row))} onChange={(event) => {
                   if (!item.row) return;

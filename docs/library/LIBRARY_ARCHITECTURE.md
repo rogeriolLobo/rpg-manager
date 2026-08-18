@@ -466,3 +466,21 @@ arquivada, sempre oferece Restaurar. `coverUrl`/`coverAssetId` (LIB-005)
 sobrevivem intactos ao ciclo archive→restore. Hard delete
 (`DELETE /rpgs/:id`) preservado só por compatibilidade, fora do fluxo
 normal da UI. Detalhe completo: `docs/library/LIBRARY_ARCHIVE.md`.
+
+## LIB-007 — Hardening de Import/Export
+
+Fecha os fluxos de entrada/saída da Biblioteca. Dois bugs reais
+corrigidos: (1) `EXISTING_PUBLICATION` no import CSV era processável pelo
+backend desde LIB-003, mas a UI de preview nunca marcava a linha como
+selecionável (checkbox sempre desabilitado — encontrado durante LIB-006,
+reproduzido e corrigido aqui); (2) ISBN duplicado dentro do mesmo arquivo
+CSV podia derrubar o `/import/confirm` inteiro (violação do índice único
+de `publications.isbn13` no mesmo batch) — agora sinalizado no preview,
+mesmo padrão do título repetido. Export CSV neutraliza spreadsheet
+formula injection (CWE-1236). Documentado (não corrigido, decisão de
+escopo): o CSV operacional (`/import/preview`, cabeçalhos em português)
+e o CSV de `/export?format=csv` (cabeçalhos em inglês) usam esquemas
+diferentes — sem round-trip automático hoje; o backup completo (JSON)
+continua sendo o único formato com cobertura total, incluindo
+`archived_at` e a referência `cover_asset_id` (não os bytes do KV).
+Detalhe completo: `docs/library/LIBRARY_IMPORT_EXPORT.md`.

@@ -138,6 +138,13 @@ transferRoutes.post('/import/preview', async (c) => {
   const isbnByRow = new Map(dataRows.map(({ cells, row }) => [row, classifyIsbn((isbnIndex>=0?cells[isbnIndex]:'')?.trim()||null)]));
   const isbn13Candidates = [...isbnByRow.values()].filter((item) => item !== null).map((item) => item!.isbn13!);
   const publicationByIsbn13 = await findPublicationsByIsbn13List(c.env.DB, isbn13Candidates);
+  // LIB-007: mesmo ISBN em 2+ linhas do MESMO arquivo (nenhuma delas pré-existente) resolveria
+  // como NOVO independentemente em cada linha — se ambas fossem aprovadas, o /import/confirm
+  // tentaria inserir a mesma publications.isbn13 duas vezes no mesmo batch (violando o índice
+  // único) e derrubaria a transação inteira, inclusive linhas válidas. Mesmo princípio já
+  // aplicado a título repetido (titleCounts) — aqui por identidade real (ISBN), não por texto.
+  const isbnCounts = new Map<string, number>();
+  for (const classified of isbnByRow.values()) if (classified) isbnCounts.set(classified.isbn13!, (isbnCounts.get(classified.isbn13!) ?? 0) + 1);
   const items: CatalogPlanItem[]=[];
   for (const { cells, row } of dataRows) { const title=cells[index('sistema / jogo')]?.trim()??''; const categoryId=categoryMap.get(normalize(cells[index('categoria')]??''))??null;
     const subgenreId=categoryId?subgenreMap.get(`${categoryId}:${normalize(cells[index('subgenero')]??'')}`)??null:null; const readingStatus=readingMap[normalize(cells[index('status da leitura')]??'')];
@@ -156,6 +163,10 @@ transferRoutes.post('/import/preview', async (c) => {
     // LIB-003: mesma validação de checksum do cadastro manual — mensagem clara em vez de
     // cair no "Campos fora dos limites permitidos." genérico.
     if(isbn&&!isIsbnInputValid(isbn))rowIssues.push('ISBN inválido: confira os dígitos.');
+    // LIB-007: identidade por ISBN tem prioridade sobre título até para detectar duplicata
+    // dentro do próprio arquivo — nunca usa fuzzy title para essa checagem.
+    const classified=isbnByRow.get(row);
+    if(classified&&(isbnCounts.get(classified.isbn13!)??0)>1)rowIssues.push('ISBN repetido no CSV; revisão manual necessária.');
     const key=normalizeTitle(title);const matches=existingMap.get(key)??[];
     if(key&&(titleCounts.get(key)??0)>1)rowIssues.push('Título repetido no CSV; revisão manual necessária.');
     if(matches.length>1)rowIssues.push('Mais de um RPG existente corresponde ao título normalizado; revisão manual necessária.');
@@ -165,7 +176,6 @@ transferRoutes.post('/import/preview', async (c) => {
     if(rowIssues.length||!parsed.success){items.push({row,title,classification:'ERRO',message:rowIssues.join(' '),existingId:existing?.id??null,currentCoverUrl:existing?.cover_url??null,incomingCoverUrl:coverUrl,changes:[],input:null,resolvedPublicationId:null});continue;}
     // LIB-003: identidade por ISBN tem prioridade sobre o caminho por título (nunca o
     // contrário — título não é identificador confiável, seção 4 do pedido).
-    const classified=isbnByRow.get(row);
     if(classified){
       const existingPublication=publicationByIsbn13.get(classified.isbn13!);
       if(existingPublication){
@@ -218,7 +228,18 @@ transferRoutes.post('/import/confirm',async(c)=>{const {jobId,approvedRows}=awai
         .bind(input.coverUrl??null,input.isbn??null,input.coverSourceUrl??null,input.coverSourceNote??null,now,item.existingId,user.id));
     }}
   statements.push(c.env.DB.prepare('UPDATE import_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now,jobId,user.id));
-  const results=await c.env.DB.batch(statements);let imported=0;let updated=0;
+  // LIB-007: import confirmado é atomic total (um único c.env.DB.batch — transação implícita do
+  // D1: qualquer falha reverte TODAS as linhas do lote, nunca processamento parcial). O preview
+  // já previne o gatilho conhecido (ISBN repetido no mesmo arquivo — ver isbnCounts acima), mas
+  // uma falha de índice único ainda pode acontecer em corrida real (duas abas confirmando prévias
+  // sobrepostas) — controlada aqui em vez de vazar um 500 genérico, mesmo princípio do POST /rpgs.
+  let results;
+  try{results=await c.env.DB.batch(statements);}catch(error){
+    const message=String(error);
+    if(message.includes('isbn13')||message.includes('isbn10'))throw new ApiError(409,'DUPLICATE_ISBN','Um dos ISBNs desta importação já pertence a outra publicação no catálogo. Nada foi importado — gere uma nova prévia.');
+    throw error;
+  }
+  let imported=0;let updated=0;
   for(const {index,action} of countTargets){const changes=Number(results[index].meta.changes??0);if(action==='NOVO')imported+=changes;else updated+=changes;}
   return c.json({imported,updated,skipped:items.length-imported-updated});});
 
@@ -241,7 +262,14 @@ transferRoutes.post('/import/campaigns/confirm',async(c)=>{const {jobId}=await r
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM campaigns WHERE user_id=? AND rpg_id=? AND name=?)`).bind(crypto.randomUUID(),user.id,input.rpgId,input.name,input.status,input.gameMaster,input.sessionZeroDate??null,input.firstSessionDate??null,input.frequency??null,input.nextSessionDate??null,lastSessionDate,input.sessionGoal??null,null,input.legacyMembersText,input.legacyCharactersText,legacySessionsCompleted,input.notes,now,now,input.status==='COMPLETED'?now:null,user.id,input.rpgId,input.name));
   statements.push(c.env.DB.prepare('UPDATE import_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now,jobId,user.id));const results=await c.env.DB.batch(statements);const imported=results.slice(0,-1).reduce((sum,result)=>sum+Number(result.meta.changes??0),0);return c.json({imported,skipped:items.length-imported});});
 
-function csvEscape(value: unknown): string { const text=String(value??''); return /[",\n]/u.test(text)?`"${text.replaceAll('"','""')}"`:text; }
+// LIB-007: nunca deixar o export.csv virar spreadsheet formula injection (CWE-1236) quando
+// aberto no Excel/Sheets — um valor começando com =, +, -, @ é neutralizado com um apóstrofo
+// líder (mitigação recomendada pela OWASP), preservando o texto original visível.
+function csvEscape(value: unknown): string {
+  let text=String(value??'');
+  if(/^[=+\-@]/u.test(text))text=`'${text}`;
+  return /[",\n]/u.test(text)?`"${text.replaceAll('"','""')}"`:text;
+}
 transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.req.query('format')??'json';if(format==='csv'){
   // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
   // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).

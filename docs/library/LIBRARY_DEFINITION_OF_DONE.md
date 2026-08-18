@@ -503,3 +503,34 @@ Detalhe completo: `docs/library/LIBRARY_ARCHIVE.md`.
       `/api/v1/version` — ver relatório da sessão.
 - [x] Diagnóstico read-only de produção antes do deploy (total/por-conta/
       ativos/arquivados) — nenhum dado real alterado.
+- [x] `MANUAL_SMOKE = PASS` — validação humana real em produção: Arquivar
+      RPG funciona; item sai de Ativos; aparece em Arquivados; dados e
+      capa preservados; Restaurar funciona; item retorna para Ativos.
+
+## LIB-007 — Hardening de Import/Export da Biblioteca — `DONE`
+
+Detalhe completo: `docs/library/LIBRARY_IMPORT_EXPORT.md`.
+
+- [x] Bug real (`EXISTING_PUBLICATION` não selecionável no import CSV,
+      encontrado durante LIB-006) reproduzido com teste E2E real antes do
+      patch, confirmado falhando, corrigido (2 linhas em
+      `settings-pages.tsx`).
+- [x] ISBN duplicado no mesmo arquivo CSV sinalizado no preview (`ERRO`),
+      mesmo padrão do título repetido — reproduzido e corrigido.
+- [x] `/import/confirm` trata violação de índice único de ISBN com
+      `409 DUPLICATE_ISBN` claro, não `500` genérico.
+- [x] Export CSV neutraliza spreadsheet formula injection (CWE-1236).
+- [x] IDOR em import job confirmado protegido (`404`); estado pessoal
+      nunca vaza ao reaproveitar Publication — testado explicitamente.
+- [x] Auditado e confirmado correto sem mudança: BOM UTF-8, aspas/vírgulas
+      em campos, ISBN formatado, capa insegura, limites de tamanho/linhas.
+- [x] Documentado como limitação deliberada: CSV export/import usam
+      esquemas de cabeçalho diferentes (sem round-trip automático); texto
+      da UI corrigido para não prometer isso.
+- [x] Backup completo (JSON) — round-trip testado: `archived_at`,
+      `cover_url`, referência `cover_asset_id` preservados.
+- [x] integration (`library-import-export.test.ts`, 6 testes), E2E
+      (`library-import-existing-publication.spec.ts`, desktop+mobile) —
+      todos verdes; suíte pré-existente de CSV revalidada sem regressão.
+- [x] lint, typecheck, build — verdes localmente; CI, deploy,
+      `/api/v1/version` — ver relatório da sessão.

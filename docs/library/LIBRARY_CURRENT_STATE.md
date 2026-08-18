@@ -343,3 +343,15 @@ externa/import CSV) distingue `ACTIVE_IN_LIBRARY`/`ARCHIVED_IN_LIBRARY`,
 arquivadas, `coverUrl`/`coverAssetId` preservados intactos. Hard delete
 (`DELETE /rpgs/:id`) preservado só por compatibilidade, fora do fluxo
 normal da UI.
+
+## Atualização — LIB-007: hardening de import/export
+
+Detalhe completo: `docs/library/LIBRARY_IMPORT_EXPORT.md`. Dois bugs
+reais corrigidos: `EXISTING_PUBLICATION` no import CSV virou selecionável
+na UI (já era processável pelo backend desde LIB-003); ISBN duplicado no
+mesmo arquivo CSV passa a ser sinalizado no preview (`ERRO`) em vez de
+poder derrubar o `/import/confirm` inteiro. Export CSV neutraliza
+formula injection. Documentado como limitação deliberada (não corrigida):
+o CSV operacional e o CSV de `/export?format=csv` usam esquemas de
+cabeçalho diferentes, sem round-trip automático — o backup completo
+(JSON) continua sendo o único formato com cobertura total.

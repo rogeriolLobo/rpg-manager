@@ -344,8 +344,11 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - **Priority:** P3 (backlog original), promovido a vertical única desta
   rodada.
 - **Status:** `DONE` — código+testes+docs no commit final, CI verde,
-  deploy publicado, `GET /api/v1/version` confirmando produção antes de
-  parar (ver relatório da sessão).
+  deploy publicado, `GET /api/v1/version` confirmado.
+- **MANUAL_SMOKE = PASS** — validação humana real em produção confirmou:
+  Arquivar RPG funciona; item sai de Ativos; aparece em Arquivados; dados
+  e capa permanecem preservados; Restaurar funciona; item retorna para
+  Ativos.
 - **Dependencies:** `rpgs.archived_at` (coluna e índice `(user_id,
   archived_at)` já existiam desde migration 0016/LIB-002 — nenhuma
   migration nova nesta tarefa), LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`),
@@ -381,7 +384,7 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   `EXISTING_PUBLICATION` no import CSV já era aprovável no servidor desde
   LIB-003, mas a UI de preview (`settings-pages.tsx`) nunca marcava essa
   linha como `actionable` — checkbox sempre desabilitado. Bug pré-existente,
-  não introduzido nem corrigido aqui; registrado para backlog futuro.
+  não introduzido aqui; **corrigido em LIB-007** (ver seção abaixo).
 - **Testes:** unit (`tests/unit/library-entry-state.test.ts`), integration
   (`tests/integration/library-archive.test.ts` — archive/restore/idempotência/
   IDOR, listagem ativos/arquivados, detalhe arquivado, dashboard exclui
@@ -398,6 +401,66 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 - **Fora de escopo (deliberado):** hard delete/UI de exclusão permanente,
   friends, social, maps, VTT, sheets, Vault/Campaign enhancements além do
   mínimo para preservar funcionamento (`rpgArchived` no vínculo).
+
+## LIB-007 — Hardening de Import/Export da Biblioteca
+
+- **Priority:** P2 (fecha os fluxos de entrada/saída antes da auditoria
+  final da Library 1.0).
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmando produção antes de
+  parar (ver relatório da sessão).
+- **Dependencies:** LIB-003 (`EXISTING_PUBLICATION`/`ALREADY_IN_LIBRARY`),
+  LIB-006 (`ARCHIVED_IN_LIBRARY`).
+- **Definition of Done:** ver `docs/library/LIBRARY_IMPORT_EXPORT.md`
+  (semântica completa do preview, distinção CSV operacional vs backup
+  completo, limites, cobertura do backup).
+- **Bug real corrigido (encontrado durante LIB-006, reproduzido antes do
+  patch):** `EXISTING_PUBLICATION` já era processável pelo backend desde
+  LIB-003, mas a UI de preview do import CSV nunca marcava essa linha
+  como `actionable` — checkbox sempre desabilitado, nunca pré-selecionada.
+  Reproduzido pela primeira vez com um teste E2E real (nenhum teste E2E
+  de import CSV existia antes desta tarefa), confirmado falhando no
+  código anterior, corrigido em `settings-pages.tsx` (2 linhas — mesmo
+  critério de `NOVO`/`ATUALIZACAO`).
+- **Outro bug real encontrado e corrigido:** ISBN duplicado dentro do
+  mesmo arquivo CSV (nenhuma pré-existente) resolvia como `NOVO` em
+  ambas as linhas independentemente; se aprovadas juntas, o
+  `/import/confirm` violaria o índice único de `publications.isbn13` no
+  mesmo batch e revertia a transação inteira. Corrigido no preview (nova
+  classificação `ERRO` para ISBN repetido, mesmo padrão já usado para
+  título repetido) + tratamento defensivo no confirm (`409 DUPLICATE_ISBN`
+  em vez de `500` genérico numa corrida real).
+- **Segurança:** export CSV agora neutraliza spreadsheet formula
+  injection (CWE-1236) — campos começando com `=`, `+`, `-`, `@` ganham
+  um apóstrofo líder (mitigação OWASP) antes de qualquer necessidade de
+  aspas. IDOR em import job confirmado protegido (`404` para outra
+  conta). Estado pessoal nunca vaza ao reaproveitar uma Publication
+  (`EXISTING_PUBLICATION`) — testado explicitamente.
+- **Auditado e confirmado correto, sem mudança necessária:** BOM UTF-8 no
+  início do CSV (`String.prototype.trim()` já remove — WhiteSpace do
+  ECMAScript inclui `U+FEFF`), aspas/vírgulas em campos (`parseCsv`),
+  linhas vazias, ISBN formatado com hífen/espaço, capa insegura, limites
+  de tamanho/linhas (500 KB, 40 linhas — adequados ao Workers/D1 Free).
+- **Documentado, não corrigido (decisão de escopo):** o CSV de
+  `GET /export?format=csv` usa cabeçalhos em inglês, diferentes dos que
+  `/import/preview` exige em português — não existe round-trip automático
+  "exportar → reimportar" via CSV hoje. Texto da UI corrigido para não
+  prometer isso; unificar os dois esquemas é decisão de produto separada.
+  Backup completo (JSON) já preserva `archived_at`, `cover_url` e a
+  referência `cover_asset_id` (não os bytes do KV) — comportamento
+  documentado e testado via round-trip.
+- **Testes:** integration
+  (`tests/integration/library-import-export.test.ts` — ISBN duplicado no
+  CSV, formula injection no export, IDOR em import job, isolamento de
+  estado pessoal, round-trip do backup completo), E2E
+  (`tests/e2e/library-import-existing-publication.spec.ts` — desktop e
+  mobile). Suíte pré-existente de CSV (`auth-and-isolation.test.ts`,
+  `publication-identity.test.ts`) revalidada sem regressão.
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit final
+  único, code+tests+docs, antes do deploy).
+- **Fora de escopo (deliberado):** LIB-008, unificação dos esquemas de
+  CSV export/import, download em massa de bytes do KV para dentro do
+  backup, suporte a delimitador `;`.
 
 ## P0-002 — Falhas em GitHub Actions
 
