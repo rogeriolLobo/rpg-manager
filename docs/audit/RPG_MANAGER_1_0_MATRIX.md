@@ -185,6 +185,55 @@ rodada:
   original de MISSING que permanece pendente. Requer desenho de schema
   de snapshot/diff + regras de restore com risco avaliado
   separadamente; decisão de não apressar mantida conscientemente.
+
+## Revalidação de hardening (segurança / integridade / performance / UX)
+
+Reauditoria factual pós-BATCH3, itens 15-17 do pedido de finalização
+acelerada. Não são features novas — são confirmações de invariantes já
+estabelecidos, mais um achado real de UX registrado para o próximo
+ciclo.
+
+- **Segurança (item 15) → revalidado, sem achado novo.** Verificação
+  direta (subagente de auditoria dedicado atingiu limite de sessão no
+  meio da varredura; auditoria concluída manualmente): (1) mass
+  assignment — todos os schemas em `shared/validation/schemas.ts` usam
+  `z.strictObject`, nenhum `z.object` solto encontrado; (2) CSRF —
+  toda rota de mutação em `src/server/index.ts` passa por
+  `requireAuth, requireCsrf` (específico por prefixo ou pelo catch-all
+  final `/api/v1/*`); (3) SQL injection — todo SQL dinâmico (`WHERE
+  ${clause}`, `ORDER BY ${order}`) interpola apenas fragmentos
+  constantes ou chaves validadas contra whitelist antes do uso; valores
+  de usuário sempre via bind `?`; `LIKE` de busca usa `ESCAPE` com
+  escaping manual de `%`/`_`/`\`; (4) IDOR — rotas novas
+  (`cartography.ts`, `external-resources.ts`) e uma amostra ampla das
+  existentes (`worlds.ts`) usam consistentemente `ownedWorld`/
+  `authorizedWorld` ou `WHERE id=? AND user_id=?`/`owner_user_id=?`.
+- **Integridade de dados (item 16) → revalidado, sem achado novo.**
+  Migrations `0023`/`0024` desta rodada são puramente aditivas (tabelas
+  novas, zero `ALTER`/`DROP` em tabela existente) — sem risco de
+  rebuild. Nenhuma migration pendente além dessas duas, ambas já
+  aplicadas e verificadas em produção.
+- **Performance / free-tier (item 17) → revalidado, sem achado novo.**
+  Rotas novas usam queries únicas com `JOIN`/índice dedicado
+  (`idx_external_resources_world`, `idx_map_pins_map`,
+  `idx_world_maps_world`), sem N+1. Bindings do Worker seguem só D1/KV/
+  Rate Limiters gratuitos — nenhum serviço pago introduzido.
+- **UX (item 14) → achado real, registrado para o próximo ciclo de
+  hardening (não corrigido agora, para não introduzir uma mudança
+  ampla e arriscada sob prazo):** ao menos 14 páginas em
+  `src/client/pages/` carregam dados iniciais com
+  `useEffect(() => { void api(...).then(setState) }, [...])` sem
+  `.catch`. Se a chamada falhar (ex.: 404 de `authorizedWorld`/
+  `ownedWorld` para um recurso inexistente ou não autorizado), a
+  promise rejeitada fica sem tratamento e a página trava
+  indefinidamente em `<Loading/>`, sem mensagem de erro — não é uma
+  falha de segurança (a autorização do backend continua correta, o
+  dado nunca chega ao cliente), é uma UX ruim num caminho raro (link
+  inválido/desatualizado ou tentativa de acesso não autorizado).
+  Proposta de correção mínima para o próximo ciclo: um handler global
+  de `unhandledrejection` que reconhece `ClientApiError` com status
+  404/403 e mostra um estado amigável, sem precisar alterar as 14
+  páginas individualmente.
 - Suíte completa revalidada em estado limpo (`rm -rf .wrangler/state`)
   após a integração de Cartografia+GM Tools: 44 E2E (desktop+mobile),
   192 unit, 135 integration — todos verdes, sem regressão.
