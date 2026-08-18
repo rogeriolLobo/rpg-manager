@@ -165,3 +165,26 @@ rodada:
   `grid-template-columns: 1fr` no breakpoint mobile permitia overflow
   horizontal da página quando havia uma tabela larga — corrigido para
   `minmax(0, 1fr)`.
+
+## Atualização — RPG-1.0-BATCH3 (ver `docs/product/MASTER_BACKLOG.md#RPG-1.0-BATCH3`)
+
+- **Cartografia → implementado.** `DONE`. Mapas (imagem externa, mesma
+  política de URL pública HTTPS do resto do produto) com pins em
+  coordenadas normalizadas (0-100%), vínculo opcional a entidade do
+  Vault (validado server-side, sem IDOR cross-conta). Tabelas próprias
+  (`world_maps`, `map_pins`), aditivas, sem alteração em
+  `vault_entities`. Escopo deliberadamente sem VTT: sem tempo real, sem
+  fog of war, sem movimento, sem WebSockets — ver justificativa em
+  `src/server/routes/cartography.ts`.
+- **GM Tools → implementado.** `DONE`. Rolador de dados (`NdM±K`) e
+  timer de mesa, 100% client-side (`src/domain/tools/dice.ts`), sem
+  tabela nova, sem risco de dados. "Quick note" não duplicado — já
+  satisfeito pela "Nova ideia" do Dashboard (BATCH2).
+- **Ainda `MISSING`, deliberadamente fora do 1.0 nesta velocidade (não
+  bloqueio):** Revision History — única funcionalidade da lista
+  original de MISSING que permanece pendente. Requer desenho de schema
+  de snapshot/diff + regras de restore com risco avaliado
+  separadamente; decisão de não apressar mantida conscientemente.
+- Suíte completa revalidada em estado limpo (`rm -rf .wrangler/state`)
+  após a integração de Cartografia+GM Tools: 44 E2E (desktop+mobile),
+  192 unit, 135 integration — todos verdes, sem regressão.

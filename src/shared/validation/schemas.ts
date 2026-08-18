@@ -306,6 +306,21 @@ export const externalResourceInputSchema = z.strictObject({
   resourceType: z.enum(EXTERNAL_RESOURCE_TYPES),
 });
 
+// F-002: mapa (imagem externa, mesma política de coverUrl) + pins (coordenadas normalizadas
+// 0-100, sem drag-and-drop nesta versão — entrada numérica direta).
+export const worldMapInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  imageUrl: z.string().trim().max(2000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
+  notes: trimmed(2000).default(''),
+});
+export const mapPinInputSchema = z.strictObject({
+  label: z.string().trim().min(1).max(160),
+  notes: trimmed(2000).default(''),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  entityId: z.string().trim().max(80).nullable().default(null),
+});
+
 export const worldInviteInputSchema = z.strictObject({
   expiresInDays: z.number().int().min(1).max(30).default(7),
   maxUses: z.number().int().min(1).max(100).default(1),

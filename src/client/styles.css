@@ -645,6 +645,95 @@ label small {
   justify-content: flex-end;
   margin-top: 0.5rem;
 }
+/* F-002 (Cartografia): grid de mapas + viewer com pins absolutamente posicionados (x/y
+   normalizados 0-100%, sem drag-and-drop nesta versão). */
+.cartography-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.cartography-map-card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.95rem;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+}
+.cartography-map-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+}
+.cartography-map-card strong {
+  display: block;
+  padding: 0.7rem;
+}
+.cartography-map-viewer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.cartography-image-wrap {
+  position: relative;
+  line-height: 0;
+}
+.cartography-image-wrap img {
+  width: 100%;
+  border-radius: 0.7rem;
+}
+.cartography-image-wrap img.clickable {
+  cursor: crosshair;
+}
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  padding: 0;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.5));
+}
+.map-pin-details {
+  align-self: start;
+}
+@media (max-width: 850px) {
+  .cartography-map-viewer {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* F-004 (GM Tools): rolador de dados + timer, 100% client-side. */
+.gm-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.2rem;
+}
+.gm-tool-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.dice-history {
+  margin-top: 0.8rem;
+}
+.dice-total {
+  color: var(--brand-primary);
+  font-size: 1.2rem;
+}
+.timer-display {
+  font-size: 2.4rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  margin: 0.6rem 0;
+  color: var(--text-heading);
+}
+
 /* F-005: modal de captura rápida de ideia (Dashboard) — backdrop dedicado (não reaproveita
    .command-backdrop: seu padding-top fixo é pensado para a paleta de comandos, mais alta, e
    centralizava mal um formulário curto em viewports estreitos — confirmado visualmente num

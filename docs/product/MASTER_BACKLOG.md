@@ -549,6 +549,53 @@ qualquer gap, execução contínua sem parar entre itens.
   Character Sheet Engine completo e Social/Amizades continuam
   explicitamente fora do 1.0.
 
+## RPG-1.0-BATCH3 — GM Tools + Cartografia zero-cost
+
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmado.
+- **F-004 (GM Tools) — implementado 100% client-side, sem backend:**
+  rolador de dados (notação `NdM`/`NdM±K`, N≤20, M≤1000) e timer de
+  mesa (start/pausa/zerar), acessíveis globalmente em `/app/gm-tools`
+  (link "Ferramentas do Mestre" na navegação, seção Sistema — não é
+  contextual a nenhum World). "Quick note" não foi duplicado: já
+  satisfeito pelo botão "Nova ideia" do Dashboard (F-005, BATCH2).
+  Lógica pura extraída para `src/domain/tools/dice.ts` (testável sem
+  DOM/D1) — gerador de aleatoriedade injetável só para determinismo em
+  teste, nunca usado para nada sensível a segurança.
+- **F-002 (Cartografia) — v1.0 deliberadamente simples, não é VTT:**
+  mapas (imagem externa, mesma política zero-fetch do `coverUrl`) com
+  pins em coordenadas normalizadas (0-100%, sem depender da resolução
+  real da imagem). Sem drag-and-drop nesta versão — clicar na imagem
+  preenche X/Y automaticamente como conveniência, mas o valor continua
+  editável nos campos numéricos. Pin pode se vincular opcionalmente a
+  uma entidade do Vault (validado: só entidades do próprio usuário,
+  não arquivadas). Explicitamente **não implementado** (fora de escopo
+  do 1.0): tokens em tempo real, fog of war, movimento, WebSockets.
+  - **Decisão de arquitetura:** duas tabelas novas (`world_maps`,
+    `map_pins`, migration `0024_cartography.sql`), aditivas, sem
+    nenhuma alteração em `vault_entities` — `map_pins.entity_id` é só
+    uma FK de ENTRADA para um pai já existente e inalterado (diferente
+    do caso do External Resources, que evitou deliberadamente ser um
+    Vault Entity pelo mesmo motivo).
+  - Mesmo padrão de autorização do Diário/External Resources: leitura
+    para quem `canViewWorld`, escrita só pelo owner do World.
+- **Testes:** unit (`tests/unit/dice.test.ts`, 7 casos), integration
+  (`tests/integration/cartography.test.ts`, 3 casos — CRUD, authZ
+  owner/membro/outsider, validação de coordenadas/URL insegura/IDOR em
+  entidade vinculada), E2E (`tests/e2e/gm-tools.spec.ts`,
+  `tests/e2e/cartography.spec.ts`, desktop+mobile). Suíte completa
+  (unit 192, integration 135, E2E — ver relatório) revalidada sem
+  regressão.
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit
+  final único, code+tests+docs, antes do deploy).
+- **Fora de escopo (deliberado, adiado para próximo batch — não é
+  BLOCKED):** Revision History (F-001), a única funcionalidade da lista
+  original ainda pendente. A própria auditoria de 14/08 já recomendava
+  cautela ("não cabe com qualidade nesta sessão... exige desenho de
+  schema + snapshot + restore + permissões") — decisão mantida
+  deliberadamente para não entregar uma versão apressada e de baixa
+  qualidade sob pressão de prazo.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0
@@ -586,9 +633,9 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | ID | Title | Priority | Status |
 |---|---|---|---|
 | F-001 | Revision History (`entity_revisions`) | P3 | `NOT_STARTED` |
-| F-002 | Cartografia zero-cost (mapas/pins) | P3 | `NOT_STARTED` |
+| F-002 | Cartografia zero-cost (mapas/pins) | P3 | `DONE` (RPG-1.0-BATCH3) |
 | F-003 | External Resources (referência a URL externa) | P3 | `DONE` (RPG-1.0-BATCH2) |
-| F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `NOT_STARTED` |
+| F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `DONE` (RPG-1.0-BATCH3) |
 | F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `DONE` (RPG-1.0-BATCH2) |
 | F-006 | Teste de integração dedicado para Global Search | P2 | `DONE` (RPG-1.0-BATCH2) |
 | F-012 | Teste de integração dedicado para Invites | P1 | `DONE` — revalidado, já coberto por `vault-and-worlds.test.ts` desde antes desta sessão (create/accept/reuse/invalid-token/expiry/revoke) |

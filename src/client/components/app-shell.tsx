@@ -1,4 +1,4 @@
-import { Archive, BookOpen, CalendarDays, Castle, Gauge, GitFork, Globe2, Link2, LogOut, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
+import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
@@ -20,13 +20,14 @@ export function AppShell() {
     [`/app/worlds/${activeWorld.id}/wiki`, BookOpen, 'Wiki'],
     ...(activeWorld.isOwner ? [[`/app/worlds/${activeWorld.id}/journal`, NotebookPen, 'Diário'] as const] : []),
     [`/app/worlds/${activeWorld.id}/resources`, Link2, 'Recursos externos'],
+    [`/app/worlds/${activeWorld.id}/cartography`, Map, 'Cartografia'],
     [`/app/worlds/${activeWorld.id}/relations`, GitFork, 'Relações'],
     [`/app/worlds/${activeWorld.id}/timeline`, CalendarDays, 'Timeline'],
     [`/app/worlds/${activeWorld.id}/bestiary`, PawPrint, 'Bestiário'],
     [`/app/worlds/${activeWorld.id}/portal`, UserRound, 'Portal do jogador'],
   ] as const : [];
   const accountLinks = [
-    ['/app/settings', Settings, 'Configurações'], ['/app/security', Shield, 'Segurança'], ['/app/profile', UserRound, 'Perfil'],
+    ['/app/gm-tools', Dices, 'Ferramentas do Mestre'], ['/app/settings', Settings, 'Configurações'], ['/app/security', Shield, 'Segurança'], ['/app/profile', UserRound, 'Perfil'],
   ] as const;
   const changeWorld = async (worldId: string) => {
     const selected = worldId || null; await setActiveWorldId(selected); if (selected) navigate(`/app/worlds/${selected}`);
