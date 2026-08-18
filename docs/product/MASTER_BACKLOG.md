@@ -749,3 +749,42 @@ existir qualquer P0/P1 com status `IN_PROGRESS` ou `BLOCKED`. Estado
 atual: **nenhum P0/P1 aberto** — ambos os P0 estão `DONE` (P0-001 com
 uma única pendência de smoke manual documentada, não uma pendência de
 código).
+
+## Teste final autônomo — smoke de release automatizado
+
+Pedido explícito: transformar o máximo possível de
+`MANUAL_SMOKE_QUEUE.md` em smoke automatizado, sem burlar Turnstile.
+
+- **Suíte nova:** `tests/e2e/release-1.0-smoke.spec.ts` — jornada única
+  cobrindo Ideas, External Resources, Global Search (Command Palette),
+  Cartografia (mapa + pin + vínculo com Vault + posição persistida +
+  remoção), GM Tools (4 notações de dado validadas por faixa
+  matemática, timer start/pause/reset), navegação cruzada por todos os
+  módulos do produto, Light/Dark/System, overflow horizontal, e
+  revalidação leve do error handling do BATCH4. Roda em desktop e
+  mobile (projects existentes). Captura console/network durante toda a
+  execução — falha se aparecer erro real de aplicação, com dois
+  filtros de ruído conhecido e documentados no próprio arquivo
+  (checagem anônima de sessão antes do login, e `net::ERR_ABORTED` de
+  requisição cancelada por navegação — padrão comum do Playwright, não
+  falha de rede real).
+- **Bugs reais de teste corrigidos durante a escrita** (não eram bugs
+  de produto): `getByLabel('World', {exact:true})` dentro do modal de
+  Nova Ideia travava indefinidamente por um motivo não totalmente
+  identificado (possível particularidade do cálculo de nome acessível
+  do Playwright para `<select>` dentro de `<label>` implícito
+  aninhado em `role=dialog`) — contornado com um seletor estrutural
+  (`ideaDialog.locator('select')`); um `openNavigation()` duplicado por
+  iteração do loop de temas travava em mobile porque o botão "Abrir
+  menu" vira "Fechar menu" enquanto o menu já está aberto.
+- **Produção autenticada:** sem sessão legítima reutilizável disponível
+  no ambiente de execução (sem storageState, sem perfil de navegador,
+  sem cookie em variável de ambiente) — os 5 fluxos ficam
+  `BLOCKED_BY_TURNSTILE` para produção autenticada especificamente;
+  TODO o resto (local completo, produção read-only, integridade de
+  dados, proteção de mídia) foi executado sem essa dependência. Ver
+  relatório da sessão para o detalhamento completo.
+- **`MANUAL_SMOKE_QUEUE.md`** permanece como está — os 5 itens
+  continuam exigindo uma execução humana real em produção (Turnstile),
+  mas agora com uma suíte E2E equivalente já provando o comportamento
+  funcional correto localmente.

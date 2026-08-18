@@ -18,6 +18,24 @@ logado com uma conta real, uma vez por item. Marcar `[x]` e anotar data
 + resultado. Se algo falhar, é regressão real — reabrir o item no
 `MASTER_BACKLOG.md` como P0/P1 conforme o impacto.
 
+## Status: AUTOMATED = PASS (equivalente local) / BLOCKED_BY_TURNSTILE (produção autenticada)
+
+Tentativa de automação total documentada na sessão de teste final
+autônomo: sem sessão de produção legítima reutilizável disponível no
+ambiente de execução (sem storageState, sem perfil de navegador salvo,
+sem cookie em variável de ambiente) — os 5 itens abaixo **não** puderam
+ser automatizados contra produção real (Turnstile bloqueia
+login/registro automatizado, e burlar isso é proibido). Continuam
+exigindo a execução humana marcada abaixo.
+
+O que FOI feito: `tests/e2e/release-1.0-smoke.spec.ts` prova
+automaticamente, em ambiente local equivalente (mesma build, mesmo
+código), que os 5 fluxos funcionam corretamente ponta-a-ponta — desktop
+e mobile, com captura de console/network (falha se aparecer erro real
+de aplicação). Isso reduz o risco do smoke humano a apenas confirmar
+que produção real (dados/infra reais) se comporta igual ao ambiente
+local já provado — não elimina a necessidade da execução abaixo.
+
 ## RPG-1.0-BATCH2
 
 - [ ] **Ideas / Quick Capture** — no Dashboard, clicar "Nova ideia",
