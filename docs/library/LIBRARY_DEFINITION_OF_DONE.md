@@ -42,21 +42,26 @@ Status por escopo. `DONE` exige produção validada, não só código.
          sessão isso teria sido rejeitado se o host não estivesse na
          allowlist).
 
-## Vertical slice completo (upload, providers, split de domínio) — `IN_PROGRESS`
+## Vertical slice completo (upload, providers, split de domínio) — `DONE`
+
+Atualizado ao longo de LIB-002 a LIB-006 (ver seções próprias abaixo para
+o detalhe de cada vertical) — todos os itens abaixo, listados como
+pendentes no momento em que esta seção foi escrita, já foram concluídos:
 
 - [x] `docs/library/LIBRARY_ARCHITECTURE.md` — decisão de domínio
       (Opção A) — **implementada** (LIB-002, migration
       `0016_library_domain_normalization.sql`).
-- [ ] `docs/library/COVER_STORAGE.md` — upload real + KV — **desenhado,
-      não implementado** (F-008, fora de escopo do LIB-002).
-- [ ] `docs/library/METADATA_PROVIDERS.md` — Open Library — **desenhado,
-      não implementado** (F-009/LIB-003, fora de escopo do LIB-002).
-- [ ] Dedup por ISBN (hoje é por título exato) — schema pronto
-      (`publications.isbn`/`isbn10`/`isbn13`), lógica de dedup não
-      implementada (F-010).
-- [ ] Archive de RPG (hoje só existe delete físico) — schema pronto
-      (`rpgs.archived_at`), endpoint/UI não implementados (F-011).
-- [ ] Preview antes de salvar metadata externa (depende de F-009).
+- [x] `docs/library/COVER_STORAGE.md` — upload real + KV — **implementado**
+      (F-008/LIB-005, Workers KV Free, `MANUAL_SMOKE = PASS`).
+- [x] `docs/library/METADATA_PROVIDERS.md` — Open Library — **implementado**
+      (F-009/LIB-004, com qualidade de busca refinada em LIB-004A/004C).
+- [x] Dedup por ISBN (não mais por título exato) — **implementado**
+      (F-010/LIB-003, `publications.isbn10`/`isbn13`, índices únicos
+      parciais).
+- [x] Archive de RPG — **implementado** (F-011/LIB-006, `rpgs.archived_at`,
+      ver `docs/library/LIBRARY_ARCHIVE.md`).
+- [x] Preview antes de salvar metadata externa — **implementado** (LIB-004,
+      preview obrigatório antes de qualquer POST).
 
 ## LIB-002 — Normalização do domínio (Game System + Publication + User Library Entry) — `DONE`
 
@@ -424,3 +429,77 @@ para a causa raiz completa e a lição para migrations futuras.
       Checklist exato em `docs/product/MASTER_BACKLOG.md`. Verificação
       read-only equivalente já feita via D1 direto (dado corrigido,
       `publication_id` restaurado, cover_url idêntico ao pré-corrupção).
+
+## LIB-004C — Enriquecimento da importação por URL oficial — `DONE`
+
+Detalhe completo: `docs/library/METADATA_PROVIDERS.md` (seção "LIB-004C")
+e `docs/product/MASTER_BACKLOG.md`.
+
+- [x] Mesclagem de metadata JSON-LD/OpenGraph/meta por campo (não mais
+      documento inteiro), string vazia tratada como ausente,
+      `WebPage.inLanguage` extraído, `twitter:image` como fallback de capa.
+- [x] Aviso de dados parciais na UI, terminologia "Buscar publicação".
+- [x] 5 testes de integração novos, confirmados TEST FIRST.
+- [x] CI, deploy, `/api/v1/version`, `MANUAL_SMOKE = PASS` (confirmado
+      pelo responsável do produto).
+
+## LIB-005 — Cover assets / upload de capa (Zero Cost) — `DONE`
+
+Detalhe completo: `docs/library/COVER_STORAGE.md`.
+
+- [x] Comparação de storage gratuito (KV vs D1 vs R2 vs Durable Objects vs
+      Cache API) antes de assumir KV.
+- [x] `publications.cover_asset_id` (migration aditiva, sem `CHECK`),
+      namespace `COVERS_KV` provisionado.
+- [x] `POST`/`DELETE /api/v1/rpgs/:id/cover`, `GET /api/v1/media/covers/:id`
+      — magic bytes validados no servidor, `SHARED_PUBLICATION_METADATA_LOCKED`
+      reaproveitada.
+- [x] Processamento de imagem no navegador antes do upload; controles
+      independentes do formulário de edição (`coverUrl` externa nunca
+      tocada).
+- [x] `docs/architecture/DATABASE_MIGRATION_SAFETY.md` — regra de
+      segurança para rebuild de tabelas D1/SQLite com FK, extraída do
+      incidente LIB-004B, referenciada em `CLAUDE.md` §15.
+- [x] unit/integration/E2E (desktop+mobile) verdes; CI, deploy,
+      `/api/v1/version`.
+- [x] `MANUAL_SMOKE = PASS` — validação humana em produção confirmou
+      upload, persistência após reload, troca, remoção, e fallback
+      correto para `coverUrl` externa quando o asset é removido. Um
+      primeiro relato de "controles ausentes" (RPG Blue Rose) foi
+      diagnosticado como sessão do navegador com bundle antigo em
+      memória — bundle de produção confirmado byte-idêntico ao testado,
+      sem defeito de código; teste E2E dedicado reproduzindo o cenário
+      real passa em desktop e mobile (ver relatório da sessão do LIB-006
+      para o diagnóstico completo).
+
+## LIB-006 — Archive e Restore da Biblioteca — `DONE`
+
+Detalhe completo: `docs/library/LIBRARY_ARCHIVE.md`.
+
+- [x] `rpgs.archived_at` (já existia desde migration 0016/LIB-002) usado
+      pela primeira vez — nenhuma migration nova.
+- [x] `POST /api/v1/rpgs/:id/archive` e `.../restore`, idempotentes,
+      IDOR coberto.
+- [x] `GET /rpgs` ativos por padrão, `?archived=true` só arquivados,
+      nunca misturados; `GET /rpgs/:id` nunca 404 só por arquivado.
+- [x] Dashboard/recomendações/contagem por grupo excluem arquivados.
+- [x] Campaigns nunca quebram — `rpgArchived` exposto, indicador na UI,
+      formulário de edição de Campaign preserva o RPG já vinculado
+      mesmo arquivado.
+- [x] `SHARED_PUBLICATION_METADATA_LOCKED` continua contando entries
+      arquivadas — testado explicitamente.
+- [x] `coverUrl`/`coverAssetId` sobrevivem intactos ao ciclo
+      archive→restore — testado explicitamente (upload real + KV).
+- [x] Dedup entende arquivado em CREATE, busca externa e import CSV —
+      nunca duplica, sempre oferece Restaurar.
+- [x] Export/backup preserva `archived_at`.
+- [x] Hard delete (`DELETE /rpgs/:id`) preservado só por compatibilidade,
+      removido do fluxo normal da UI; nenhuma nova UI de exclusão
+      permanente criada.
+- [x] unit (`library-entry-state.test.ts`), integration
+      (`library-archive.test.ts`, 12 testes), E2E (desktop+mobile,
+      `rpg-archive-restore.spec.ts`) — todos verdes.
+- [x] lint, typecheck, build — verdes localmente; CI, deploy,
+      `/api/v1/version` — ver relatório da sessão.
+- [x] Diagnóstico read-only de produção antes do deploy (total/por-conta/
+      ativos/arquivados) — nenhum dado real alterado.

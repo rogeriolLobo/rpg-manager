@@ -47,6 +47,10 @@ export interface BookMetadataResult {
   isbn13?: string;
   /** Sempre uma URL EXTERNA pública (covers.openlibrary.org ou a página importada) — o servidor nunca baixa a imagem em si para o nosso storage, só o navegador via <img>, mesma política de LIB-001. */
   coverUrl?: string;
+  /** LIB-006: presente só quando `internalPublicationId` já é uma User Library Entry do usuário ATUAL (ativa ou arquivada) — ver src/domain/rpg/library-entry-state.ts. Nunca calculado a partir de outra conta. */
+  libraryStatus?: 'ACTIVE_IN_LIBRARY' | 'ARCHIVED_IN_LIBRARY';
+  /** LIB-006: ID da User Library Entry existente quando `libraryStatus` está presente — usado pela UI para linkar/oferecer Restaurar. */
+  libraryEntryId?: string;
 }
 
 export interface BookMetadataProvider {

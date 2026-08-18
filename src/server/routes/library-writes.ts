@@ -47,8 +47,26 @@ async function findPublicationByExternalId(db: D1Database, provider: string, ext
     .bind(provider, externalId).first<ExistingPublicationRow>();
 }
 
-async function findLibraryEntryForPublication(db: D1Database, userId: string, publicationId: string): Promise<{ id: string } | null> {
-  return db.prepare('SELECT id FROM rpgs WHERE user_id=? AND publication_id=?').bind(userId, publicationId).first<{ id: string }>();
+// LIB-006: inclui archived_at — uma Library Entry ARQUIVADA continua contando
+// como referência existente (nunca cria uma segunda linha para a mesma
+// Publication; ver classifyLibraryEntryState e docs/library/LIBRARY_ARCHIVE.md).
+async function findLibraryEntryForPublication(db: D1Database, userId: string, publicationId: string): Promise<{ id: string; archivedAt: string | null } | null> {
+  const row = await db.prepare('SELECT id,archived_at FROM rpgs WHERE user_id=? AND publication_id=?').bind(userId, publicationId).first<{ id: string; archived_at: string | null }>();
+  return row ? { id: row.id, archivedAt: row.archived_at } : null;
+}
+
+// LIB-006: usado por /rpgs/search-external para informar, por resultado, se a
+// Publication já é uma Library Entry do usuário atual (ativa ou arquivada) —
+// evita duplicar/errar a mensagem de "já no catálogo" quando na verdade está
+// arquivada (seção 16 do pedido LIB-006).
+export async function findUserLibraryEntriesByPublicationIds(
+  db: D1Database, userId: string, publicationIds: string[],
+): Promise<Map<string, { id: string; archivedAt: string | null }>> {
+  const unique = [...new Set(publicationIds)];
+  if (!unique.length) return new Map();
+  const rows = await db.prepare(`SELECT id,publication_id,archived_at FROM rpgs WHERE user_id=? AND publication_id IN (${unique.map(() => '?').join(',')})`)
+    .bind(userId, ...unique).all<{ id: string; publication_id: string; archived_at: string | null }>();
+  return new Map(rows.results.map((row) => [row.publication_id, { id: row.id, archivedAt: row.archived_at }]));
 }
 
 // LIB-004A: resolve um `reusePublicationId` vindo do catálogo interno (seção 9
@@ -126,6 +144,12 @@ export async function buildCreateLibraryEntryStatements(
 
   if (existing) {
     const alreadyInLibrary = await findLibraryEntryForPublication(db, userId, existing.id);
+    if (alreadyInLibrary?.archivedAt) {
+      // LIB-006: arquivada != ausente — nunca cria uma segunda linha para a mesma
+      // Publication; oferece o ID existente para a UI propor "Restaurar" em vez de
+      // um erro genérico (seção 15 do pedido LIB-006).
+      throw new ApiError(409, 'ARCHIVED_IN_LIBRARY', 'Este título está arquivado na sua biblioteca.', { libraryEntryId: [alreadyInLibrary.id] });
+    }
     if (alreadyInLibrary) throw new ApiError(409, 'ALREADY_IN_LIBRARY', 'Você já tem este título na sua biblioteca.');
     const statements = [buildRpgInsertStatement(db, { entryId, userId, input, publicationId: existing.id, now }), ...externalIdStatements(db, existing.id, input, now)];
     return { statements, ids: { entryId, gameSystemId: existing.game_system_id, publicationId: existing.id }, reusedExistingPublication: true };

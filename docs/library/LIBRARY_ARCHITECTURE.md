@@ -449,3 +449,20 @@ constraint — nunca precisa de rebuild de tabela), endpoints dedicados
 do LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`). Detalhe completo,
 incluindo a comparação de alternativas de storage gratuito que motivou a
 escolha do KV: `docs/library/COVER_STORAGE.md`.
+
+## LIB-006 — Archive e Restore da Biblioteca (F-011)
+
+`rpgs.archived_at` (coluna e índice já existentes desde a migration
+0016/LIB-002) passa a ser usado pela primeira vez — nenhuma migration
+nova. Archive atua só sobre a User Library Entry (`rpgs`), nunca sobre
+`publications`/`game_systems`: uma entry arquivada continua contando como
+referência para `SHARED_PUBLICATION_METADATA_LOCKED` (LIB-003) — arquivar
+não é uma forma de "liberar" a trava. `GET /rpgs` mostra só ativos por
+padrão (`?archived=true` inverte), `GET /rpgs/:id` nunca 404 só por estar
+arquivado. Dedup (CREATE, busca externa, import CSV) passa a distinguir
+`NOT_IN_LIBRARY`/`ACTIVE_IN_LIBRARY`/`ARCHIVED_IN_LIBRARY`
+(`src/domain/rpg/library-entry-state.ts`) — nunca duplica uma entry
+arquivada, sempre oferece Restaurar. `coverUrl`/`coverAssetId` (LIB-005)
+sobrevivem intactos ao ciclo archive→restore. Hard delete
+(`DELETE /rpgs/:id`) preservado só por compatibilidade, fora do fluxo
+normal da UI. Detalhe completo: `docs/library/LIBRARY_ARCHIVE.md`.

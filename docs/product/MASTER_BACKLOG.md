@@ -273,20 +273,20 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
 ## LIB-005 — Cover assets / upload de capa (Zero Cost)
 
 - **Priority:** P2 (evolução funcional da Biblioteca, não regressão)
-- **Status:** `IN_PROGRESS` — código+testes+docs no commit `261fb85`, CI
-  verde, deploy publicado, `GET /api/v1/version` confirmado. Manual
-  smoke humano em produção (Blue Rose) reportou os controles de upload
-  ausentes na página de detalhe. Investigação factual (ver seção
-  "Diagnóstico do smoke manual" abaixo) não encontrou defeito de código:
-  bundle de produção é byte-idêntico ao build local testado (SHA-256
-  igual), contém as strings "Enviar capa"/"Trocar capa"/"Remover capa",
-  e um novo teste E2E reproduzindo exatamente os dados reais do Blue
-  Rose (`coverUrl` externa persistida, `coverAssetId` nulo, 1 única
-  referência, dono autenticado) passa em desktop e mobile — o botão
-  aparece normalmente. Hipótese mais provável: sessão do navegador com o
-  bundle antigo em memória (aba aberta antes do deploy), não código
-  defeituoso. Aguardando reteste humano com F5/Ctrl+F5 antes de marcar
-  `DONE` — ver relatório da sessão para o diagnóstico completo.
+- **Status:** `DONE` — código+testes+docs nos commits `261fb85` (feature)
+  e `82714ee` (investigação/reteste do smoke), CI verde, deploy
+  publicado, `GET /api/v1/version` confirmado.
+- **MANUAL_SMOKE = PASS** — validação humana em produção (RPG real,
+  conta principal) confirmou: upload de capa funciona; imagem permanece
+  após reload completo; trocar capa funciona; remover capa funciona;
+  quando existe `coverUrl` externa, remover o asset volta corretamente
+  para a `coverUrl` original; `coverUrl` externa permanece preservada
+  durante todo o ciclo. Um primeiro relato de "controles ausentes"
+  (Blue Rose) foi diagnosticado como sessão do navegador com o bundle
+  antigo em memória (aba aberta antes do deploy), não defeito de código
+  — bundle de produção confirmado byte-idêntico (SHA-256) ao build
+  testado, e um teste E2E dedicado reproduzindo o cenário real (`coverUrl`
+  externa + `coverAssetId` nulo) passa em desktop e mobile.
 - **Dependencies:** LIB-001 (capa por URL externa), LIB-002 (domínio
   `publications`), LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`)
 - **Definition of Done:** ver `docs/library/COVER_STORAGE.md` (design
@@ -339,6 +339,66 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   processamento de imagem no servidor (fica só no navegador),
   redimensionamento configurável pelo usuário.
 
+## LIB-006 — Archive e Restore da Biblioteca (F-011)
+
+- **Priority:** P3 (backlog original), promovido a vertical única desta
+  rodada.
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmando produção antes de
+  parar (ver relatório da sessão).
+- **Dependencies:** `rpgs.archived_at` (coluna e índice `(user_id,
+  archived_at)` já existiam desde migration 0016/LIB-002 — nenhuma
+  migration nova nesta tarefa), LIB-003 (`SHARED_PUBLICATION_METADATA_LOCKED`),
+  LIB-005 (`coverAssetId`).
+- **Definition of Done:** ver `docs/library/LIBRARY_ARCHIVE.md` (semântica
+  completa, decisões de escopo, hard delete).
+- **Domínio:** archive atua sobre a User Library Entry (`rpgs`), nunca
+  sobre `publications`/`game_systems` — uma entry arquivada continua
+  contando como referência para `SHARED_PUBLICATION_METADATA_LOCKED`
+  (testado explicitamente).
+- **Backend:** `POST /api/v1/rpgs/:id/archive` e `.../restore`
+  (idempotentes via `UPDATE ... WHERE id=? AND user_id=?`, `meta.changes`
+  prova posse+existência), `GET /rpgs` com filtro padrão
+  `archived_at IS NULL` (`?archived=true` inverte), `GET /rpgs/:id` nunca
+  404 só por estar arquivado. Dashboard/recomendações/contagem por grupo
+  passam a excluir arquivados. `campaigns` expõe `rpgArchived` sem nunca
+  deixar de carregar. Dedup (CREATE/CSV import/busca externa) distingue
+  `NOT_IN_LIBRARY`/`ACTIVE_IN_LIBRARY`/`ARCHIVED_IN_LIBRARY`
+  (`src/domain/rpg/library-entry-state.ts`) — nunca duplica uma entry
+  arquivada, sempre oferece "Restaurar".
+- **Frontend:** abas "Ativos"/"Arquivados" na Biblioteca (mesma
+  `LibraryPage`, reaproveitando a querystring existente — sem componente
+  duplicado); botão "Arquivar RPG"/"Restaurar RPG" na página de detalhe
+  substitui "Excluir RPG" como ação normal; indicação "Arquivado" nos
+  cards e na campanha vinculada; busca externa e import CSV mostram
+  "Arquivado na sua Biblioteca" com ação Restaurar em vez de deixar o
+  usuário tentar duplicar.
+- **Hard delete:** endpoint `DELETE /rpgs/:id` preservado por
+  compatibilidade, mas não é mais chamado por nenhuma ação normal da UI —
+  nenhuma nova interface de "excluir permanentemente" foi criada (decisão
+  documentada em `docs/library/LIBRARY_ARCHIVE.md`, fora de escopo).
+- **Achado factual fora de escopo (não corrigido nesta tarefa):**
+  `EXISTING_PUBLICATION` no import CSV já era aprovável no servidor desde
+  LIB-003, mas a UI de preview (`settings-pages.tsx`) nunca marcava essa
+  linha como `actionable` — checkbox sempre desabilitado. Bug pré-existente,
+  não introduzido nem corrigido aqui; registrado para backlog futuro.
+- **Testes:** unit (`tests/unit/library-entry-state.test.ts`), integration
+  (`tests/integration/library-archive.test.ts` — archive/restore/idempotência/
+  IDOR, listagem ativos/arquivados, detalhe arquivado, dashboard exclui
+  arquivados, dedup CREATE/CSV/busca externa entende arquivado, SHARED_LOCK
+  continua contando arquivada, preservação de coverUrl/coverAssetId/campanha,
+  export preserva `archived_at`), E2E
+  (`tests/e2e/rpg-archive-restore.spec.ts` — fluxo completo pela UI,
+  desktop e mobile, incluindo busca reconhecendo arquivado sem duplicar).
+- **Produção (diagnóstico read-only antes do deploy):** ver relatório da
+  sessão — total/por-usuário/ativos/arquivados na conta principal, nenhum
+  dado real alterado durante a validação.
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit final
+  único, code+tests+docs, antes do deploy).
+- **Fora de escopo (deliberado):** hard delete/UI de exclusão permanente,
+  friends, social, maps, VTT, sheets, Vault/Campaign enhancements além do
+  mínimo para preservar funcionamento (`rpgArchived` no vínculo).
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0
@@ -382,10 +442,10 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `NOT_STARTED` |
 | F-006 | Teste de integração dedicado para Global Search | P2 | `NOT_STARTED` |
 | F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `DONE` (LIB-002) |
-| F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `NOT_STARTED` |
+| F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `DONE` (LIB-005) |
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |
 | F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
-| F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `NOT_STARTED` |
+| F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `DONE` (LIB-006) |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):
 VTT, Sheets (motor completo), Social/Amizades.

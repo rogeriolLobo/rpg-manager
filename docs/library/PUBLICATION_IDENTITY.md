@@ -172,6 +172,13 @@ de aceitar qualquer alteração nos campos editoriais.
   /api/v1/rpgs/:id/cover`) — capa por upload é metadata editorial da
   Publication tanto quanto `coverUrl`, mesma trava, mesmo critério
   (`COUNT(*) > 1`). Ver `docs/library/COVER_STORAGE.md`.
+- LIB-006: uma Library Entry **arquivada** continua contando para esse
+  `COUNT(*)` — archive nunca "libera" a trava. Se User A arquiva sua
+  entry e User B continua ativo na mesma Publication, B permanece
+  bloqueado: se pudesse editar livremente, A veria os dados trocados ao
+  restaurar, sem nunca ter concordado. Testado explicitamente em
+  `tests/integration/library-archive.test.ts`. Ver
+  `docs/library/LIBRARY_ARCHIVE.md`.
 
 **Por que isso é seguro contra IDOR/escalada:** o bloqueio não depende de
 quem é "dono" da Publication (não existe dono — é catálogo compartilhado,

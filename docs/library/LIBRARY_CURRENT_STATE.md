@@ -90,9 +90,17 @@ CREATE/PATCH/import, sem allowlist de hosts nem fetch do servidor).
 
 ## Archive/delete flow
 
-Não existe archive para RPG (existe para Vault Entities e Worlds, mas
-não para `rpgs`). `DELETE /rpgs/:id` é exclusão física, bloqueada por
-FK se houver campanhas vinculadas (`409 RPG_HAS_CAMPAIGNS`).
+> **Atualização (LIB-006, posterior a esta auditoria de 2026-08-14):**
+> archive para RPG foi implementado — ver `docs/library/LIBRARY_ARCHIVE.md`
+> para a semântica completa. O parágrafo abaixo descreve o estado no
+> momento desta auditoria (LIB-001), preservado por valor histórico.
+
+Não existia archive para RPG (existia para Vault Entities e Worlds, mas
+não para `rpgs`) neste momento da auditoria. `DELETE /rpgs/:id` é
+exclusão física, bloqueada por FK se houver campanhas vinculadas
+(`409 RPG_HAS_CAMPAIGNS`) — endpoint preservado por compatibilidade após
+LIB-006, mas não é mais usado pela ação normal da UI (substituído por
+archive).
 
 ## Import flow
 
@@ -154,13 +162,14 @@ domínios. Erros de campo (`fields`) agora chegam ao frontend para
    o objeto inteiro; combinado com um formulário mal cuidado (como no
    incidente anterior), aumenta a superfície de bugs de "campo que eu
    não editei mudou sozinho".
-4. **Sem archive** para RPG (existe em Worlds/Vault) — delete é a única
-   opção reversível apenas via FK-bloqueio (indireto, não é archive de
-   verdade).
-5. **Sem upload de capa** — depende inteiramente de URL externa.
-6. **Sem metadata provider** — cadastro é 100% manual.
-7. **Sem provenance** — não há como saber se um campo foi preenchido
-   manualmente ou importado de algum lugar.
+4. ~~**Sem archive** para RPG~~ — resolvido em LIB-006, ver
+   `docs/library/LIBRARY_ARCHIVE.md`.
+5. ~~**Sem upload de capa**~~ — resolvido em LIB-005, ver
+   `docs/library/COVER_STORAGE.md`.
+6. ~~**Sem metadata provider**~~ — resolvido em LIB-004, ver
+   `docs/library/METADATA_PROVIDERS.md`.
+7. ~~**Sem provenance**~~ — resolvido em LIB-004 (`metadata_source`/
+   `metadata_source_id`/`metadata_source_url`/`metadata_fetched_at`).
 
 Nenhum desses é `BROKEN` hoje — são gaps funcionais reais (`MISSING`),
 não regressões. O único bug funcional real (`coverUrl` rejeitando URLs
@@ -304,3 +313,33 @@ idempotente, restaura o vínculo a partir do padrão determinístico
 `pub_<rpg.id>` do backfill original do LIB-002 (verificado 30/30 antes de
 aplicar). Nenhum dado perdido — "28 títulos" vs "30 RPGs" era contagem
 por-conta vs global, não perda de dados (ver mesma seção).
+
+## Atualização — LIB-004C: enriquecimento da importação por URL oficial
+
+Detalhe completo: `docs/library/METADATA_PROVIDERS.md`, seção "LIB-004C".
+Mesclagem de metadata (JSON-LD/OpenGraph/meta) passou a ser por campo, não
+mais por documento inteiro; string vazia tratada como valor ausente;
+`WebPage.inLanguage` extraído; `twitter:image` como fallback de capa.
+
+## Atualização — LIB-005: upload de capa (Workers KV Free)
+
+Upload de capa deixa de estar `MISSING`. Detalhe completo:
+`docs/library/COVER_STORAGE.md`. `publications.cover_asset_id` (aditivo,
+sem `CHECK`), namespace `COVERS_KV` provisionado,
+`POST`/`DELETE /api/v1/rpgs/:id/cover`, `GET /api/v1/media/covers/:id`.
+`coverUrl` (URL externa) continua existindo e coexistindo — a
+apresentação prioriza `coverAssetId` quando presente, mas o campo nunca é
+apagado pelo upload.
+
+## Atualização — LIB-006: Archive/Restore da Biblioteca
+
+Archive de RPG deixa de estar `MISSING`. Detalhe completo:
+`docs/library/LIBRARY_ARCHIVE.md`. `rpgs.archived_at` (já existia desde a
+migration 0016/LIB-002, nunca usado até aqui — nenhuma migration nova).
+`POST /api/v1/rpgs/:id/archive`/`.../restore`, `GET /rpgs` ativos por
+padrão, dashboard/recomendações excluem arquivados, dedup (CREATE/busca
+externa/import CSV) distingue `ACTIVE_IN_LIBRARY`/`ARCHIVED_IN_LIBRARY`,
+`SHARED_PUBLICATION_METADATA_LOCKED` continua contando entries
+arquivadas, `coverUrl`/`coverAssetId` preservados intactos. Hard delete
+(`DELETE /rpgs/:id`) preservado só por compatibilidade, fora do fluxo
+normal da UI.

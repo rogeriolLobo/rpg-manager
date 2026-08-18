@@ -5,15 +5,18 @@ import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
 export const campaignRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
-interface CampaignRow { id: string; rpg_id: string; rpg_title: string; name: string; status: CampaignStatus; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; play_group_id: string | null; play_group_name: string | null; adventure_entity_id:string|null;adventure_name:string|null;legacy_members_text: string; legacy_characters_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
-const SELECT = `SELECT c.*,r.title rpg_title,g.name play_group_name,c.legacy_sessions_completed+(SELECT COUNT(*) FROM campaign_sessions cs WHERE cs.campaign_id=c.id) sessions_completed,
+interface CampaignRow { id: string; rpg_id: string; rpg_title: string; rpg_archived_at: string | null; name: string; status: CampaignStatus; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; play_group_id: string | null; play_group_name: string | null; adventure_entity_id:string|null;adventure_name:string|null;legacy_members_text: string; legacy_characters_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
+// LIB-006: r.archived_at (aliado rpg_archived_at) exposto como `rpgArchived` — uma Campaign
+// nunca deixa de carregar por causa disso (o RPG arquivado continua existindo, join normal),
+// só ganha um indicador visual no cliente (seção 11 do pedido LIB-006).
+const SELECT = `SELECT c.*,r.title rpg_title,r.archived_at rpg_archived_at,g.name play_group_name,c.legacy_sessions_completed+(SELECT COUNT(*) FROM campaign_sessions cs WHERE cs.campaign_id=c.id) sessions_completed,
   adventure.name adventure_name,
   EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.active=1 AND length(cm.character_name)>0) has_characters
   FROM campaigns c JOIN rpgs r ON r.id=c.rpg_id LEFT JOIN play_groups g ON g.id=c.play_group_id LEFT JOIN vault_entities adventure ON adventure.id=c.adventure_entity_id`;
 function present(row: CampaignRow) {
   const state: CampaignPlanningState = { status: row.status, sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date,
     frequency: row.frequency, nextSessionDate: row.next_session_date, hasCharacters: Boolean(row.has_characters), sessionsCompleted: Number(row.sessions_completed), sessionGoal: row.session_goal };
-  return { id: row.id, rpgId: row.rpg_id, rpgTitle: row.rpg_title, name: row.name, status: row.status, gameMaster: row.game_master,
+  return { id: row.id, rpgId: row.rpg_id, rpgTitle: row.rpg_title, rpgArchived: Boolean(row.rpg_archived_at), name: row.name, status: row.status, gameMaster: row.game_master,
     sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date, frequency: row.frequency, nextSessionDate: row.next_session_date,
     lastSessionDate: row.last_session_date, sessionGoal: row.session_goal, playGroupId: row.play_group_id, playGroupName: row.play_group_name,
     adventureEntityId:row.adventure_entity_id,adventureName:row.adventure_name,

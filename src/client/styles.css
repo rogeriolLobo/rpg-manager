@@ -497,6 +497,15 @@ label small {
   color: var(--brand-primary);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
+/* LIB-006: reaproveita .view-toggle (Ativos/Arquivados) — texto em vez de ícone, então
+   precisa de padding horizontal e uma margem para separar do PageHeader/filtros. */
+.library-state-toggle {
+  width: fit-content;
+  margin-bottom: 1rem;
+}
+.library-state-toggle button {
+  padding: 0.45rem 1rem;
+}
 .book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -1227,6 +1236,12 @@ legend {
    (resultados abaixo do limiar nunca chegam aqui). */
 .search-result-origin {
   font-style: italic;
+}
+/* LIB-006: estado da Library do usuário para este resultado (já ativo/arquivado) — mesmo
+   .badge do resto do app, só com uma margem para não colar nas outras linhas de meta. */
+.search-result-library-status {
+  margin-top: 0.2rem;
+  width: fit-content;
 }
 /* LIB-004A: "Importar de uma página oficial" — mesmo padrão visual do .search-box, com
    label visível (o campo não é óbvio como a busca por título/ISBN). */

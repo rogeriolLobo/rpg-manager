@@ -21,6 +21,9 @@ interface Campaign {
   id: string;
   rpgId: string;
   rpgTitle: string;
+  // LIB-006: indicador para a Campaign continuar funcionando/mostrando o RPG mesmo depois de
+  // arquivado (nunca quebra a Campaign — ver docs/library/LIBRARY_ARCHIVE.md).
+  rpgArchived: boolean;
   name: string;
   status: string;
   gameMaster: string;
@@ -103,7 +106,7 @@ export function CampaignsPage() {
             >
               <div>
                 <Badge>{item.status}</Badge>
-                <span className="eyebrow">{item.rpgTitle}</span>
+                <span className="eyebrow">{item.rpgTitle}{item.rpgArchived && " · RPG arquivado"}</span>
                 <h2>{item.name}</h2>
                 <p>{item.nextAction}</p>
               </div>
@@ -168,7 +171,7 @@ export function CampaignFormPage() {
   useEffect(() => {
     void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);});
     if (id)
-      void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) =>
+      void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) => {
         setForm({
           rpgId: item.rpgId,
           name: item.name,
@@ -184,8 +187,16 @@ export function CampaignFormPage() {
           legacyMembersText: item.legacyMembersText,
           legacyCharactersText: item.legacyCharactersText,
           notes: item.notes,
-        }),
-      );
+        });
+        // LIB-006: garante que o RPG já vinculado apareça na lista mesmo se foi arquivado
+        // depois da campanha criada (GET /rpgs só lista ativos por padrão) — nunca força
+        // o usuário a trocar de RPG só por isso (seção 11 do pedido LIB-006).
+        if (item.rpgArchived) {
+          void api<{ item: Rpg }>(`/rpgs/${item.rpgId}`).then(({ item: rpg }) =>
+            setRpgs((current) => (current.some((existing) => existing.id === rpg.id) ? current : [...current, rpg])),
+          );
+        }
+      });
   }, [id,worldId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -228,7 +239,7 @@ export function CampaignFormPage() {
             <option value="">Selecione um RPG</option>
             {rpgs.map((item) => (
               <option value={item.id} key={item.id}>
-                {item.title}
+                {item.title}{item.archivedAt ? " (arquivado)" : ""}
               </option>
             ))}
           </select>
@@ -408,7 +419,7 @@ export function CampaignDetailPage() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow={data.item.rpgTitle}
+        eyebrow={data.item.rpgTitle + (data.item.rpgArchived ? " · RPG arquivado" : "")}
         title={data.item.name}
         description={`${data.item.stage} · ${data.item.nextAction}`}
         action={

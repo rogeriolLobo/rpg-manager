@@ -19,7 +19,7 @@ async function ownedGroup(c: AppContext, id: string) {
 groupRoutes.get('/', async (c) => {
   const rows = await c.env.DB.prepare(`SELECT g.id,g.name,g.notes,g.created_at createdAt,g.updated_at updatedAt,
     (SELECT COUNT(*) FROM play_group_members m WHERE m.group_id=g.id) memberCount,
-    (SELECT COUNT(*) FROM rpgs r WHERE r.play_group_id=g.id) rpgCount,
+    (SELECT COUNT(*) FROM rpgs r WHERE r.play_group_id=g.id AND r.archived_at IS NULL) rpgCount,
     (SELECT COUNT(*) FROM campaigns cp WHERE cp.play_group_id=g.id) campaignCount,
     (SELECT COALESCE(u.display_name,m.player_name) FROM play_group_members m LEFT JOIN users u ON u.id=m.user_id
       WHERE m.group_id=g.id AND m.is_game_master=1 LIMIT 1) gameMasterName

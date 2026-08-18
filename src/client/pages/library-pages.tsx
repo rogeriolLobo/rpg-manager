@@ -1,4 +1,4 @@
-import { BookOpen, Grid2X2, List, Plus, Search, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, Grid2X2, List, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Link,
@@ -6,7 +6,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { api, ClientApiError, deleteApi, patchJson, postJson } from "../api/client";
+import { api, ClientApiError, patchJson, postJson } from "../api/client";
 import { MAX_COVER_ASSET_BYTES } from "../../domain/rpg/cover-asset";
 import { Badge, Empty, Loading, PageHeader } from "./dashboard-page";
 import { displayLabel } from "../labels";
@@ -37,6 +37,8 @@ export interface Rpg {
   // sobre coverUrl na exibição (ver effectiveCoverSrc abaixo) — coverUrl (URL
   // externa) continua intocado, para não interferir no fluxo já existente.
   coverAssetId: string | null;
+  // LIB-006: null = ativo, timestamp ISO = arquivado. Ver docs/library/LIBRARY_ARCHIVE.md.
+  archivedAt: string | null;
   // LIB-004: campos editoriais adicionais + provenance.
   subtitle: string;
   authors: string;
@@ -58,6 +60,8 @@ interface SearchResult {
   workId: string | null; editionId: string | null; internalPublicationId?: string; matchedAlias?: string; sourceUrl: string;
   title: string; subtitle?: string; authors?: string; publisher?: string;
   publicationYear?: number; language?: string; isbn10?: string; isbn13?: string; coverUrl?: string;
+  // LIB-006: presente quando este resultado já é uma Library Entry do usuário atual.
+  libraryStatus?: "ACTIVE_IN_LIBRARY" | "ARCHIVED_IN_LIBRARY"; libraryEntryId?: string;
 }
 const ORIGIN_LABELS: Record<SearchResult["origin"], string> = {
   INTERNAL: "Já no catálogo do RPG Manager", OPEN_LIBRARY: "Open Library", URL_IMPORT: "Página importada",
@@ -108,12 +112,18 @@ export function LibraryPage() {
   const totalPages = result
     ? Math.max(1, Math.ceil(result.pagination.total / result.pagination.pageSize))
     : 1;
+  // LIB-006: "Ativos" é o padrão da Biblioteca (arquivados nunca aparecem misturados) —
+  // ver docs/library/LIBRARY_ARCHIVE.md. O parâmetro reaproveita o mesmo mecanismo de
+  // querystring dos demais filtros (repassado direto para GET /rpgs).
+  const showingArchived = params.get("archived") === "true";
   return (
     <div className="page">
       <PageHeader
         eyebrow="Biblioteca"
         title="Seu catálogo de RPGs"
-        description={`${result?.pagination.total ?? 0} títulos organizados para a próxima aventura.`}
+        description={showingArchived
+          ? `${result?.pagination.total ?? 0} RPGs arquivados.`
+          : `${result?.pagination.total ?? 0} títulos organizados para a próxima aventura.`}
         action={
           <Link className="primary-button link-button" to="/app/library/new">
             <Plus size={18} />
@@ -121,6 +131,14 @@ export function LibraryPage() {
           </Link>
         }
       />
+      <div className="view-toggle library-state-toggle" role="tablist" aria-label="Estado da biblioteca">
+        <button role="tab" aria-selected={!showingArchived} className={showingArchived ? "" : "active"} onClick={() => set("archived", "")}>
+          Ativos
+        </button>
+        <button role="tab" aria-selected={showingArchived} className={showingArchived ? "active" : ""} onClick={() => set("archived", "true")}>
+          Arquivados
+        </button>
+      </div>
       <section className="filters">
         <label className="search-box">
           <Search />
@@ -208,8 +226,8 @@ export function LibraryPage() {
         <Loading />
       ) : result.items.length === 0 ? (
         <Empty
-          title="Nenhum RPG encontrado"
-          text="Ajuste os filtros ou adicione um novo título."
+          title={showingArchived ? "Nenhum RPG arquivado" : "Nenhum RPG encontrado"}
+          text={showingArchived ? "RPGs arquivados aparecem aqui — seus dados continuam preservados." : "Ajuste os filtros ou adicione um novo título."}
           action="Adicionar RPG"
           to="/app/library/new"
         />
@@ -269,6 +287,7 @@ function BookCard({ item }: { item: Rpg }) {
       </div>
       <div className="book-card-body">
         <Badge>{item.readingStatus}</Badge>
+        {item.archivedAt && <Badge>Arquivado</Badge>}
         <h2>{item.title}</h2>
         <p>{item.subgenreName ?? "Sem subgênero"}</p>
         <div className="book-meta">
@@ -475,7 +494,7 @@ function UrlImportPanel({ onImported }: { onImported: (result: SearchResult) => 
   );
 }
 
-function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchResult) => void; onCancel: () => void }) {
+function OnlineSearchPanel({ onSelect, onCancel, onRestore }: { onSelect: (result: SearchResult) => void; onCancel: () => void; onRestore: (libraryEntryId: string) => void }) {
   const [query, setQuery] = useState("");
   const [state, setState] = useState<
     | { status: "idle" }
@@ -535,8 +554,19 @@ function OnlineSearchPanel({ onSelect, onCancel }: { onSelect: (result: SearchRe
                   {ORIGIN_LABELS[result.origin]}
                   {result.matchedAlias ? ` · encontrado via "${result.matchedAlias}"` : ""}
                 </span>
+                {/* LIB-006: nunca deixa o usuário duplicar algo que já está na Biblioteca —
+                    mostra o estado real (ativo/arquivado) em vez de deixar "Selecionar" falhar
+                    silenciosamente com 409 (seção 16 do pedido LIB-006). */}
+                {result.libraryStatus === "ACTIVE_IN_LIBRARY" && <span className="badge search-result-library-status">Já na sua Biblioteca</span>}
+                {result.libraryStatus === "ARCHIVED_IN_LIBRARY" && <span className="badge search-result-library-status">Arquivado na sua Biblioteca</span>}
               </div>
-              <button type="button" className="secondary-button" onClick={() => onSelect(result)}>Selecionar</button>
+              {result.libraryStatus === "ACTIVE_IN_LIBRARY" ? (
+                <Link className="ghost-button link-button" to={`/app/library/${result.libraryEntryId}`}>Ver na Biblioteca</Link>
+              ) : result.libraryStatus === "ARCHIVED_IN_LIBRARY" ? (
+                <button type="button" className="secondary-button" onClick={() => onRestore(result.libraryEntryId!)}>Restaurar</button>
+              ) : (
+                <button type="button" className="secondary-button" onClick={() => onSelect(result)}>Selecionar</button>
+              )}
             </li>
           ))}
         </ul>
@@ -592,6 +622,9 @@ function RpgFormFields({ id }: { id?: string }) {
   const [form, setForm] = useState<Record<string, string | boolean>>(initial);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  // LIB-006: preenchido só quando o CREATE/PATCH resolve ao vivo uma Publication já arquivada
+  // na Biblioteca do usuário — ver submit() abaixo.
+  const [archivedConflictEntryId, setArchivedConflictEntryId] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(id));
   // LIB-004: só relevante para cadastro novo — editar um RPG existente nunca reabre busca
   // (o PATCH não reatribui identidade/provenance, ver library-writes.ts). "manual" continua
@@ -686,6 +719,16 @@ function RpgFormFields({ id }: { id?: string }) {
     }));
     setMode("preview");
   };
+  // LIB-006: resultado de busca já é uma Library Entry ARQUIVADA — restaura em vez de criar
+  // (nunca duplica, seção 16 do pedido LIB-006) e abre a entry existente diretamente.
+  const restoreFromSearch = async (libraryEntryId: string) => {
+    try {
+      await postJson(`/rpgs/${libraryEntryId}/restore`, {});
+      navigate(`/app/library/${libraryEntryId}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível restaurar este RPG.");
+    }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
@@ -733,7 +776,13 @@ function RpgFormFields({ id }: { id?: string }) {
         : await postJson<{ item: Rpg }>("/rpgs", payload);
       navigate(`/app/library/${result.item.id}`);
     } catch (reason) {
-      if (reason instanceof ClientApiError && reason.fields) {
+      // LIB-006: identidade (ISBN/reuse) resolvida ao vivo no servidor pode achar uma entry
+      // ARQUIVADA mesmo que o resultado de busca (potencialmente stale) não soubesse disso —
+      // oferece Restaurar em vez de um erro genérico (seção 15 do pedido LIB-006).
+      if (reason instanceof ClientApiError && reason.code === "ARCHIVED_IN_LIBRARY") {
+        setArchivedConflictEntryId(reason.fields?.libraryEntryId?.[0] ?? null);
+        setError(reason.message);
+      } else if (reason instanceof ClientApiError && reason.fields) {
         setFieldErrors(reason.fields);
         setError("Revise os campos destacados.");
       } else {
@@ -741,12 +790,21 @@ function RpgFormFields({ id }: { id?: string }) {
       }
     }
   };
+  const restoreArchivedConflict = async () => {
+    if (!archivedConflictEntryId) return;
+    try {
+      await postJson(`/rpgs/${archivedConflictEntryId}/restore`, {});
+      navigate(`/app/library/${archivedConflictEntryId}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível restaurar este RPG.");
+    }
+  };
   const fieldError = (name: string) => fieldErrors[name]?.[0];
   if (!id && mode === "search") {
     return (
       <div className="page narrow">
         <PageHeader eyebrow="Novo RPG" title="Buscar publicação" description="Catálogo do RPG Manager, Open Library e páginas oficiais — poucos resultados, você escolhe e revisa antes de salvar." />
-        <OnlineSearchPanel onSelect={selectSearchResult} onCancel={() => setMode("manual")} />
+        <OnlineSearchPanel onSelect={selectSearchResult} onCancel={() => setMode("manual")} onRestore={restoreFromSearch} />
       </div>
     );
   }
@@ -982,7 +1040,14 @@ function RpgFormFields({ id }: { id?: string }) {
           />
         </label>
         </fieldset>
-        {error && <p className="form-error span-2">{error}</p>}
+        {error && (
+          <p className="form-error span-2">
+            {error}
+            {archivedConflictEntryId && (
+              <button type="button" className="ghost-button" onClick={() => void restoreArchivedConflict()}>Restaurar</button>
+            )}
+          </p>
+        )}
         <div className="form-actions span-2">
           <button
             type="button"
@@ -1000,7 +1065,6 @@ function RpgFormFields({ id }: { id?: string }) {
 
 export function RpgDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [data, setData] = useState<{
     item: Rpg;
     campaigns: Array<{ id: string; name: string; status: string }>;
@@ -1013,10 +1077,27 @@ export function RpgDetailPage() {
   }, [id]);
   if (!data) return <Loading />;
   const { item } = data;
-  const remove = async () => {
-    if (confirm(`Excluir “${item.title}”? Esta ação não pode ser desfeita.`)) {
-      await deleteApi(`/rpgs/${item.id}`);
-      navigate("/app/library");
+  // LIB-006: arquivar substitui excluir como ação normal da Biblioteca ativa (seção 5/18 do
+  // pedido) — nunca DELETE físico. Idempotente no servidor; aqui só atualiza o estado local em
+  // vez de navegar embora, para o usuário poder clicar "Restaurar" imediatamente se mudar de ideia.
+  const archive = async () => {
+    const campaignNote = data.campaigns.length
+      ? ` Este RPG tem ${data.campaigns.length} campanha(s) vinculada(s); elas continuarão funcionando normalmente, indicando que o RPG está arquivado.`
+      : "";
+    if (!confirm(`Arquivar “${item.title}”? Ele será removido da Biblioteca ativa, mas seus dados serão preservados e poderá ser restaurado depois.${campaignNote}`)) return;
+    try {
+      const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/archive`, {});
+      setData((current) => (current ? { ...current, item: updated } : current));
+    } catch (reason) {
+      alert(reason instanceof Error ? reason.message : "Não foi possível arquivar este RPG.");
+    }
+  };
+  const restore = async () => {
+    try {
+      const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/restore`, {});
+      setData((current) => (current ? { ...current, item: updated } : current));
+    } catch (reason) {
+      alert(reason instanceof Error ? reason.message : "Não foi possível restaurar este RPG.");
     }
   };
   return (
@@ -1024,7 +1105,7 @@ export function RpgDetailPage() {
       <PageHeader
         eyebrow={item.categoryName ?? "RPG"}
         title={item.title}
-        description={item.subtitle || `${item.subgenreName ?? "Sem subgênero"} · ${item.readiness}`}
+        description={(item.subtitle || `${item.subgenreName ?? "Sem subgênero"} · ${item.readiness}`) + (item.archivedAt ? " · Arquivado" : "")}
         action={
           <div className="button-row">
             <Link
@@ -1110,10 +1191,17 @@ export function RpgDetailPage() {
           ) : (
             <p>Nenhuma campanha ligada a este RPG.</p>
           )}
-          <button className="danger-button" onClick={() => void remove()}>
-            <Trash2 size={17} />
-            Excluir RPG
-          </button>
+          {item.archivedAt ? (
+            <button className="primary-button" onClick={() => void restore()}>
+              <ArchiveRestore size={17} />
+              Restaurar RPG
+            </button>
+          ) : (
+            <button className="secondary-button" onClick={() => void archive()}>
+              <Archive size={17} />
+              Arquivar RPG
+            </button>
+          )}
         </section>
       </div>
     </div>

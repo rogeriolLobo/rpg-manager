@@ -1,6 +1,6 @@
 import { Download, FileJson, FileSpreadsheet, Info, Monitor, Moon, Palette, Sun, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
 import { useAuth } from "../auth/auth-context";
 import { PageHeader } from "./dashboard-page";
@@ -113,10 +113,13 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
   type PreviewItem = {
     row?: number;
     title: string;
-    classification?: "NOVO" | "ATUALIZACAO" | "IGNORADO" | "ERRO";
+    classification?: "NOVO" | "ATUALIZACAO" | "IGNORADO" | "ERRO" | "EXISTING_PUBLICATION" | "ALREADY_IN_LIBRARY" | "ARCHIVED_IN_LIBRARY";
     message?: string;
     currentCoverUrl?: string | null;
     incomingCoverUrl?: string | null;
+    // LIB-003/LIB-006: ID da Library Entry existente (ALREADY_IN_LIBRARY/ARCHIVED_IN_LIBRARY) —
+    // usado só para linkar; nunca reenviado ao /import/confirm.
+    existingId?: string | null;
   };
   const [preview, setPreview] = useState<{
     jobId: string;
@@ -174,6 +177,7 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
           <strong>{preview.count} linhas analisadas</strong>
           {kind === "catalog" && preview.summary ? <span>
             {preview.summary.NOVO ?? 0} novos · {preview.summary.ATUALIZACAO ?? 0} atualizações · {preview.summary.IGNORADO ?? 0} ignorados · {preview.summary.ERRO ?? 0} erros
+            {(preview.summary.ARCHIVED_IN_LIBRARY ?? 0) > 0 ? ` · ${preview.summary.ARCHIVED_IN_LIBRARY} arquivados` : ""}
           </span> : null}
           {kind === "catalog" ? <div className="table-wrap"><table><thead><tr><th>Aprovar</th><th>Linha</th><th>Classificação</th><th>RPG</th><th>Resultado</th></tr></thead><tbody>
             {preview.items.map((item) => {
@@ -183,7 +187,8 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
                   if (!item.row) return;
                   setApprovedRows((current) => event.target.checked ? [...current, item.row!] : current.filter((row) => row !== item.row));
                 }} /></td>
-                <td>{item.row}</td><td><span className="badge">{item.classification}</span></td><td>{item.title || "—"}</td><td>{item.message}</td>
+                <td>{item.row}</td><td><span className="badge">{item.classification}</span></td><td>{item.title || "—"}</td>
+                <td>{item.message}{item.existingId && <Link to={`/app/library/${item.existingId}`}> Abrir</Link>}</td>
               </tr>;
             })}
           </tbody></table></div> : preview.items.map((item) => <span key={item.title}>{item.title}</span>)}

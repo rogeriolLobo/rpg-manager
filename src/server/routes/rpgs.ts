@@ -10,7 +10,7 @@ import { coverAssetKvKey, MAX_COVER_ASSET_BYTES, sniffCoverAssetContentType } fr
 import { rpgInputSchema, rpgUpdateInputSchema, urlImportSchema } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
-import { LIBRARY_ENTRY_JOIN, assertSharedPublicationEditable, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements } from './library-writes';
+import { LIBRARY_ENTRY_JOIN, assertSharedPublicationEditable, buildCreateLibraryEntryStatements, buildUpdateLibraryEntryStatements, findUserLibraryEntriesByPublicationIds } from './library-writes';
 
 export const rpgRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -52,6 +52,9 @@ interface RpgRow {
   // sobre cover_url na apresentação (ver present() abaixo). Nunca lido/escrito
   // pelo schema de coverUrl (rpgInputSchema) — mutação própria (rotas .../cover).
   cover_asset_id: string | null;
+  // LIB-006: archived_at existe desde migration 0016 (nunca usado até agora) —
+  // ver docs/library/LIBRARY_ARCHIVE.md. NULL = ativo; timestamp ISO = arquivado.
+  archived_at: string | null;
   // LIB-004: campos editoriais adicionais, sempre de `publications` (fonte de verdade).
   subtitle: string; authors: string; publisher: string; publication_year: number | null; language: string;
   publication_type: string; metadata_source: string;
@@ -68,7 +71,7 @@ function present(row: RpgRow) {
     subgenreName: row.subgenre_name, readingStatus: row.reading_status, hasPlayed: candidate.hasPlayed, wantsToPlay: candidate.wantsToPlay,
     priority: row.priority, playGroupId: row.play_group_id, playGroupName: row.play_group_name, playGroupNotes: row.play_group_notes, plannedPlayDate: row.planned_play_date, tableStatus: row.table_status,
     gameMaster: row.game_master, notes: row.notes, coverUrl: row.cover_url, isbn: row.isbn, coverSourceUrl: row.cover_source_url,
-    coverSourceNote: row.cover_source_note, coverAssetId: row.cover_asset_id, createdAt: row.created_at, updatedAt: row.updated_at,
+    coverSourceNote: row.cover_source_note, coverAssetId: row.cover_asset_id, archivedAt: row.archived_at, createdAt: row.created_at, updatedAt: row.updated_at,
     subtitle: row.subtitle, authors: row.authors, publisher: row.publisher, publicationYear: row.publication_year, language: row.language,
     publicationType: row.publication_type, metadataSource: row.metadata_source,
     recommendationScore: calculateRpgRecommendationScore(candidate), readiness: calculateRpgReadiness(candidate), nextAction: calculateRpgNextAction(candidate),
@@ -78,7 +81,7 @@ function present(row: RpgRow) {
 const SELECT = `SELECT r.id,r.publication_id,COALESCE(p.title,r.title) title,r.category_id,c.name category_name,r.subgenre_id,s.name subgenre_name,
   r.reading_status,r.has_played,r.wants_to_play,r.priority,r.play_group_notes,r.play_group_id,g.name play_group_name,r.planned_play_date,r.table_status,
   r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note,
-  p.cover_asset_id cover_asset_id,
+  p.cover_asset_id cover_asset_id,r.archived_at archived_at,
   COALESCE(p.subtitle,'') subtitle,COALESCE(p.authors,'') authors,COALESCE(p.publisher,'') publisher,p.publication_year publication_year,
   COALESCE(p.language,'') language,COALESCE(p.publication_type,'CORE_RULEBOOK') publication_type,COALESCE(p.metadata_source,'MANUAL') metadata_source,
   r.created_at,r.updated_at FROM rpgs r
@@ -99,6 +102,23 @@ async function validateGroup(c: Context<{ Bindings: Env; Variables: AppVariables
   if (!playGroupId) return;
   const group = await c.env.DB.prepare('SELECT id FROM play_groups WHERE id=? AND user_id=?').bind(playGroupId, c.get('user').id).first();
   if (!group) throw new ApiError(422, 'INVALID_PLAY_GROUP', 'Grupo de jogo inválido.');
+}
+
+// LIB-006: anota cada resultado com o estado da Library do usuário ATUAL para
+// a Publication correspondente (só resultados de origem INTERNAL/ISBN-exato
+// carregam `internalPublicationId` — Open Library "novo" nunca tem, porque
+// ainda não existe no nosso catálogo). Sem isso, um resultado que já está
+// arquivado apareceria como "novo" e um clique em "Selecionar" terminaria
+// num 409 sem explicação (seção 16 do pedido LIB-006).
+async function enrichWithLibraryState(c: Context<{ Bindings: Env; Variables: AppVariables }>, results: BookMetadataResult[]): Promise<BookMetadataResult[]> {
+  const publicationIds = results.map((result) => result.internalPublicationId).filter((id): id is string => Boolean(id));
+  if (!publicationIds.length) return results;
+  const states = await findUserLibraryEntriesByPublicationIds(c.env.DB, c.get('user').id, publicationIds);
+  return results.map((result) => {
+    const state = result.internalPublicationId ? states.get(result.internalPublicationId) : undefined;
+    if (!state) return result;
+    return { ...result, libraryStatus: state.archivedAt ? 'ARCHIVED_IN_LIBRARY' : 'ACTIVE_IN_LIBRARY', libraryEntryId: state.id };
+  });
 }
 
 rpgRoutes.get('/metadata', async (c) => {
@@ -144,7 +164,7 @@ rpgRoutes.get('/search-external', async (c) => {
   if (classified?.isbn13) {
     // ISBN é o identificador mais forte (seção 3) — catálogo interno primeiro, senão Open Library.
     const internal = await findInternalPublicationByIsbn13(c.env.DB, classified.isbn13);
-    if (internal) return c.json({ results: [internal] });
+    if (internal) return c.json({ results: await enrichWithLibraryState(c, [internal]) });
     try {
       const found = await openLibraryProvider.lookupByIsbn(classified.isbn13);
       return c.json({ results: found ? [found] : [] });
@@ -165,7 +185,8 @@ rpgRoutes.get('/search-external', async (c) => {
     // só falha a busca inteira se não houver NADA para mostrar (seção 8 do pedido original).
     if (!internalResults.length) throw new ApiError(502, 'PROVIDER_UNAVAILABLE', 'Não foi possível consultar a Open Library agora. Você ainda pode cadastrar o livro manualmente.');
   }
-  return c.json({ results: [...internalResults, ...externalResults].slice(0, RESULT_LIMIT) });
+  const combined = [...internalResults, ...externalResults].slice(0, RESULT_LIMIT);
+  return c.json({ results: await enrichWithLibraryState(c, combined) });
 });
 
 // LIB-004A: fallback "Importar de uma página oficial" (seção 10 do pedido) —
@@ -213,6 +234,9 @@ rpgRoutes.get('/', async (c) => {
   const page = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
   const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize ?? '24', 10) || 24));
   const where = ['r.user_id=?']; const values: unknown[] = [user.id];
+  // LIB-006: Biblioteca padrão mostra só ativos; `?archived=true` mostra só arquivados —
+  // nunca mistura os dois (ver docs/library/LIBRARY_ARCHIVE.md).
+  where.push(query.archived === 'true' ? 'r.archived_at IS NOT NULL' : 'r.archived_at IS NULL');
   if (query.search) { where.push('r.title LIKE ? ESCAPE \'\\\''); values.push(`%${query.search.slice(0, 100).replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`); }
   const filters: Record<string, string> = { category: 'r.category_id', subgenre: 'r.subgenre_id', readingStatus: 'r.reading_status', priority: 'r.priority', tableStatus: 'r.table_status' };
   for (const [key, column] of Object.entries(filters)) if (query[key]) { where.push(`${column}=?`); values.push(query[key]); }
@@ -296,6 +320,36 @@ rpgRoutes.patch('/:id', async (c) => {
   return c.json({ item: present(row!) });
 });
 
+// LIB-006: arquivar NÃO é excluir — só marca rpgs.archived_at, preservando
+// 100% dos dados (publication_id, coverUrl/coverAssetId, ISBN, estado
+// pessoal, campaign links). Nunca toca em `publications`/KV — uma entry
+// arquivada continua contando como referência para SHARED_PUBLICATION_
+// METADATA_LOCKED (ver assertSharedPublicationEditable, docs/library/
+// LIBRARY_ARCHIVE.md). Idempotente por design: UPDATE com COALESCE não muda
+// o valor se já estava arquivado, mas `meta.changes` ainda confirma posse
+// (mesma técnica de LIB-005 para archive/restore — ver docs/library/
+// LIBRARY_ARCHIVE.md, "Idempotência").
+rpgRoutes.post('/:id/archive', async (c) => {
+  const user = c.get('user'); const entryId = c.req.param('id'); const now = nowIso();
+  const result = await c.env.DB.prepare('UPDATE rpgs SET archived_at=COALESCE(archived_at,?),updated_at=? WHERE id=? AND user_id=?').bind(now, now, entryId, user.id).run();
+  if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
+  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, user.id).first<RpgRow>();
+  return c.json({ item: present(row!) });
+});
+
+rpgRoutes.post('/:id/restore', async (c) => {
+  const user = c.get('user'); const entryId = c.req.param('id'); const now = nowIso();
+  const result = await c.env.DB.prepare('UPDATE rpgs SET archived_at=NULL,updated_at=? WHERE id=? AND user_id=?').bind(now, entryId, user.id).run();
+  if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
+  const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(entryId, user.id).first<RpgRow>();
+  return c.json({ item: present(row!) });
+});
+
+// LIB-006 seção 18: hard delete permanece só por compatibilidade — não é mais
+// usado pelo fluxo normal da UI (substituído por archive). Nenhuma nova
+// interface de "excluir permanentemente" foi criada nesta tarefa; decisão de
+// remover/expor isso de novo fica para uma tarefa própria (ver
+// docs/library/LIBRARY_ARCHIVE.md, "Hard delete").
 rpgRoutes.delete('/:id', async (c) => {
   try {
     const result = await c.env.DB.prepare('DELETE FROM rpgs WHERE id=? AND user_id=?').bind(c.req.param('id'), c.get('user').id).run();

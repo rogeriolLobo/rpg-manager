@@ -7,13 +7,17 @@ export const dashboardRoutes = new Hono<{ Bindings: Env; Variables: AppVariables
 
 dashboardRoutes.get('/', async (c) => {
   const userId = c.get('user').id;
+  // LIB-006: métricas/recomendações do dashboard consideram só Library Entries ATIVAS —
+  // um RPG arquivado não deve aparecer como recomendação nem inflar contadores
+  // (seção 10 do pedido LIB-006). "Campanhas recentes" abaixo não é filtrado: a campanha
+  // continua existindo/carregando mesmo se o RPG dela for arquivado depois (seção 11).
   const [metrics, categories, reading, rpgRows, campaignRows] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT COUNT(*) total,SUM(reading_status='READ') read_count,SUM(has_played=1) played_count,SUM(wants_to_play=1) wants_count,
-      SUM(reading_status!='READ') unread_count,SUM(table_status='SCHEDULED') scheduled_count FROM rpgs WHERE user_id=?`).bind(userId),
-    c.env.DB.prepare(`SELECT COALESCE(c.name,'Sem categoria') name,COUNT(*) count FROM rpgs r LEFT JOIN categories c ON c.id=r.category_id WHERE r.user_id=? GROUP BY c.name ORDER BY count DESC`).bind(userId),
-    c.env.DB.prepare(`SELECT reading_status status,COUNT(*) count FROM rpgs WHERE user_id=? GROUP BY reading_status`).bind(userId),
+      SUM(reading_status!='READ') unread_count,SUM(table_status='SCHEDULED') scheduled_count FROM rpgs WHERE user_id=? AND archived_at IS NULL`).bind(userId),
+    c.env.DB.prepare(`SELECT COALESCE(c.name,'Sem categoria') name,COUNT(*) count FROM rpgs r LEFT JOIN categories c ON c.id=r.category_id WHERE r.user_id=? AND r.archived_at IS NULL GROUP BY c.name ORDER BY count DESC`).bind(userId),
+    c.env.DB.prepare(`SELECT reading_status status,COUNT(*) count FROM rpgs WHERE user_id=? AND archived_at IS NULL GROUP BY reading_status`).bind(userId),
     c.env.DB.prepare(`SELECT r.id,r.title,r.reading_status,r.has_played,r.wants_to_play,r.priority,r.play_group_notes,r.planned_play_date,r.table_status,
-      s.name subgenre_name,g.name play_group_name FROM rpgs r LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=?`).bind(userId),
+      s.name subgenre_name,g.name play_group_name FROM rpgs r LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? AND r.archived_at IS NULL`).bind(userId),
     c.env.DB.prepare(`SELECT c.id,c.name,c.status,c.session_zero_date,c.first_session_date,c.frequency,c.next_session_date,c.session_goal,r.title rpg_title,
       c.legacy_sessions_completed+(SELECT COUNT(*) FROM campaign_sessions s WHERE s.campaign_id=c.id) sessions_completed,
       EXISTS(SELECT 1 FROM campaign_members m WHERE m.campaign_id=c.id AND m.active=1 AND length(m.character_name)>0) has_characters
