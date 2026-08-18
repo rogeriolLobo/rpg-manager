@@ -123,3 +123,45 @@ instrução do projeto é não inventar resultados, incluindo não inventar
 lacunas que não existem.)
 
 Nenhum **BROKEN** foi encontrado nesta auditoria (fora do bug de coverUrl já corrigido nesta sessão, que pertencia à Library).
+
+## Atualização — RPG-1.0-BATCH2 (reauditoria factual, ver `docs/product/MASTER_BACKLOG.md#RPG-1.0-BATCH2`)
+
+As linhas acima refletem o estado de 2026-08-14 e são preservadas por
+valor histórico. Estado real após revalidação/implementação nesta
+rodada:
+
+- **Invites (P1 acima) → resolvido.** `vault-and-worlds.test.ts` já
+  cobria create/accept/reuse/token inválido/expiração/revogação desde
+  antes desta auditoria — não localizado em 14/08 por estar num arquivo
+  mais amplo. Confirmado passando, nenhum código novo.
+- **Global Search (P2 acima) → resolvido.** Novo
+  `tests/integration/global-search.test.ts` (6 casos) — isolamento
+  multi-tenant, visibilidade de World, permissão de entidade e o
+  comportamento deliberado do LIB-006 (RPG arquivado do próprio usuário
+  continua buscável) confirmados corretos. Nenhum bug de código
+  encontrado.
+- **Quests, Handouts (linha "NÃO EXISTE HOJE") → não estava correto.**
+  `QUEST`/`HANDOUT` já eram valores válidos de `ENTITY_TYPES` antes desta
+  sessão, funcionando como entidades base do Vault — reclassificado
+  `SATISFIED_BY_EXISTING_DOMAIN`, com teste de round-trip real
+  adicionado (não existia antes).
+- **Compendium (linha "NÃO EXISTE HOJE") → `SATISFIED_BY_EXISTING_DOMAIN`.**
+  O Vault já é a listagem filtrável por tipo/World/visibilidade/busca —
+  o mesmo conceito, sem view agregada nova necessária.
+- **Ideas / Quick Capture → implementado** nesta rodada, exatamente como
+  a ação recomendada já indicava: atalho de UX sobre `journal_pages`
+  existente, sem domínio novo. Ver `docs/product/MASTER_BACKLOG.md#RPG-1.0-BATCH2`.
+- **External Resources → implementado** nesta rodada, mas como tabela
+  própria (`external_resources`), não como Vault Entity —
+  `vault_entities.entity_type` tem `CHECK` fechado e é a tabela mais
+  referenciada por FK do produto; adicionar um tipo novo exigiria um
+  rebuild de alto risco. Ver justificativa completa em
+  `src/server/routes/external-resources.ts`.
+- **Ainda `MISSING`, deliberadamente fora desta rodada (não bloqueio,
+  ver `MASTER_BACKLOG.md`):** Revision History, Cartografia, GM Tools.
+- **Bug real de UX/mobile encontrado e corrigido nesta rodada** (não
+  relacionado a nenhuma feature específica, afeta qualquer overlay
+  `position:fixed` no Dashboard/Settings/páginas com `.detail-grid`):
+  `grid-template-columns: 1fr` no breakpoint mobile permitia overflow
+  horizontal da página quando havia uma tabela larga — corrigido para
+  `minmax(0, 1fr)`.

@@ -385,6 +385,26 @@ td {
   border-bottom: 1px solid var(--border);
   padding: 0.75rem 0;
 }
+/* F-003: lista de recursos externos (link + ícone + descrição) reaproveitando .clean-list. */
+.external-resource-list {
+  margin-bottom: 1.2rem;
+}
+.external-resource-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  min-width: 0;
+}
+.external-resource-link span {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.external-resource-link small {
+  color: var(--text-muted);
+}
 .empty-state {
   text-align: center;
   padding: 2.5rem 1rem;
@@ -624,6 +644,26 @@ label small {
 .form-actions {
   justify-content: flex-end;
   margin-top: 0.5rem;
+}
+/* F-005: modal de captura rápida de ideia (Dashboard) — backdrop dedicado (não reaproveita
+   .command-backdrop: seu padding-top fixo é pensado para a paleta de comandos, mais alta, e
+   centralizava mal um formulário curto em viewports estreitos — confirmado visualmente num
+   teste E2E mobile real). Centralização por flexbox, robusta em qualquer largura de viewport. */
+.quick-idea-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--overlay);
+}
+.quick-idea-modal {
+  width: 100%;
+  max-width: 30rem;
+  max-height: 100%;
+  overflow-y: auto;
 }
 fieldset {
   border: 1px solid var(--border);
@@ -1081,7 +1121,14 @@ legend {
   .dashboard-grid,
   .settings-grid,
   .detail-grid {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr), não "1fr": um track "1fr" sozinho ainda usa min-width:auto (o
+       min-content do item) como piso — uma tabela larga (ex.: "O que jogar agora?" no
+       Dashboard) força esse piso além da viewport mobile, criando overflow horizontal na
+       PÁGINA inteira. Isso quebra qualquer overlay position:fixed (mobile Chrome amplia o
+       layout viewport para caber o conteúdo, desalinhando o fixed do visual viewport) —
+       encontrado via teste E2E real (modal de "Nova ideia" aparecendo fora do lugar em
+       mobile-chromium). */
+    grid-template-columns: minmax(0, 1fr);
   }
   .filters {
     grid-template-columns: 1fr 1fr;

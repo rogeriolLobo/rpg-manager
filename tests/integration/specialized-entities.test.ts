@@ -41,4 +41,32 @@ describe('campos especializados e Bestiário',()=>{
     expect(item.creature.statBlock).toEqual(expect.objectContaining({templateName:'Ficha narrativa',values:{ameaca:3,habito:'Coleciona sinos'}}));
     expect((await request(`/bestiary/templates/${templateId}`,'DELETE',undefined,owner)).status).toBe(409);
   });
+
+  // RPG MANAGER 1.0 — a auditoria de docs/audit/RPG_MANAGER_1_0_MATRIX.md (2026-08-14) listava
+  // Quests/Handouts como MISSING. Revalidação factual: QUEST e HANDOUT já são valores válidos de
+  // ENTITY_TYPES (src/domain/content/types.ts) desde antes desta sessão, sem nenhum caso especial
+  // em vault.ts que os exclua — são entidades base do Vault (nome/resumo/descrição/visibilidade/
+  // World/campanha), o mesmo modelo já usado por LOCATION/EVENT. O seletor de tipo do formulário
+  // (vault-pages.tsx) já os lista. Não há gap real: SATISFIED_BY_EXISTING_DOMAIN, sem necessidade
+  // de subsistema paralelo. Este teste prova o round-trip real, que não existia antes.
+  it('QUEST e HANDOUT funcionam como entidades base do Vault (SATISFIED_BY_EXISTING_DOMAIN — sem subsistema novo)',async()=>{
+    const owner=await register('quest-handout-owner');
+    const worldId=await createWorld(owner,'Aldeia das Quests');
+    const quest=await request('/vault','POST',{entityType:'QUEST',name:'Resgatar a relíquia',summary:'Missão principal do arco 1',description:'Detalhes da missão.',visibility:'PRIVATE',worldId,groupId:null,parentEntityId:null,adventure:null,lore:null},owner);
+    expect(quest.status).toBe(201);
+    const questId=(await quest.json() as {id:string}).id;
+    const questItem=(await (await request(`/vault/${questId}`,'GET',undefined,owner)).json() as {item:{entityType:string;name:string}}).item;
+    expect(questItem).toMatchObject({entityType:'QUEST',name:'Resgatar a relíquia'});
+
+    const handout=await request('/vault','POST',{entityType:'HANDOUT',name:'Carta do informante',summary:'',description:'Texto para entregar aos jogadores.',visibility:'PLAYERS',worldId,groupId:null,parentEntityId:null,adventure:null,lore:null},owner);
+    expect(handout.status).toBe(201);
+    const handoutId=(await handout.json() as {id:string}).id;
+    const handoutItem=(await (await request(`/vault/${handoutId}`,'GET',undefined,owner)).json() as {item:{entityType:string;visibility:string}}).item;
+    expect(handoutItem).toMatchObject({entityType:'HANDOUT',visibility:'PLAYERS'});
+
+    const filtered=await request(`/vault?worldId=${worldId}&type=QUEST`,'GET',undefined,owner);
+    const filteredItems=(await filtered.json() as {items:Array<{id:string;entityType:string}>}).items;
+    expect(filteredItems.some((item)=>item.id===questId)).toBe(true);
+    expect(filteredItems.some((item)=>item.id===handoutId)).toBe(false);
+  });
 });

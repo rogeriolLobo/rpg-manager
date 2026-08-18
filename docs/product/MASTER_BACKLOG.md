@@ -462,6 +462,93 @@ Status possíveis: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `DONE`.
   CSV export/import, download em massa de bytes do KV para dentro do
   backup, suporte a delimitador `;`.
 
+## RPG-1.0-BATCH2 — Fechamento de P1/P2 + Ideas + External Resources + revalidação de Quests/Handouts/Compendium
+
+Modo "finalização acelerada 1.0" — reauditoria factual do estado atual
+(`docs/audit/RPG_MANAGER_1_0_MATRIX.md`, 2026-08-14) antes de assumir
+qualquer gap, execução contínua sem parar entre itens.
+
+- **Status:** `DONE` — código+testes+docs no commit final, CI verde,
+  deploy publicado, `GET /api/v1/version` confirmando produção.
+- **F-012 (Invites, P1 da auditoria original) — revalidado, não
+  reimplementado:** `vault-and-worlds.test.ts` já cobria create (só
+  owner), accept, reuse (código já usado → 404), token inválido,
+  expiração e revogação desde antes desta sessão — a auditoria de
+  14/08 não tinha localizado esse teste (estava dentro de um arquivo
+  mais amplo, não num arquivo dedicado a Invites). Nenhum código novo;
+  só a confirmação factual + atualização da matriz de auditoria.
+- **F-006 (Global Search, P2 da auditoria original) — bug real não
+  encontrado, cobertura real adicionada:** só existia uma asserção
+  incidental dentro de `world-knowledge.test.ts`. Novo arquivo
+  `tests/integration/global-search.test.ts` (6 casos: query curta,
+  isolamento entre contas, RPG arquivado do próprio usuário continua
+  buscável — decisão deliberada do LIB-006 — World PRIVATE/GROUP,
+  entidade GM_ONLY via `canViewEntity`, filtro por `worldId`) — todos
+  passam sem nenhuma mudança de código, confirmando que o isolamento
+  multi-tenant e as permissões já estavam corretas.
+- **F-013 (Quests/Handouts) e F-014 (Compendium) — `SATISFIED_BY_EXISTING_DOMAIN`:**
+  a auditoria de 14/08 listava ambos como `MISSING`. Revalidação
+  factual: `QUEST` e `HANDOUT` já são valores válidos de `ENTITY_TYPES`
+  (`src/domain/content/types.ts`), sem nenhum caso especial em
+  `vault.ts` que os exclua — funcionam hoje como entidades base do
+  Vault (mesmo modelo de LOCATION/EVENT), já oferecidos no seletor de
+  tipo do formulário. Compendium: o Vault já é uma listagem filtrável
+  por tipo/World/visibilidade/busca — o mesmo conceito, sem view
+  agregada nova. Nenhum código novo; teste de round-trip real adicionado
+  em `tests/integration/specialized-entities.test.ts` para QUEST/HANDOUT
+  (não existia antes).
+- **F-005 (Ideas / Quick Capture) — implementado, sem domínio novo:**
+  botão "Nova ideia" no Dashboard (`QuickIdeaButton`,
+  `dashboard-page.tsx`) abre um modal curto (Título + Anotação opcional
+  + seletor de World) e grava via `POST /journal/:worldId/pages`
+  (endpoint já existente desde LIB-002/journal — nenhuma rota nova).
+  Só aparece para quem já é dono de pelo menos um World. **Decisão de
+  escopo documentada:** "World opcional" (mencionado no pedido) não foi
+  implementado — `journal_pages.world_id` é `NOT NULL` desde a migration
+  0011, e relaxar isso exigiria um rebuild de tabela
+  (`docs/architecture/DATABASE_MIGRATION_SAFETY.md`) desproporcional
+  para esta feature; o seletor de World no modal cobre o caso de uso
+  real sem esse risco.
+- **Bug real encontrado e corrigido durante o teste E2E do Quick Capture:**
+  `.dashboard-grid`/`.settings-grid`/`.detail-grid` no breakpoint mobile
+  usavam `grid-template-columns: 1fr` (sem `minmax(0, 1fr)`) — um único
+  track `1fr` ainda respeita `min-width:auto` (o min-content do item),
+  então uma tabela larga (ex.: "O que jogar agora?" no Dashboard) forçava
+  overflow horizontal na PÁGINA inteira em viewports estreitos. Isso
+  desalinhava qualquer overlay `position:fixed`/`100vw` (mobile Chrome
+  amplia o layout viewport para caber o conteúdo, descolando do visual
+  viewport) — encontrado porque o modal de "Nova ideia" aparecia fora do
+  lugar em `mobile-chromium`. Corrigido (`minmax(0, 1fr)`) — afeta
+  positivamente qualquer overlay futuro nessas três grids, não só o
+  Quick Capture.
+- **F-003 (External Resources) — implementado como tabela própria, não
+  como Vault Entity:** `vault_entities.entity_type` tem
+  `CHECK(entity_type IN (...))` fechado (migration 0006) — adicionar um
+  tipo novo exigiria rebuild da tabela mais referenciada por FK do
+  produto (mesma classe de risco do incidente LIB-004B). Em vez disso,
+  `external_resources` (migration `0023_external_resources.sql`) —
+  tabela nova, aditiva, sem nenhuma FK de entrada. Escopada por World
+  (`world_id NOT NULL`), visibilidade reaproveita o modelo do próprio
+  World (leitura para quem `canViewWorld`, escrita só pelo owner — mesmo
+  padrão do Diário), URL validada com a mesma política zero-fetch do
+  `coverUrl` (LIB-001, sem allowlist, só sintática). Nova página
+  `/app/worlds/:id/resources`, link "Recursos externos" na navegação
+  contextual do World.
+- **Testes:** integration (`global-search.test.ts` 6 casos,
+  `external-resources.test.ts` 2 casos, +1 caso QUEST/HANDOUT em
+  `specialized-entities.test.ts`), E2E (`dashboard-quick-idea.spec.ts`,
+  `external-resources.spec.ts`, desktop+mobile). Suíte completa (unit
+  185, integration 132, E2E — ver relatório) revalidada sem regressão.
+- **Commit:** ver relatório da sessão (RELEASE_CHAIN_POLICY: commit
+  final único, code+tests+docs, antes do deploy).
+- **Fora de escopo desta rodada (deliberado, não é BLOCKED — planejado
+  para o próximo batch):** Cartografia (F-002), Revision History (F-001)
+  e GM Tools (F-004) — os três exigem desenho próprio (schema, UI,
+  decisões de risco) maior que o restante deste batch; adiados para
+  manter o tamanho do commit revisável, não por bloqueio real. VTT,
+  Character Sheet Engine completo e Social/Amizades continuam
+  explicitamente fora do 1.0.
+
 ## P0-002 — Falhas em GitHub Actions
 
 - **Priority:** P0
@@ -500,10 +587,13 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 |---|---|---|---|
 | F-001 | Revision History (`entity_revisions`) | P3 | `NOT_STARTED` |
 | F-002 | Cartografia zero-cost (mapas/pins) | P3 | `NOT_STARTED` |
-| F-003 | External Resources (referência a URL externa) | P3 | `NOT_STARTED` |
+| F-003 | External Resources (referência a URL externa) | P3 | `DONE` (RPG-1.0-BATCH2) |
 | F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `NOT_STARTED` |
-| F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `NOT_STARTED` |
-| F-006 | Teste de integração dedicado para Global Search | P2 | `NOT_STARTED` |
+| F-005 | Ideas / Quick Capture (UX sobre Journal existente) | P3 | `DONE` (RPG-1.0-BATCH2) |
+| F-006 | Teste de integração dedicado para Global Search | P2 | `DONE` (RPG-1.0-BATCH2) |
+| F-012 | Teste de integração dedicado para Invites | P1 | `DONE` — revalidado, já coberto por `vault-and-worlds.test.ts` desde antes desta sessão (create/accept/reuse/invalid-token/expiry/revoke) |
+| F-013 | Quests/Handouts | P2 | `DONE` — `SATISFIED_BY_EXISTING_DOMAIN` (entidades base do Vault, sem subsistema novo) |
+| F-014 | Compendium (visão agregada) | P3 | `DONE` — `SATISFIED_BY_EXISTING_DOMAIN` (Vault já é a listagem filtrável por tipo/World/visibilidade) |
 | F-007 | Split de domínio System→Publication→User State (Opção A, `LIBRARY_ARCHITECTURE.md`) | P2 | `DONE` (LIB-002) |
 | F-008 | Upload real de capa + Workers KV (`COVER_STORAGE.md`) | P2 | `DONE` (LIB-005) |
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |

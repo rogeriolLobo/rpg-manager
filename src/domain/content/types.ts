@@ -42,6 +42,9 @@ export const RELATION_TYPES = [
 export const RELATION_DIRECTIONS = ['DIRECTED', 'BIDIRECTIONAL'] as const;
 export const TEMPORAL_PRECISIONS = ['EXACT', 'DAY', 'MONTH', 'YEAR', 'ERA', 'APPROXIMATE', 'UNKNOWN'] as const;
 export const CREATURE_STAT_FIELD_TYPES = ['TEXT', 'NUMBER', 'BOOLEAN'] as const;
+// F-003: tipo de referência externa (link) — tabela própria (external_resources), não um
+// Vault Entity — ver src/server/routes/external-resources.ts para a justificativa completa.
+export const EXTERNAL_RESOURCE_TYPES = ['ARTICLE', 'IMAGE', 'MAP', 'PDF', 'VIDEO', 'AUDIO', 'OTHER'] as const;
 
 export type VaultEntityType = typeof ENTITY_TYPES[number];
 export type EntityVisibility = typeof ENTITY_VISIBILITIES[number];
@@ -56,6 +59,7 @@ export type RelationType = typeof RELATION_TYPES[number];
 export type RelationDirection = typeof RELATION_DIRECTIONS[number];
 export type TemporalPrecision = typeof TEMPORAL_PRECISIONS[number];
 export type CreatureStatFieldType = typeof CREATURE_STAT_FIELD_TYPES[number];
+export type ExternalResourceType = typeof EXTERNAL_RESOURCE_TYPES[number];
 
 export interface CreatureStatFieldDefinition {
   key: string;

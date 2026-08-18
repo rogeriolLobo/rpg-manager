@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
+import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, EXTERNAL_RESOURCE_TYPES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isIsbnInputValid } from '../../domain/rpg/isbn';
 import { PUBLICATION_TYPES } from '../../domain/rpg/library-domain';
 import { isPublicHttpsUrl } from '../security/cover-url';
@@ -295,6 +295,15 @@ export const journalPageInputSchema = z.strictObject({
   title: z.string().trim().min(1).max(160),
   content: trimmed(100000).default(''),
   folderId: z.string().trim().max(80).nullable().default(null),
+});
+
+// F-003: mesma política de URL do coverUrl (LIB-001) — sintática, sem allowlist de host, sem
+// fetch do servidor (o navegador é quem abre o link, via <a href>).
+export const externalResourceInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  url: z.string().trim().max(2000).refine(isPublicHttpsUrl, 'Use uma URL HTTPS pública.'),
+  description: trimmed(2000).default(''),
+  resourceType: z.enum(EXTERNAL_RESOURCE_TYPES),
 });
 
 export const worldInviteInputSchema = z.strictObject({
