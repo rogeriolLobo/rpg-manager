@@ -28,12 +28,36 @@ produto separada, fora de escopo do LIB-007.
 
 ### B) Backup completo (JSON estruturado)
 
-`GET /api/v1/export` (sem `?format=csv`, o padrão). Contém **todas** as
-tabelas do usuário — `rpgs` (incluindo `archived_at`), `publications`
-(incluindo `cover_asset_id`), `game_systems`, `publication_external_ids`,
-campanhas/sessões/membros, grupos, Worlds, Vault, preferências. É o
-único formato com cobertura completa; ver seção "Cobertura do backup
-completo" abaixo.
+`GET /api/v1/export` (sem `?format=csv`, o padrão). Cobertura completa
+do domínio de **Library**: `rpgs` (incluindo `archived_at`),
+`publications` (incluindo `cover_asset_id`), `game_systems`,
+`publication_external_ids`, campanhas/sessões/membros/presença, grupos.
+Worlds/Vault estão presentes apenas em nível de **linha-base**
+(`worlds`, `vault_entities`, `adventureDetails`) — ver correção de
+escopo abaixo, achada na auditoria de integridade RPG-1.0-BATCH5.
+
+**Achado de auditoria (RPG-1.0-BATCH5, não corrigido nesta rodada —
+decisão deliberada de não expandir o backup sob pressão de prazo, ver
+`.claude/CLAUDE.md` §40):** o backup **não** inclui hoje os campos
+especializados de Vault entities (NPC/Creature/Character/Faction/
+Item/Lore — tabelas `npc_details`, `creature_details`,
+`creature_stat_blocks`, `character_details`, `faction_details`,
+`item_details`, `lore_details`), nem Journal (`journal_pages`,
+`journal_folders`), Wiki (`wiki_entity_metadata`, `wiki_entity_tags`,
+`wiki_entity_aliases`, `wiki_folders`, `world_tags`), Relations
+(`entity_relations`), Cartografia (`world_maps`, `map_pins`),
+External Resources (`external_resources`), Timeline/Calendar
+(`world_eras`, `world_calendars`, `event_temporal_details`), nem o
+novo `entity_revisions` (F-001). Restaurar este backup hoje recria a
+entidade base do Vault/World mas perde os campos especializados e
+todo o conteúdo de Worlds além do registro raiz — isso NÃO é um risco
+para os dados reais (nada é apagado, o backup é só leitura), mas é uma
+lacuna real de completude que a redação anterior deste documento
+("contém todas as tabelas") descrevia incorretamente. Registrado como
+item de backlog dedicado (ver `docs/product/MASTER_BACKLOG.md`) para
+uma sessão própria — expandir isso agora, sem tempo para desenhar e
+testar o round-trip completo de cada tabela nova, violaria a mesma
+regra de qualidade que motivou adiar o F-001 originalmente.
 
 ## Semântica do preview de import de catálogo
 

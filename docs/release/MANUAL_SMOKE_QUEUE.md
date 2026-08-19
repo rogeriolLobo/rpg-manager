@@ -59,6 +59,21 @@ local já provado — não elimina a necessidade da execução abaixo.
   rolar um dado (ex.: `2d6+1`) e conferir o resultado → iniciar/pausar/
   zerar o timer.
 
+## RPG-1.0-BATCH5 (F-001 — Revision History)
+
+- [ ] **Vault → Histórico** — abrir uma entidade própria do Vault,
+  editar e salvar, clicar em "Histórico", confirmar que aparecem 2
+  revisões (Criação + Edição), abrir "Ver" na revisão antiga, restaurar
+  e confirmar que o conteúdo voltou e uma 3ª revisão (Restauração)
+  apareceu no topo.
+- [ ] **World → Histórico** — mesmo fluxo acima, mas na tela de detalhe
+  de um World próprio.
+- [ ] **Journal → Histórico** — abrir uma página do Diário de um World
+  próprio, editar, salvar, confirmar histórico e restore funcionam
+  igual.
+- [ ] **Isolamento** — confirmar que o botão "Histórico" não aparece em
+  entidades/Worlds que não são seus (visão de PLAYER/campanha).
+
 ## Checklist final (preencher ao fechar o 1.0)
 
 - [ ] Todos os itens acima executados sem falha.

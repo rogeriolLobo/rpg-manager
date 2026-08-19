@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { journalFolderInputSchema, journalPageInputSchema } from '../../shared/validation/schemas';
 import { ownedWorld } from '../content/authorization';
+import { getRevision, listRevisions, parseRevisionNumber, parseSnapshot, recordRevisionStatement } from '../content/revisions';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
@@ -65,19 +66,27 @@ journalRoutes.delete('/:worldId/folders/:folderId', async (c) => {
 });
 
 journalRoutes.post('/:worldId/pages', async (c) => {
-  const worldId = c.req.param('worldId'); await ownedWorld(c, worldId);
+  const worldId = c.req.param('worldId'); const world = await ownedWorld(c, worldId);
   const input = await readJson(c, journalPageInputSchema); await validatePageFolder(c.env, worldId, input.folderId);
   const id = crypto.randomUUID(), now = nowIso();
-  await c.env.DB.prepare('INSERT INTO journal_pages (id,world_id,folder_id,title,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-    .bind(id, worldId, input.folderId, input.title, input.content, now, now).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO journal_pages (id,world_id,folder_id,title,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+      .bind(id, worldId, input.folderId, input.title, input.content, now, now),
+    // F-001: revisão inicial, mesma transação do create.
+    recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: id, ownerUserId: world.owner_user_id, actorUserId: c.get('user').id, action: 'CREATE', snapshot: input, now }),
+  ]);
   return c.json({ item: { id, ...input, createdAt: now, updatedAt: now } }, 201);
 });
 
 journalRoutes.patch('/:worldId/pages/:pageId', async (c) => {
-  const worldId = c.req.param('worldId'); await ownedWorld(c, worldId);
+  const worldId = c.req.param('worldId'); const world = await ownedWorld(c, worldId);
   const input = await readJson(c, journalPageInputSchema); await validatePageFolder(c.env, worldId, input.folderId);
-  const result = await c.env.DB.prepare('UPDATE journal_pages SET folder_id=?,title=?,content=?,updated_at=? WHERE id=? AND world_id=?')
-    .bind(input.folderId, input.title, input.content, nowIso(), c.req.param('pageId'), worldId).run();
+  const pageId = c.req.param('pageId'); const now = nowIso();
+  const [result] = await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE journal_pages SET folder_id=?,title=?,content=?,updated_at=? WHERE id=? AND world_id=?')
+      .bind(input.folderId, input.title, input.content, now, pageId, worldId),
+    recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: pageId, ownerUserId: world.owner_user_id, actorUserId: c.get('user').id, action: 'UPDATE', snapshot: input, now }),
+  ]);
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Página não encontrada.');
   return c.json({ success: true });
 });
@@ -87,4 +96,44 @@ journalRoutes.delete('/:worldId/pages/:pageId', async (c) => {
   const result = await c.env.DB.prepare('DELETE FROM journal_pages WHERE id=? AND world_id=?').bind(c.req.param('pageId'), worldId).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Página não encontrada.');
   return c.body(null, 204);
+});
+
+// F-001: histórico é owner-only — Journal já é inteiramente owner-only (nem GET de lista é
+// compartilhado, ver `/:worldId` acima), então isso não amplia nem restringe nada além do que já
+// existe.
+journalRoutes.get('/:worldId/pages/:pageId/revisions', async (c) => {
+  const worldId = c.req.param('worldId'); await ownedWorld(c, worldId);
+  const pageId = c.req.param('pageId');
+  const page = await c.env.DB.prepare('SELECT id FROM journal_pages WHERE id=? AND world_id=?').bind(pageId, worldId).first();
+  if (!page) throw new ApiError(404, 'NOT_FOUND', 'Página não encontrada.');
+  const query = c.req.query();
+  const pageNum = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number.parseInt(query.pageSize ?? '20', 10) || 20));
+  const result = await listRevisions(c.env.DB, 'JOURNAL_PAGE', pageId, pageNum, pageSize);
+  return c.json({ items: result.items, pagination: { page: pageNum, pageSize, total: result.total } });
+});
+
+journalRoutes.get('/:worldId/pages/:pageId/revisions/:number', async (c) => {
+  const worldId = c.req.param('worldId'); await ownedWorld(c, worldId);
+  const pageId = c.req.param('pageId'); const number = parseRevisionNumber(c.req.param('number'));
+  const row = await getRevision(c.env.DB, 'JOURNAL_PAGE', pageId, number);
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Revisão não encontrada.');
+  return c.json({ item: { ...row, snapshot: JSON.parse(row.snapshotRaw) } });
+});
+
+journalRoutes.post('/:worldId/pages/:pageId/revisions/:number/restore', async (c) => {
+  const worldId = c.req.param('worldId'); const world = await ownedWorld(c, worldId);
+  const pageId = c.req.param('pageId'); const number = parseRevisionNumber(c.req.param('number'));
+  const revisionRow = await getRevision(c.env.DB, 'JOURNAL_PAGE', pageId, number);
+  if (!revisionRow) throw new ApiError(404, 'NOT_FOUND', 'Revisão não encontrada.');
+  const input = parseSnapshot(journalPageInputSchema, revisionRow.snapshotRaw);
+  await validatePageFolder(c.env, worldId, input.folderId);
+  const now = nowIso();
+  const [result] = await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE journal_pages SET folder_id=?,title=?,content=?,updated_at=? WHERE id=? AND world_id=?')
+      .bind(input.folderId, input.title, input.content, now, pageId, worldId),
+    recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: pageId, ownerUserId: world.owner_user_id, actorUserId: c.get('user').id, action: 'RESTORE', snapshot: input, restoredFromRevisionNumber: number, now }),
+  ]);
+  if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Página não encontrada.');
+  return c.json({ success: true });
 });

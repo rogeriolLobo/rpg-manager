@@ -5,6 +5,9 @@ process.env.no_proxy = '127.0.0.1,localhost';
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // RPG-1.0-BATCH5: aquece worker+D1 com uma chamada real ANTES de qualquer teste cronometrado
+  // (não é um timeout cego — ver tests/e2e/global-setup.ts e docs/e2e/LOCAL_E2E_DIAGNOSTICS.md).
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false,
   // LIB-003: 1 worker só no CI — causa raiz de dois flakes recorrentes
   // (RATE_LIMIT em AUTH_REGISTRATION_RATE_LIMITER e SQLITE_BUSY no D1 local)

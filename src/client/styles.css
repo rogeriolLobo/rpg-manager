@@ -1402,3 +1402,67 @@ legend {
   font-size: 0.85rem;
   color: var(--text-muted);
 }
+
+/* F-001: histórico de revisões (Vault entities/Journal pages/Worlds) — reaproveita o backdrop
+   genérico de modal (.quick-idea-backdrop) e o .badge existente; só o essencial é novo aqui. */
+.revision-history-modal {
+  width: 100%;
+  max-width: 38rem;
+  max-height: 100%;
+  overflow-y: auto;
+  display: grid;
+  gap: 1rem;
+}
+.revision-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.revision-history-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+.revision-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.revision-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface);
+}
+.revision-item-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.revision-item-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.revision-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+/* Ação nunca é indicada só por cor — o texto do badge (Criação/Edição/Restauração) já
+   comunica sozinho; a cor é só reforço visual complementar. */
+.revision-badge-create { border-color: var(--success, var(--border)); }
+.revision-badge-restore { border-color: var(--accent, var(--border)); }
+.revision-detail-preview {
+  border-style: dashed;
+}

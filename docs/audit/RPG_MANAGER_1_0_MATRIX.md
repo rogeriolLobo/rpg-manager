@@ -96,7 +96,7 @@ identificada) · **BROKEN** (existe mas quebrado) · **MISSING** (não existe) �
 
 | Feature | Classificação | 1.0 obrigatório? | Ação recomendada |
 |---|---|---|---|
-| Revision History (`entity_revisions`) | **MISSING** | A decidir (seção 28 do pedido classifica como opcional) | Ver `docs/audit/WORLDCRAFT_GAP_MATRIX.md` — recomendo **não** implementar agora; nenhuma migration, rota ou UI existe; implementar com segurança exige desenho de schema + snapshot + restore + permissões, não cabe com qualidade nesta sessão |
+| Revision History (`entity_revisions`) | **DONE** (RPG-1.0-BATCH5) | Reaberto deliberadamente e implementado — ver `docs/product/RPG_MANAGER_FINAL_STATUS.md` | `migrations/0025_entity_revisions.sql`, `src/server/content/revisions.ts`, `src/client/components/revision-history.tsx`; owner-only, snapshot JSON, restore sempre cria nova revisão |
 | Cartography (mapas/pins) | **MISSING** | Opcional | Idem — recomendo próxima sessão dedicada |
 | External Resources / Files | **MISSING** | Opcional | Idem |
 | GM Tools (dice roller, timer, quick notes) | **MISSING** | Explicitamente NÃO obrigatório (seção 14 do pedido) | `OUT_OF_SCOPE_1_0` a menos que sobre tempo depois do checklist obrigatório |
@@ -180,11 +180,33 @@ rodada:
   timer de mesa, 100% client-side (`src/domain/tools/dice.ts`), sem
   tabela nova, sem risco de dados. "Quick note" não duplicado — já
   satisfeito pela "Nova ideia" do Dashboard (BATCH2).
-- **Ainda `MISSING`, deliberadamente fora do 1.0 nesta velocidade (não
-  bloqueio):** Revision History — única funcionalidade da lista
-  original de MISSING que permanece pendente. Requer desenho de schema
-  de snapshot/diff + regras de restore com risco avaliado
-  separadamente; decisão de não apressar mantida conscientemente.
+- **Ainda `MISSING` neste ponto do histórico, deliberadamente fora do
+  1.0 nesta velocidade (não bloqueio):** Revision History — única
+  funcionalidade da lista original de MISSING que permaneceu pendente
+  até o BATCH5 (ver abaixo), quando foi reaberta com tempo hábil para
+  auditoria completa antes do código.
+
+## Atualização — RPG-1.0-BATCH5 (ver `docs/product/MASTER_BACKLOG.md#F-001`)
+
+- **Revision History → implementado.** `DONE`. Escopo: Vault entities,
+  Journal pages, Worlds — os três tipos de conteúdo autoral editável
+  priorizados pela auditoria (Timeline/Relations/Maps/External
+  Resources ficam de fora, sem histórico de edição rico o bastante para
+  justificar o custo agora). Tabela nova e puramente aditiva
+  `entity_revisions` (`migrations/0025_entity_revisions.sql`, sem
+  `DROP`/`RENAME` de tabela existente). Snapshot JSON por revisão (não
+  diff — decisão registrada e justificada em
+  `docs/product/RPG_MANAGER_FINAL_STATUS.md`). Autorização: owner-only,
+  o mesmo limite que já vale para EDITAR esses três recursos hoje (não
+  existe co-edição no produto) — nunca um canal mais amplo que a edição
+  já é. Restore sempre cria uma nova revisão (nunca "volta o
+  ponteiro"), revalidando com a MESMA função usada por um update normal
+  (`buildEntityUpdateStatements` extraída e reaproveitada, não
+  duplicada). 16 testes de integração
+  (`tests/integration/revision-history.test.ts`) + E2E
+  (`tests/e2e/revision-history.spec.ts`, fluxo completo + regressão de
+  segurança 401 sem sessão). Sem tabela existente alterada, sem coluna
+  removida, sem regressão em Vault/Journal/Worlds.
 
 ## Revalidação de hardening (segurança / integridade / performance / UX)
 

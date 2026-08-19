@@ -3,6 +3,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+screenshots/
 .wrangler/
 .dev.vars
 .env

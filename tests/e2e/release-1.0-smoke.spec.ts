@@ -146,8 +146,22 @@ test("RPG Manager 1.0 — smoke de release: Ideas, External Resources, Global Se
   await pinButton.click();
   await expect(page.getByRole("heading", { name: `${PREFIX} Pin` })).toBeVisible();
   await expect(page.getByRole("link", { name: `Ver ${PREFIX} Location` })).toBeVisible();
-  page.once("dialog", (dialog) => void dialog.accept());
+  // RPG-1.0-BATCH5: diagnóstico explícito em vez de só esperar o botão sumir — se o diálogo
+  // nativo (`confirm()`) não for capturado a tempo, o Playwright o descarta (DISMISS) por
+  // padrão, `confirm()` retorna false, e `removePin()` retorna cedo sem chamar a API (ver
+  // src/client/pages/cartography-pages.tsx). Isso produzia "elemento não encontrado" — um
+  // sintoma de UI — quando a causa real (quando acontecia) era o diálogo nunca aceito. Agora
+  // afirmamos o tipo/mensagem do diálogo E esperamos a resposta real do DELETE antes de checar
+  // o DOM, para que uma falha aqui aponte exatamente para STARTUP/NETWORK/APPLICATION/UI.
+  const deletePinResponse = page.waitForResponse((response) => response.request().method() === "DELETE" && /\/cartography\/.+\/pins\/.+/u.test(response.url()));
+  page.once("dialog", async (dialog) => {
+    expect(dialog.type(), "diálogo inesperado ao remover pin").toBe("confirm");
+    expect(dialog.message(), "mensagem de confirmação inesperada").toBe("Remover este pin?");
+    await dialog.accept();
+  });
   await page.getByRole("button", { name: "Remover pin" }).click();
+  const deleteResponse = await deletePinResponse;
+  expect(deleteResponse.status(), `DELETE do pin falhou (rede/aplicação, não UI): ${deleteResponse.status()}`).toBe(204);
   await expect(page.getByRole("button", { name: `Pin: ${PREFIX} Pin` })).toHaveCount(0);
 
   // ── E. GM Tools (client-side, sem escrita de dados) ──

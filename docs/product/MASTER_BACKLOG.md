@@ -686,32 +686,39 @@ qualquer gap, execução contínua sem parar entre itens.
   `f0498ac` (retry/timeout)
 - **Production version:** N/A (mudança de CI, não de app)
 
-## F-001 — Revision History: decisão explícita de escopo (não é omissão silenciosa)
+## F-001 — Revision History — `DONE` (RPG-1.0-BATCH5)
 
-Classificação final: `OUT_OF_SCOPE_1_0`, não `BLOCKED` e não `DONE`.
+**Histórico da decisão** (preservado, não é omissão silenciosa): nas
+sessões anteriores este item foi classificado `OUT_OF_SCOPE_1_0` porque
+era P3, o item de maior risco de schema da lista de `MISSING`, e
+implementar apressado sob pressão de prazo violaria a Seção 40 do
+`CLAUDE.md`. Com o restante do backlog 1.0 já `DONE` e período adicional
+disponível, o item foi reaberto deliberadamente (não por pressa) para
+esta sessão, com auditoria completa antes de qualquer código — ver
+`docs/product/RPG_MANAGER_FINAL_STATUS.md`, seção F-001, para o desenho
+completo (arquitetura, decisão snapshot-vs-diff, autorização, testes).
 
-Motivos (decisão consciente, não falta de tempo disfarçada):
-
-- É P3, a menor prioridade da lista, e todos os itens P1/P2 do backlog
-  1.0 já estão `DONE`.
-- É o item de maior risco de schema da lista original de `MISSING`:
-  exige desenhar snapshot/diff versionado para conteúdo de
-  Vault/Journal/World, decidir granularidade (campo a campo? documento
-  inteiro?), e regras de restore com avaliação de risco própria (o
-  próprio ticket que autorizou esta rodada permite explicitamente
-  reduzir a read-only-only ou adiar, mas exige não declarar `COMPLETE`
-  silenciosamente).
-- Implementar uma versão apressada e de baixa qualidade sob pressão de
-  prazo (deadline interno 20/08) violaria a Seção 40 do `CLAUDE.md`
-  ("Não queremos quantidade de funcionalidades. Queremos um produto
-  coerente, estável, seguro.").
-
-Fica registrado como candidato ao próximo ciclo pós-1.0, com o desenho
-mínimo já esboçado (não implementado): tabela aditiva
-`entity_revisions` (entity_id/journal_page_id, actor, timestamp,
-snapshot JSON ou diff, sem FK de saída que force rebuild de tabela
-existente), leitura antes de restore, restore condicionado a reavaliação
-de risco.
+- **Escopo:** Vault entities, Journal pages e Worlds (conteúdo autoral
+  editável priorizado, seção 5 do pedido). Timeline/Relations/Maps/
+  External Resources ficam deliberadamente fora — nenhum tem histórico
+  de edição rico o suficiente para justificar o custo agora.
+- **Modelo:** um snapshot JSON por revisão (não diff) — mais simples,
+  mais barato de restaurar, decisão registrada e comparada com diff em
+  `RPG_MANAGER_FINAL_STATUS.md`.
+- **Migration:** `migrations/0025_entity_revisions.sql` — puramente
+  aditiva (nova tabela `entity_revisions`, nenhum `DROP`/`RENAME` de
+  tabela existente, ver `docs/architecture/DATABASE_MIGRATION_SAFETY.md`).
+- **Autorização:** histórico é owner-only — mesmo limite que já existe
+  para EDITAR esses três recursos neste produto (não existe co-edição
+  hoje). Nunca um canal de acesso mais amplo que a edição já é.
+- **Restore:** sempre cria uma NOVA revisão (nunca "volta o ponteiro"),
+  revalida os dados com a MESMA função de validação de um update normal
+  (nunca um caminho de escrita paralelo).
+- **Testes:** `tests/integration/revision-history.test.ts` (16 casos:
+  criação/edição/restore, isolamento entre contas, 404 sem vazar
+  existência, número de revisão inválido, snapshot sem campos proibidos,
+  recurso arquivado bloqueia restore) + `tests/e2e/revision-history.spec.ts`
+  (fluxo completo Vault + World, desktop/mobile via projects do CI).
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
@@ -724,7 +731,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 
 | ID | Title | Priority | Status |
 |---|---|---|---|
-| F-001 | Revision History (`entity_revisions`) | P3 | `OUT_OF_SCOPE_1_0` — decisão explícita (ver nota abaixo) |
+| F-001 | Revision History (`entity_revisions`) | P3 | `DONE` (RPG-1.0-BATCH5) |
 | F-002 | Cartografia zero-cost (mapas/pins) | P3 | `DONE` (RPG-1.0-BATCH3) |
 | F-003 | External Resources (referência a URL externa) | P3 | `DONE` (RPG-1.0-BATCH2) |
 | F-004 | GM Tools (dice roller, timer, quick notes) | P3 | `DONE` (RPG-1.0-BATCH3) |
@@ -738,6 +745,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |
 | F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `DONE` (LIB-006) |
+| F-015 | Backup JSON completo — incluir campos especializados de Vault (NPC/Creature/Character/Faction/Item/Lore), Journal, Wiki, Relations, Cartografia, External Resources, Timeline/Calendar e `entity_revisions` | P2 | `NOT_STARTED` — achado real na auditoria de integridade RPG-1.0-BATCH5, deliberadamente não implementado agora para não expandir escopo sob pressão de prazo (ver `docs/library/LIBRARY_IMPORT_EXPORT.md`); nenhum dado é perdido hoje (o backup é só leitura, ninguém depende dele para restore ainda), é lacuna de completude, não regressão |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):
 VTT, Sheets (motor completo), Social/Amizades.
