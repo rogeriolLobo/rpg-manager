@@ -1,3 +1,8 @@
+// F-020 (BATCH9): Character Sheet Engine base — motor de fichas genérico e neutro em
+// relação a sistema de jogo. Graduado de src/domain/future/character-sheet.ts (o contrato
+// puro validateSheet/SheetTemplate já existia e é preservado sem alteração de assinatura —
+// ver tests/unit/future-architecture.test.ts). `pdfMapping` já está previsto na interface
+// para reuso direto por F-021 (Fichas em PDF), sem precisar de uma segunda estrutura.
 export const SHEET_FIELD_TYPES = ['TEXT','NUMBER','BOOLEAN','CHOICE'] as const;
 export type SheetFieldType = typeof SHEET_FIELD_TYPES[number];
 export type SheetValue = string | number | boolean;

@@ -888,6 +888,80 @@ concluída.
   ordem de execução do roadmap: BATCH9 — Character Sheet Engine base
   (F-020).
 
+## F-020 — Character Sheet Engine base — `DONE` (RPG-1.0-BATCH9)
+
+Motor de fichas genérico e neutro em relação a sistema de jogo,
+graduado de `src/domain/future/character-sheet.ts` (sketch já existia
+com o contrato `validateSheet`/`SheetTemplate` travado por
+`tests/unit/future-architecture.test.ts` — preservado sem alterar
+assinatura, só movido para `src/domain/sheets.ts` e ligado a rotas
+reais).
+
+- **Migration `0029_character_sheets.sql`** (aditiva): `sheet_templates`
+  (modelo declarativo — campos TEXT/NUMBER/BOOLEAN/CHOICE, `world_id`
+  OPCIONAL, `version`) + `character_sheets` (1:1 com `vault_entities`,
+  `template_version` grava a versão do modelo no momento do
+  preenchimento). Generaliza o padrão já comprovado por
+  `creature_stat_templates`/`creature_stat_blocks` (migration 0015),
+  com duas diferenças deliberadas:
+  - `world_id` opcional — Personagem/NPC não exigem World
+    (Vault-first, `CLAUDE.md` §2/§24); um modelo sem World serve
+    qualquer entidade do dono.
+  - versionamento — alterar os campos de um modelo incrementa
+    `version`; fichas já preenchidas guardam a versão antiga
+    (`template_version`) e passam a ser sinalizadas `outdated:true`
+    sem invalidar retroativamente o que já existe.
+- **Decisão de autorização:** leitura da ficha segue `authorizedEntity`
+  (mesma visibilidade PRIVATE/GROUP/CAMPAIGN/PLAYERS/GM_ONLY da
+  entidade — nunca vaza para quem não pode ver a entidade); escrita
+  segue `ownedEntity` — o produto não tem co-edição de Vault Entity em
+  lugar nenhum (mesmo limite já documentado em `vault.ts`), então a
+  ficha de um Personagem controlado por um jogador continua editável
+  apenas pelo dono/GM que criou a entidade, não pelo jogador vinculado.
+  Isso é consistente com todo o resto do domínio Vault e evita
+  introduzir um modelo de coedição novo sem desenho de conflito.
+- **Decisão de escopo:** aplica-se a CHARACTER e NPC (não CREATURE, que
+  mantém seu próprio motor de bestiário já existente). Guardado como
+  recurso separado (`/api/v1/sheets/entities/:id`), não embutido no
+  `SELECT`/`present()` gigante de `vault.ts` — reduz risco de
+  regressão no fluxo de edição de entidade já estável, ao custo de uma
+  chamada extra (mesmo princípio de "menor mudança seria segura").
+- **Validações de servidor:** `TEMPLATE_FIELDS_IN_USE` bloqueia
+  remover/renomear a chave de um campo com valor já salvo em alguma
+  ficha; `TEMPLATE_IN_USE` bloqueia excluir modelo em uso;
+  `INVALID_ENTITY_TYPE` bloqueia vincular ficha a entidade que não é
+  CHARACTER/NPC; `TEMPLATE_WORLD_MISMATCH` bloqueia usar modelo de um
+  World diferente do da entidade (ou modelo de World nenhum World
+  quando a entidade pertence a um). Erros de valor por campo
+  (`INVALID_SHEET_VALUES`) reaproveitam `validateSheet` e são
+  convertidos para o formato `Record<string,string[]>` já usado pelo
+  resto da API (`ClientApiError.fields`) na borda HTTP, sem alterar o
+  contrato puro do domínio.
+- **UI:** `/app/sheets` (gestão de modelos — criar/excluir, campo por
+  campo, com World opcional); painel "Ficha de personagem" na página
+  de detalhe do Vault (`EntitySheetPanel`, complementar — falha não
+  bloqueia a página principal, mesmo princípio de metadata/backlinks
+  já usado ali); `/app/vault/:id/sheet` (selecionar modelo, preencher
+  campos tipados, erros por campo, remover ficha).
+- **Bug real de TESTE (não de produto) corrigido durante a escrita da
+  suíte de integração completa:** um teste pré-existente e pesado
+  (`vault-and-worlds.test.ts` — 4 contas + ~12 entidades/vínculos em
+  sequência) passou a estourar o timeout padrão de 5000ms do vitest de
+  forma intermitente sob a suíte completa (contenção do pool de
+  workers, mais pronunciada com a suíte maior), mesmo sempre passando
+  isolado — corrigido com um timeout explícito de 15s nesse teste
+  específico, sem alterar sua lógica.
+- **Testes:** `tests/integration/character-sheets.test.ts` (5 casos:
+  criação+vínculo+validação por campo, IDOR entre donos e restrição de
+  tipo de entidade, compatibilidade de World, bloqueio de exclusão/
+  edição de campo em uso + versionamento, remoção de ficha) +
+  `tests/e2e/character-sheets.spec.ts` (1 cenário, desktop+mobile:
+  criar modelo → vincular a um Personagem → erro de campo obrigatório
+  → salvar → editar → remover).
+- Próximo item da ordem de execução do roadmap: BATCH10 — F-021 (PDF
+  Character Sheets) + F-023 (Vault system-aware), reaproveitando
+  `sheet_templates`/`character_sheets`.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

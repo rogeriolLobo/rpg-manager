@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ADVENTURE_TYPES, CAMPAIGN_ENTITY_USAGE_TYPES, CREATURE_STAT_FIELD_TYPES, ENTITY_TYPES, ENTITY_VISIBILITIES, EXTERNAL_RESOURCE_TYPES, LORE_CANON_STATUSES, LORE_TYPES, RELATION_DIRECTIONS, RELATION_TYPES, TEMPORAL_PRECISIONS, WORLD_VISIBILITIES } from '../../domain/content/types';
 import { isIsbnInputValid } from '../../domain/rpg/isbn';
 import { PUBLICATION_TYPES } from '../../domain/rpg/library-domain';
+import { SHEET_FIELD_TYPES } from '../../domain/sheets';
 import { isPublicHttpsUrl } from '../security/cover-url';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -248,6 +249,27 @@ export const creatureStatTemplateInputSchema = z.strictObject({
   fields: z.array(creatureStatFieldSchema).max(80).refine((fields) => new Set(fields.map((field) => field.key)).size === fields.length, 'As chaves dos campos devem ser únicas.'),
 });
 
+// F-020 (BATCH9): motor de fichas — ver src/domain/sheets.ts e src/server/routes/sheets.ts.
+export const sheetFieldSchema = z.strictObject({
+  key: z.string().trim().regex(/^[a-z][a-z0-9_]{0,39}$/),
+  label: z.string().trim().min(1).max(80),
+  type: z.enum(SHEET_FIELD_TYPES),
+  required: z.boolean().default(false),
+  options: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
+}).refine((field) => field.type !== 'CHOICE' || (field.options && field.options.length > 0), { message: 'Campos do tipo CHOICE exigem ao menos uma opção.', path: ['options'] });
+
+export const sheetTemplateInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  description: trimmed(2000).default(''),
+  worldId: z.string().trim().min(1).max(80).nullable(),
+  fields: z.array(sheetFieldSchema).max(80).refine((fields) => new Set(fields.map((field) => field.key)).size === fields.length, 'As chaves dos campos devem ser únicas.'),
+});
+
+export const characterSheetInputSchema = z.strictObject({
+  templateId: z.string().trim().min(1).max(80),
+  values: z.record(z.string(), z.union([z.string().max(5000), z.number().finite(), z.boolean()])),
+});
+
 export const creatureDetailsSchema = z.strictObject({
   classification: trimmed(160).default(''), habitat: trimmed(1000).default(''), behavior: trimmed(5000).default(''),
   dangerNotes: trimmed(5000).default(''),
@@ -399,3 +421,5 @@ export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
 export type EventTemporalInput = z.infer<typeof eventTemporalInputSchema>;
 export type CreatureStatTemplateInput = z.infer<typeof creatureStatTemplateInputSchema>;
 export type JournalPageInput = z.infer<typeof journalPageInputSchema>;
+export type SheetTemplateInput = z.infer<typeof sheetTemplateInputSchema>;
+export type CharacterSheetInput = z.infer<typeof characterSheetInputSchema>;

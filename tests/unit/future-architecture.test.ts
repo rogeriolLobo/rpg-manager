@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { validateSheet, type SheetTemplate } from '../../src/domain/future/character-sheet';
+import { validateSheet, type SheetTemplate } from '../../src/domain/sheets';
 import { isValidMapPoint } from '../../src/domain/future/maps';
 
 describe('future architecture contracts',()=>{

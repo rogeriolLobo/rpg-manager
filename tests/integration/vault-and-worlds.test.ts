@@ -160,6 +160,10 @@ describe('Worlds, Vault e permissões V2', () => {
     expect((await request(`/worlds/${worldId}/members`, 'POST', { userId: outsider.userId, role: 'OWNER' }, owner)).status).toBe(422);
   });
 
+  // BATCH9: timeout explícito — o teste registra 4 contas e cria ~12 entidades/vínculos em
+  // sequência; sob contenção do pool de workers em execução da suíte completa (mais
+  // pronunciada à medida que a suíte cresce) isso passou a ultrapassar os 5000ms padrão do
+  // vitest de forma intermitente, mesmo sempre passando isolado. Achado real nesta sessão.
   it('aplica GROUP, CAMPAIGN, PLAYERS e GM_ONLY sem permitir impersonação', async () => {
     const owner = await register('permission-owner');
     const player = await register('permission-player');
@@ -185,7 +189,7 @@ describe('Worlds, Vault e permissões V2', () => {
       expect((await request(`/vault/${entityId}`, 'GET', undefined, outsider)).status).toBe(404);
       expect((await request(`/campaigns/${campaignId}/entities/${entityId}`, 'DELETE', undefined, outsider)).status).toBe(404);
     }
-  });
+  }, 15_000);
 
   it('preserva entidades ao arquivar World e ao concluir campanha, e bloqueia ciclos', async () => {
     const owner = await register('history-owner');
