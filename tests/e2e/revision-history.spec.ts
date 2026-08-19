@@ -48,7 +48,14 @@ test("F-001: histórico de revisões de uma entidade do Vault — editar, ver hi
   await items.nth(1).getByRole("button", { name: "Ver" }).click();
   await expect(page.getByRole("heading", { name: "Versão Original" })).toBeVisible();
 
-  // Restaura — o modal fecha, o conteúdo volta ao original.
+  // Restaura — o modal fecha, o conteúdo volta ao original. `restore()` chama um confirm()
+  // nativo (mesmo padrão de archive/remover pin no resto do app) — sem um handler de dialog
+  // registrado ANTES do clique, o Playwright descarta o confirm() por padrão (retorna false),
+  // o restore nunca roda e o modal nunca fecha. Achado real: a assert abaixo passava mesmo
+  // assim (falso positivo) porque casava com o <h3> deixado pelo preview de "Ver" — nunca
+  // confiar em getByRole('heading', ...) sem nível quando um preview secundário pode conter o
+  // mesmo texto.
+  page.once("dialog", (dialog) => void dialog.accept());
   await items.nth(1).getByRole("button", { name: "Restaurar" }).click();
   await expect(page.getByRole("heading", { name: "Versão Original" })).toBeVisible();
 
@@ -75,6 +82,7 @@ test("F-001: histórico de um World — mesmo contrato, botão contextual na pr�
 
   await page.getByRole("button", { name: "Histórico" }).click();
   await expect(page.locator(".revision-item")).toHaveCount(2);
+  page.once("dialog", (dialog) => void dialog.accept());
   await page.locator(".revision-item").nth(1).getByRole("button", { name: "Restaurar" }).click();
   await expect(page.getByRole("heading", { name: "Mundo Original" })).toBeVisible();
 });
