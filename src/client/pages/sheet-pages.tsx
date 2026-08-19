@@ -13,7 +13,7 @@ import { Empty, Loading, PageHeader } from './dashboard-page';
 // "não existe co-edição de Vault Entity" já documentado em vault-pages.tsx).
 
 export interface SheetFieldDefinition { key:string; label:string; type:SheetFieldType; required:boolean; options?:string[] }
-export interface SheetTemplateSummary { id:string; worldId:string|null; worldName:string|null; name:string; description:string; version:number; fields:SheetFieldDefinition[] }
+export interface SheetTemplateSummary { id:string; worldId:string|null; worldName:string|null; gameSystemId:string|null; gameSystemName:string|null; name:string; description:string; version:number; fields:SheetFieldDefinition[] }
 export interface EntitySheet { entityId:string; templateId:string; templateName:string; templateVersion:number; currentTemplateVersion:number; outdated:boolean; fields:SheetFieldDefinition[]; values:Record<string,string|number|boolean>; createdAt:string; updatedAt:string }
 
 const fieldTypeLabel:Record<SheetFieldType,string>={TEXT:'Texto',NUMBER:'Número',BOOLEAN:'Sim/Não',CHOICE:'Múltipla escolha'};
@@ -58,7 +58,9 @@ export function SheetEditorPage(){
   useEffect(()=>{let active=true;
     Promise.all([
       api<{item:SheetEntityInfo}>(`/vault/${id}`),
-      api<{items:SheetTemplateSummary[]}>('/sheets/templates'),
+      // F-023: compatibilidade (global + World + Game System resolvido) é decidida pelo
+      // servidor — única fonte de verdade, reaproveitada pela validação do PUT.
+      api<{items:SheetTemplateSummary[]}>(`/sheets/entities/${id}/templates`),
       api<{item:EntitySheet|null}>(`/sheets/entities/${id}`),
     ]).then(([entityResult,templatesResult,sheetResult])=>{if(!active)return;
       setEntity(entityResult.item);setTemplates(templatesResult.items);
@@ -71,7 +73,7 @@ export function SheetEditorPage(){
   if(loading)return <Loading/>;
   if(!entity)return <p className="form-error">{error||'Entidade não encontrada.'}</p>;
 
-  const compatibleTemplates=templates.filter((template)=>!template.worldId||template.worldId===entity.worldId);
+  const compatibleTemplates=templates;
   const selectedTemplate=compatibleTemplates.find((template)=>template.id===templateId);
   const selectTemplate=(nextId:string)=>{setTemplateId(nextId);setValues({});setFieldErrors({});};
   const updateValue=(key:string,value:string|number|boolean)=>setValues((current)=>({...current,[key]:value}));
@@ -93,7 +95,7 @@ export function SheetEditorPage(){
     <form className="panel form-grid" onSubmit={submit}>
       <label className="span-2">Modelo<select required value={templateId} onChange={(event)=>selectTemplate(event.target.value)}>
         <option value="">Selecione um modelo</option>
-        {compatibleTemplates.map((template)=><option key={template.id} value={template.id}>{template.name}{template.worldId?'':' (global)'}</option>)}
+        {compatibleTemplates.map((template)=><option key={template.id} value={template.id}>{template.name}{template.gameSystemName?` (${template.gameSystemName})`:template.worldId?'':' (global)'}</option>)}
       </select></label>
       {compatibleTemplates.length===0&&<p className="section-note span-2">Nenhum modelo disponível para {entity.worldName??'Personagens sem World'}. <Link to="/app/sheets">Crie um modelo</Link> primeiro.</p>}
       {selectedTemplate?.fields.map((field)=><label key={field.key} className="span-2">
@@ -115,21 +117,23 @@ export function SheetEditorPage(){
 }
 
 interface TemplateFormField { key:string; label:string; type:SheetFieldType; required:boolean; optionsText:string }
-interface TemplateFormState { name:string; description:string; worldId:string; fields:TemplateFormField[] }
+interface TemplateFormState { name:string; description:string; worldId:string; gameSystemId:string; fields:TemplateFormField[] }
 const emptyField=():TemplateFormField=>({key:'',label:'',type:'TEXT',required:false,optionsText:''});
-const blankForm:TemplateFormState={name:'',description:'',worldId:'',fields:[emptyField()]};
+const blankForm:TemplateFormState={name:'',description:'',worldId:'',gameSystemId:'',fields:[emptyField()]};
 
 export function SheetTemplatesPage(){
   const resource=useResource<SheetTemplateSummary[]>('/sheets/templates',async()=>(await api<{items:SheetTemplateSummary[]}>('/sheets/templates')).items);
   const [worlds,setWorlds]=useState<Array<{id:string;name:string}>>([]);
+  const [gameSystems,setGameSystems]=useState<Array<{id:string;name:string}>>([]);
   const [form,setForm]=useState<TemplateFormState>(blankForm);
   const [error,setError]=useState('');
   useEffect(()=>{void api<{worlds:Array<{id:string;name:string}>}>('/vault/metadata').then((result)=>setWorlds(result.worlds)).catch(()=>{});},[]);
+  useEffect(()=>{void api<{items:Array<{id:string;name:string}>}>('/sheets/game-systems').then((result)=>setGameSystems(result.items)).catch(()=>{});},[]);
 
   const updateField=(index:number,changes:Partial<TemplateFormField>)=>setForm((current)=>({...current,fields:current.fields.map((field,fieldIndex)=>fieldIndex===index?{...field,...changes}:field)}));
   const submit=async(event:FormEvent)=>{event.preventDefault();setError('');
     const payload={
-      name:form.name,description:form.description,worldId:form.worldId||null,
+      name:form.name,description:form.description,worldId:form.worldId||null,gameSystemId:form.gameSystemId||null,
       fields:form.fields.map((field)=>({key:field.key,label:field.label,type:field.type,required:field.required,...(field.type==='CHOICE'?{options:field.optionsText.split(',').map((option)=>option.trim()).filter(Boolean)}:{})})),
     };
     try{await postJson('/sheets/templates',payload);setForm(blankForm);resource.reload();}
@@ -149,7 +153,7 @@ export function SheetTemplatesPage(){
         <section className="panel template-list">
           <h2>Modelos existentes</h2>
           {templates.length?<ul className="clean-list">{templates.map((template)=><li key={template.id}>
-            <span><strong>{template.name}</strong><small>{template.worldName??'Global'} · {template.fields.length} campos · v{template.version}{template.description?` · ${template.description}`:''}</small></span>
+            <span><strong>{template.name}</strong><small>{template.gameSystemName??template.worldName??'Global'} · {template.fields.length} campos · v{template.version}{template.description?` · ${template.description}`:''}</small></span>
             <button type="button" className="ghost-button" onClick={()=>void remove(template.id)}><Trash2 size={16}/>Excluir</button>
           </li>)}</ul>:<Empty title="Nenhum modelo criado" text="Crie o primeiro modelo de ficha para vincular a Personagens e NPCs." action="Ver Vault" to="/app/vault"/>}
         </section>
@@ -158,7 +162,8 @@ export function SheetTemplatesPage(){
         <h2>Novo modelo</h2>
         <label>Nome<input required maxLength={120} value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})}/></label>
         <label>Descrição<textarea rows={3} maxLength={2000} value={form.description} onChange={(event)=>setForm({...form,description:event.target.value})}/></label>
-        <label>World (opcional)<select value={form.worldId} onChange={(event)=>setForm({...form,worldId:event.target.value})}><option value="">Global (qualquer World)</option>{worlds.map((world)=><option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
+        <label>World (opcional)<select value={form.worldId} onChange={(event)=>setForm({...form,worldId:event.target.value,gameSystemId:event.target.value?'':form.gameSystemId})}><option value="">Global (qualquer World)</option>{worlds.map((world)=><option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
+        <label>Game System (opcional)<select value={form.gameSystemId} disabled={Boolean(form.worldId)} onChange={(event)=>setForm({...form,gameSystemId:event.target.value})}><option value="">Nenhum (usar World acima, se houver)</option>{gameSystems.map((system)=><option key={system.id} value={system.id}>{system.name}</option>)}</select>{gameSystems.length===0&&<small className="section-note">Nenhum Game System disponível ainda — cadastre um RPG na Biblioteca primeiro.</small>}</label>
         <div className="template-fields">
           <strong>Campos</strong>
           {form.fields.map((field,index)=><div className="template-field" key={index}>

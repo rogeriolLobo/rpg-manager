@@ -19,6 +19,9 @@ test("Ficha de personagem: cria modelo, vincula a um Personagem, valida campos e
   await register(page, `e2e-sheet-owner-${suffix}@example.com`, `Dono Ficha ${suffix}`);
 
   await page.goto("/app/sheets");
+  // F-023: seletor de Game System presente e habilitado por padrão (mutuamente exclusivo
+  // com World — cobertura de compatibilidade fica nos testes de integração).
+  await expect(page.getByLabel("Game System (opcional)")).toBeEnabled();
   await page.getByLabel("Nome").fill(`Modelo Neutro ${suffix}`);
   // Primeiro campo (TEXT, já presente por padrão).
   await page.getByLabel("Chave").fill("conceito");

@@ -258,12 +258,15 @@ export const sheetFieldSchema = z.strictObject({
   options: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
 }).refine((field) => field.type !== 'CHOICE' || (field.options && field.options.length > 0), { message: 'Campos do tipo CHOICE exigem ao menos uma opção.', path: ['options'] });
 
+// F-023 (BATCH10): gameSystemId é mutuamente exclusivo com worldId — um modelo é global,
+// OU de um World, OU de um Game System (ver migrations/0030_sheet_templates_game_system.sql).
 export const sheetTemplateInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   description: trimmed(2000).default(''),
   worldId: z.string().trim().min(1).max(80).nullable(),
+  gameSystemId: z.string().trim().min(1).max(80).nullable(),
   fields: z.array(sheetFieldSchema).max(80).refine((fields) => new Set(fields.map((field) => field.key)).size === fields.length, 'As chaves dos campos devem ser únicas.'),
-});
+}).refine((input) => !(input.worldId && input.gameSystemId), { message: 'Um modelo não pode pertencer a um World e a um Game System ao mesmo tempo.', path: ['gameSystemId'] });
 
 export const characterSheetInputSchema = z.strictObject({
   templateId: z.string().trim().min(1).max(80),

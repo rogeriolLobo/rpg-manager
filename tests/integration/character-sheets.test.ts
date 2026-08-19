@@ -1,8 +1,11 @@
 // F-020 (BATCH9): Character Sheet Engine base — ver src/server/routes/sheets.ts.
-import { exports } from 'cloudflare:workers';
+// F-023 (BATCH10): modelo escopado a Game System — ver mesmo arquivo de rotas.
+import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import type { Env } from '../../src/server/types';
 
 const worker = exports as unknown as { default: { fetch(input: string | Request, init?: RequestInit): Promise<Response> } };
+const testEnv = env as unknown as Env;
 const origin = 'https://sheets.example.com';
 const password = 'esta e uma senha longa 2026';
 let requestSequence = 1;
@@ -39,7 +42,7 @@ const entity = (name: string, extra: Record<string, unknown> = {}) => ({
 });
 
 const template = (extra: Record<string, unknown> = {}) => ({
-  name: 'Ficha Neutra', description: '', worldId: null,
+  name: 'Ficha Neutra', description: '', worldId: null, gameSystemId: null,
   fields: [
     { key: 'conceito', label: 'Conceito', type: 'TEXT', required: true },
     { key: 'recursos', label: 'Recursos', type: 'NUMBER', required: true },
@@ -58,6 +61,28 @@ async function createTemplate(account: Account, extra: Record<string, unknown> =
   const response = await request('/sheets/templates', 'POST', template(extra), account);
   expect(response.status).toBe(201);
   return (await response.json() as { id: string }).id;
+}
+
+const rpgInput = (extra: Record<string, unknown> = {}) => ({
+  title: 'RPG de Teste', categoryId: 'fantasia', subgenreId: 'alta-fantasia', readingStatus: 'NOT_STARTED',
+  hasPlayed: false, wantsToPlay: false, priority: 'LOW', playGroupNotes: '', playGroupId: null,
+  plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '', notes: '', coverUrl: null, isbn: null, ...extra,
+});
+
+// Cria um Rpg (e seu Game System) e devolve o gameSystemId resolvido.
+async function createGameSystem(account: Account, title: string): Promise<{ rpgId: string; gameSystemId: string }> {
+  const response = await request('/rpgs', 'POST', rpgInput({ title }), account);
+  expect(response.status).toBe(201);
+  const rpgId = (await response.json() as { item: { id: string } }).item.id;
+  const rpgRow = await testEnv.DB.prepare('SELECT publication_id FROM rpgs WHERE id=?').bind(rpgId).first<{ publication_id: string }>();
+  const publicationRow = await testEnv.DB.prepare('SELECT game_system_id FROM publications WHERE id=?').bind(rpgRow!.publication_id).first<{ game_system_id: string }>();
+  return { rpgId, gameSystemId: publicationRow!.game_system_id };
+}
+
+async function createWorld(account: Account, name: string, defaultRpgId: string | null = null): Promise<string> {
+  const response = await request('/worlds', 'POST', { name, description: '', defaultRpgId, visibility: 'PRIVATE' }, account);
+  expect(response.status).toBe(201);
+  return (await response.json() as { item: { id: string } }).item.id;
 }
 
 describe('Character Sheet Engine (F-020)', () => {
@@ -153,5 +178,48 @@ describe('Character Sheet Engine (F-020)', () => {
     expect(await read.json()).toEqual({ item: null });
     // A entidade em si continua existindo.
     expect((await request(`/vault/${entityId}`, 'GET', undefined, owner)).status).toBe(200);
+  });
+
+  it('F-023: modelo escopado a um Game System vale para qualquer World cujo Rpg padrão seja daquele sistema (sem exigir vínculo direto ao World)', async () => {
+    const owner = await register('sheet-owner-6');
+    const system = await createGameSystem(owner, 'Sistema Compartilhado');
+    const otherSystem = await createGameSystem(owner, 'Sistema Diferente');
+
+    const worldA = await createWorld(owner, 'World Sistema A', system.rpgId);
+    const worldC = await createWorld(owner, 'World Sistema Diferente', otherSystem.rpgId);
+    const worldD = await createWorld(owner, 'World Sem Rpg Padrão');
+
+    // Modelo global de World (worldId null) mas amarrado ao Game System — nenhuma entidade
+    // abaixo tem esse World diretamente, a compatibilidade vem só do Rpg padrão do World.
+    const templateId = await createTemplate(owner, { worldId: null, gameSystemId: system.gameSystemId });
+    const entityWorldA = await createEntity(owner, { worldId: worldA });
+    const entityWorldC = await createEntity(owner, { worldId: worldC });
+    const entityWorldD = await createEntity(owner, { worldId: worldD });
+    const entityNoWorld = await createEntity(owner);
+
+    const values = { conceito: 'x', recursos: 1, postura: 'OUSADA' };
+    expect((await request(`/sheets/entities/${entityWorldA}`, 'PUT', { templateId, values }, owner)).status).toBe(200);
+    expect((await request(`/sheets/entities/${entityWorldC}`, 'PUT', { templateId, values }, owner)).status).toBe(422);
+    expect((await request(`/sheets/entities/${entityWorldD}`, 'PUT', { templateId, values }, owner)).status).toBe(422);
+    expect((await request(`/sheets/entities/${entityNoWorld}`, 'PUT', { templateId, values }, owner)).status).toBe(422);
+
+    // GET /entities/:id/templates é a mesma regra de compatibilidade usada pelo PUT acima.
+    const suggestionsA = await request(`/sheets/entities/${entityWorldA}/templates`, 'GET', undefined, owner);
+    expect((await suggestionsA.json() as { items: Array<{ id: string }> }).items.map((item) => item.id)).toContain(templateId);
+    const suggestionsC = await request(`/sheets/entities/${entityWorldC}/templates`, 'GET', undefined, owner);
+    expect((await suggestionsC.json() as { items: Array<{ id: string }> }).items.map((item) => item.id)).not.toContain(templateId);
+  });
+
+  it('F-023: modelo não pode ser escopado a World e Game System ao mesmo tempo, e Game System inexistente é rejeitado', async () => {
+    const owner = await register('sheet-owner-7');
+    const worldId = await createWorld(owner, 'World Exclusividade');
+    const { gameSystemId } = await createGameSystem(owner, 'Sistema Exclusividade');
+
+    expect((await request('/sheets/templates', 'POST', template({ worldId, gameSystemId }), owner)).status).toBe(422);
+    expect((await request('/sheets/templates', 'POST', template({ gameSystemId: 'gs_inexistente' }), owner)).status).toBe(422);
+
+    // Sem conflito: só Game System, válido.
+    const created = await request('/sheets/templates', 'POST', template({ gameSystemId }), owner);
+    expect(created.status).toBe(201);
   });
 });

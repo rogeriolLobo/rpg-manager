@@ -38,7 +38,7 @@ IDs seguem a sequência já usada em `MASTER_BACKLOG.md` (F-001..F-015).
 | F-020 | Character Sheet Engine — motor genérico + templates por sistema | Implementado como domínio próprio: `src/domain/sheets.ts` (graduado de `src/domain/future/character-sheet.ts`, contrato `validateSheet`/`SheetTemplate` preservado — `tests/unit/future-architecture.test.ts`), `sheet_templates`+`character_sheets` (migration 0029, aditiva). Modelo declarativo (TEXT/NUMBER/BOOLEAN/CHOICE), `world_id` opcional (Personagem não exige World — Vault-first), `version` incrementada quando os campos mudam (ficha antiga fica `outdated:true` sem invalidar retroativamente). Aplica-se a CHARACTER/NPC; leitura segue `authorizedEntity` (visibilidade da entidade), escrita `ownedEntity` (mesmo limite de "sem co-edição" já documentado em `vault.ts`) | Sim — `CLAUDE.md` §31 (domínio próprio: template + campos tipados + browser renderer) | Nenhuma | Médio — mitigado: TEMPLATE_FIELDS_IN_USE bloqueia remover campo com valor em uso, TEMPLATE_WORLD_MISMATCH impede vincular modelo de outro World, entity_type restrito a CHARACTER/NPC | Sim — `sheet_templates`,`character_sheets` (0029, aditiva) | `DONE` | `DONE` (`/app/sheets` modelos + painel/editor na entidade) | `DONE` (5 integration + 1 E2E desktop/mobile) | `DONE` (BATCH9) |
 | F-021 | PDF Character Sheets (AcroForm/overlay, editor de template) | Ausente | Sim — `CLAUDE.md` §31 | F-020 (`DONE`) | Alto — risco de licenciamento (nunca redistribuir PDF oficial protegido); processamento de PDF client-side por custo zero | Não (usa tabelas de F-020 + metadata de arquivo) | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
 | F-022 | Vault avançado — reutilização entre Worlds/Campaigns/Adventures (LINK vs COPY/FORK explícito) | Vault já é global do usuário; não tem semântica de link/fork entre contextos | Sim — `CLAUDE.md` §25 (Vault é reutilizável, entidades não morrem com a Campaign) | Nenhuma | Médio — sincronização implícita mal desenhada pode corromper dados | Provável — tabela de vínculo/fork | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
-| F-023 | Vault system-aware (campos customizados por Game System sem tabela por RPG) | `specialized_*` tables cobrem tipos fixos (NPC/Creature/etc.), não por sistema | Sim — decorre de F-020 (mesma necessidade de campos declarativos) | F-020 (`DONE`, reaproveitar `sheet_templates`) | Médio | Provável | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
+| F-023 | Vault system-aware (campos customizados por Game System sem tabela por RPG) | Implementado: `sheet_templates.game_system_id` (migration 0030, aditiva), mutuamente exclusivo com `world_id` (validado na rota, não via CHECK). Compatibilidade de uma entidade com um modelo de Game System é derivada de `worlds.default_rpg_id → rpgs.publication_id → publications.game_system_id` (cadeia já existente, nenhuma coluna nova em vault_entities) — um modelo escopado a um sistema vale para qualquer entidade cujo World tenha um Rpg padrão daquele sistema, sem precisar de tabela por RPG. `GET /sheets/entities/:id/templates` é a única fonte de verdade de compatibilidade, reaproveitada pelo PUT de vínculo | Sim — decorre de F-020 (mesma necessidade de campos declarativos) | F-020 (`DONE`, reaproveitar `sheet_templates`) | Médio — mitigado: mutual exclusão validada no schema Zod, `INVALID_GAME_SYSTEM` rejeita ID inexistente, `TEMPLATE_INCOMPATIBLE` nunca deixa vincular fora do escopo | Sim — `sheet_templates.game_system_id` (0030, aditiva) | `DONE` | `DONE` (seletor "Game System" no formulário de modelo, mutuamente exclusivo com World) | `DONE` (2 integration + 1 E2E estendido) | `DONE` (BATCH10) |
 | F-024 | One-Shots como conceito explícito | Hoje um One-Shot só existe como Campaign com 1 sessão — sem status/campos próprios | A confirmar na auditoria de implementação — pode ser `SATISFIED_BY_EXISTING_DOMAIN` (especialização seguro de Campaign) como F-013/F-014 já foram | Nenhuma | Baixo se especialização de Campaign; médio se domínio novo | Talvez (coluna `campaigns.session_mode` em vez de tabela nova) | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
 | F-025 | Adventures aprofundadas (acts/scenes/encounters/handouts estruturados) | Adventure já existe como Vault Entity (`adventure_details`: premise/hooks/keyScenes/rewards/notes, texto livre) | Sim — `CLAUDE.md` §26, pedido explícito de estruturar em acts/scenes/encounters | Nenhuma técnica | Médio — risco de duplicar Vault Entities (NPCs/Locations já linkáveis) se mal desenhado | Sim — tabelas de scene/encounter ligadas a `adventure_details` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
 | F-026 | Conteúdo oficial/licenciado (provenance, publisher, edition, read-only) | `publications` já tem provenance para catálogo (não para conteúdo de Adventure/Sheet) | Sim | F-020, F-025 | Alto — jurídico/licenciamento, nunca copiar texto protegido | Sim — colunas de provenance nas tabelas de conteúdo | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` | `NOT_STARTED` |
@@ -63,15 +63,18 @@ são restrições permanentes do projeto (`CLAUDE.md` §9, §18).
 
 Execução real (histórico, não mais planejamento): BATCH6 F-015 → BATCH7
 F-016+F-019 (Social base) → BATCH8 F-017+F-018 (Biblioteca social +
-convites) → BATCH9 F-020 (Sheet Engine base, `DONE`) → daqui em diante,
-planejado: BATCH10 F-021+F-023 (PDF + system-aware, reaproveitando
-`sheet_templates`/`character_sheets`) → BATCH11 F-022 (Vault avançado) →
-BATCH12 F-024+F-025 (One-Shots + Adventures) → BATCH13 F-026+F-027
-(conteúdo oficial + Compendium) → BATCH14 F-028 (Files/Handouts) →
-BATCH15 F-029+F-030 (VTT fundação + fog) → BATCH16 F-031+F-032
-(realtime + combate) → BATCH17 F-033+F-034 (Player/GM view integrada) →
-BATCH18 hardening final + F-015 revalidado cobrindo todos os domínios
-novos (Social, Sheets, Vault avançado, Adventures, Files, VTT).
+convites) → BATCH9 F-020 (Sheet Engine base, `DONE`) → BATCH10 F-023
+(Vault system-aware, `DONE` — separado de F-021 porque PDF é feature
+grande e sensível a licenciamento o suficiente para merecer seu próprio
+ciclo AUDIT→...→DEPLOY, em vez de arriscar as duas juntas no mesmo
+commit) → daqui em diante, planejado: BATCH11 F-021 (PDF Character
+Sheets) → BATCH12 F-022 (Vault avançado) → BATCH13 F-024+F-025
+(One-Shots + Adventures) → BATCH14 F-026+F-027 (conteúdo oficial +
+Compendium) → BATCH15 F-028 (Files/Handouts) → BATCH16 F-029+F-030
+(VTT fundação + fog) → BATCH17 F-031+F-032 (realtime + combate) →
+BATCH18 F-033+F-034 (Player/GM view integrada) → BATCH19 hardening
+final + F-015 revalidado cobrindo todos os domínios novos (Social,
+Sheets, Vault avançado, Adventures, Files, VTT).
 
 ## Critério de conclusão
 

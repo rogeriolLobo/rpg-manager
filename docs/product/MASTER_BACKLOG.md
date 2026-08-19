@@ -958,9 +958,60 @@ reais).
   `tests/e2e/character-sheets.spec.ts` (1 cenário, desktop+mobile:
   criar modelo → vincular a um Personagem → erro de campo obrigatório
   → salvar → editar → remover).
-- Próximo item da ordem de execução do roadmap: BATCH10 — F-021 (PDF
-  Character Sheets) + F-023 (Vault system-aware), reaproveitando
-  `sheet_templates`/`character_sheets`.
+- Próximo item da ordem de execução do roadmap: BATCH10 — F-023 (Vault
+  system-aware), reaproveitando `sheet_templates`/`character_sheets`.
+  F-021 (PDF) foi separado para seu próprio batch por ser feature grande
+  e sensível a licenciamento.
+
+## F-023 — Vault system-aware (Game System em sheet_templates) — `DONE` (RPG-1.0-BATCH10)
+
+Generaliza o motor de F-020 para reconhecer Game System, sem tabela de
+campos por RPG.
+
+- **Migration `0030_sheet_templates_game_system.sql`** (aditiva):
+  `sheet_templates.game_system_id` (nullable, `ON DELETE SET NULL`),
+  mutuamente exclusivo com `world_id` — validado no schema Zod
+  (`sheetTemplateInputSchema.refine`), não via CHECK de SQL (evita
+  depender de um recurso de `ALTER TABLE ADD COLUMN` com CHECK
+  multi-coluna cujo suporte no SQLite do D1 não estava confirmado; a
+  mesma exclusividade já é aplicada só na camada de app em outros
+  campos do produto, ex.: `groupId` só é obrigatório quando
+  `visibility=GROUP`).
+- **Decisão central:** o Game System de uma entidade é derivado, nunca
+  armazenado — `worlds.default_rpg_id → rpgs.publication_id →
+  publications.game_system_id` (cadeia 100% já existente desde a
+  migration 0005/0016; nenhuma coluna nova em `vault_entities`). Um
+  modelo escopado a um Game System passa a valer para qualquer entidade
+  cujo World tenha um Rpg padrão daquele sistema — exatamente "sem
+  tabela por RPG" do enunciado do roadmap, porque o mesmo Game System
+  pode ter várias Publications/edições no catálogo compartilhado
+  (`game_systems`, sem dono, ver LIB-002) e todas continuam valendo
+  para o mesmo modelo.
+- **`GET /sheets/entities/:id/templates`** (nova rota) é a única fonte
+  de verdade de compatibilidade (global OU World OU Game System
+  resolvido) — o `PUT /sheets/entities/:id` de vínculo reaproveita a
+  mesma função (`templateCompatible`/`resolveEntityContext`) para nunca
+  divergir entre "o que a UI sugere" e "o que o servidor aceita". Código
+  de erro do PUT trocado de `TEMPLATE_WORLD_MISMATCH` para o mais geral
+  `TEMPLATE_INCOMPATIBLE` (nenhum teste dependia do código antigo).
+- **`GET /sheets/game-systems`** (nova rota) devolve só os Game Systems
+  já usados na Biblioteca do próprio usuário (não o catálogo
+  compartilhado inteiro) — suficiente para o formulário de modelo, sem
+  precisar de uma tela de busca no catálogo global que o produto ainda
+  não tem em lugar nenhum.
+- **UI:** formulário de modelo (`/app/sheets`) ganhou o seletor "Game
+  System (opcional)", desabilitado enquanto um World estiver
+  selecionado (e vice-versa, escolher World limpa o Game System);
+  `SheetEditorPage` passou a buscar `/sheets/entities/:id/templates` em
+  vez de filtrar a lista completa no cliente.
+- **Testes:** 2 novos casos em `tests/integration/character-sheets.test.ts`
+  (compatibilidade cross-World via Game System resolvido do Rpg padrão,
+  incluindo o caso "entidade sem World nunca vê modelo de sistema"; e
+  exclusividade mútua World/Game System + `INVALID_GAME_SYSTEM`) — 7
+  casos no total no arquivo. `tests/e2e/character-sheets.spec.ts`
+  estendido com a asserção do seletor "Game System" no formulário.
+- Próximo item da ordem de execução do roadmap: BATCH11 — F-021 (PDF
+  Character Sheets), agora como batch próprio.
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
