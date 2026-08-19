@@ -96,6 +96,8 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByLabel("Nome da campanha").fill("A Coroa de E2E");
   await page.getByLabel("Grupo de jogo").selectOption({ label: "Mesa E2E" });
   await expect(page.getByLabel("Narrador")).toHaveValue("Aventureiro E2E");
+  // F-024 (BATCH13): One-Shot é um formato explícito de Campaign, padrão "Campanha".
+  await expect(page.getByLabel("Formato")).toHaveValue("CAMPAIGN");
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(
     page.getByRole("heading", { name: "A Coroa de E2E" }),

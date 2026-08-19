@@ -28,6 +28,7 @@ interface Campaign {
   rpgArchived: boolean;
   name: string;
   status: string;
+  sessionMode: string;
   gameMaster: string;
   sessionZeroDate: string | null;
   firstSessionDate: string | null;
@@ -103,6 +104,7 @@ export function CampaignsPage() {
             >
               <div>
                 <Badge>{item.status}</Badge>
+                {item.sessionMode === "ONE_SHOT" && <Badge>{item.sessionMode}</Badge>}
                 <span className="eyebrow">{item.rpgTitle}{item.rpgArchived && " · RPG arquivado"}</span>
                 <h2>{item.name}</h2>
                 <p>{item.nextAction}</p>
@@ -139,6 +141,7 @@ const blank = {
   rpgId: "",
   name: "",
   status: "PLANNING",
+  sessionMode: "CAMPAIGN",
   gameMaster: "",
   sessionZeroDate: "",
   firstSessionDate: "",
@@ -178,6 +181,7 @@ export function CampaignFormPage() {
           rpgId: item.rpgId,
           name: item.name,
           status: item.status,
+          sessionMode: item.sessionMode,
           gameMaster: item.gameMaster,
           sessionZeroDate: item.sessionZeroDate ?? "",
           firstSessionDate: item.firstSessionDate ?? "",
@@ -268,6 +272,16 @@ export function CampaignFormPage() {
             <option value="IN_PROGRESS">Em andamento</option>
             <option value="PAUSED">Pausada</option>
             <option value="COMPLETED">Concluída</option>
+          </select>
+        </label>
+        <label>
+          Formato
+          <select
+            value={form.sessionMode}
+            onChange={(e) => update("sessionMode", e.target.value)}
+          >
+            <option value="CAMPAIGN">Campanha</option>
+            <option value="ONE_SHOT">One-Shot (mesa única)</option>
           </select>
         </label>
         <label>
@@ -439,6 +453,7 @@ export function CampaignDetailPage() {
       <section className="campaign-summary">
         {[
           ["Status", data.item.status],
+          ["Formato", displayLabel(data.item.sessionMode)],
           ["Próxima sessão", formatDate(data.item.nextSessionDate)],
           ["Sessões", data.item.sessionsCompleted],
           [

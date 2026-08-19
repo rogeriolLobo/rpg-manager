@@ -121,10 +121,13 @@ export const rpgUpdateInputSchema = rpgInputSchema.extend({
   isbn: z.union([z.string().trim().max(32), z.literal(''), z.null()]).optional(),
 });
 
+// F-024 (BATCH13): One-Shot é uma especialização de Campaign (sessionMode), não um
+// domínio novo — ver migrations/0033_campaign_session_mode.sql.
 export const campaignInputSchema = z.strictObject({
   rpgId: z.string().min(1).max(80),
   name: z.string().trim().min(1).max(160),
   status: z.enum(['PLANNING', 'SESSION_ZERO', 'PREPARING', 'IN_PROGRESS', 'PAUSED', 'COMPLETED']),
+  sessionMode: z.enum(['CAMPAIGN', 'ONE_SHOT']).default('CAMPAIGN'),
   gameMaster: trimmed(100).default(''),
   playGroupId: z.string().trim().max(80).nullable().optional(),
   adventureEntityId: z.string().trim().max(80).nullable().optional(),

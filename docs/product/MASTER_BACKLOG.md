@@ -1134,6 +1134,28 @@ CLAUDE.md §7).
 - Próximo item da ordem de execução do roadmap: BATCH13 — F-024
   (One-Shots) + F-025 (Adventures aprofundadas).
 
+## F-024 — One-Shots como conceito explícito — `DONE` (RPG-1.0-BATCH13)
+
+Confirmado como especialização segura de Campaign (mesmo padrão de
+F-013/F-014) — não é domínio novo.
+
+- **Migration `0033_campaign_session_mode.sql`** (aditiva):
+  `campaigns.session_mode` (`CAMPAIGN`\|`ONE_SHOT`, default `CAMPAIGN`).
+  Antes, um One-Shot só existia "por convenção" (Campaign com
+  `session_goal=1`), sem nenhum marcador explícito — não dava para
+  filtrar/comunicar a intenção de mesa única e autocontida.
+- `GET /campaigns?sessionMode=` filtra a visão "Meus One-Shots" (mesmo
+  padrão do filtro `worldId` já existente).
+- **UI:** campo "Formato" no formulário de criar/editar campanha, badge
+  "One-Shot" na listagem (só aparece quando `ONE_SHOT` — Campaign
+  continua sendo o padrão silencioso), linha "Formato" no resumo da
+  campanha.
+- **Testes:** `tests/integration/campaign-session-mode.test.ts` (2
+  casos: default/aceite/refletido no GET, `INVALID_SESSION_MODE`
+  rejeitado, filtro só retorna o formato pedido, PATCH atualiza) + E2E
+  (`core-flow.spec.ts` estendido com asserção do default "Formato").
+- Próximo: F-025 (Adventures aprofundadas), mesmo BATCH13.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

@@ -5,7 +5,7 @@ import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
 export const campaignRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
-interface CampaignRow { id: string; rpg_id: string; rpg_title: string; rpg_archived_at: string | null; name: string; status: CampaignStatus; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; play_group_id: string | null; play_group_name: string | null; adventure_entity_id:string|null;adventure_name:string|null;legacy_members_text: string; legacy_characters_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
+interface CampaignRow { id: string; rpg_id: string; rpg_title: string; rpg_archived_at: string | null; name: string; status: CampaignStatus; session_mode: string; game_master: string; session_zero_date: string | null; first_session_date: string | null; frequency: string | null; next_session_date: string | null; last_session_date: string | null; session_goal: number | null; play_group_id: string | null; play_group_name: string | null; adventure_entity_id:string|null;adventure_name:string|null;legacy_members_text: string; legacy_characters_text: string; notes: string; created_at: string; updated_at: string; completed_at: string | null; sessions_completed: number; has_characters: number }
 // LIB-006: r.archived_at (aliado rpg_archived_at) exposto como `rpgArchived` — uma Campaign
 // nunca deixa de carregar por causa disso (o RPG arquivado continua existindo, join normal),
 // só ganha um indicador visual no cliente (seção 11 do pedido LIB-006).
@@ -16,7 +16,7 @@ const SELECT = `SELECT c.*,r.title rpg_title,r.archived_at rpg_archived_at,g.nam
 function present(row: CampaignRow) {
   const state: CampaignPlanningState = { status: row.status, sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date,
     frequency: row.frequency, nextSessionDate: row.next_session_date, hasCharacters: Boolean(row.has_characters), sessionsCompleted: Number(row.sessions_completed), sessionGoal: row.session_goal };
-  return { id: row.id, rpgId: row.rpg_id, rpgTitle: row.rpg_title, rpgArchived: Boolean(row.rpg_archived_at), name: row.name, status: row.status, gameMaster: row.game_master,
+  return { id: row.id, rpgId: row.rpg_id, rpgTitle: row.rpg_title, rpgArchived: Boolean(row.rpg_archived_at), name: row.name, status: row.status, sessionMode: row.session_mode, gameMaster: row.game_master,
     sessionZeroDate: row.session_zero_date, firstSessionDate: row.first_session_date, frequency: row.frequency, nextSessionDate: row.next_session_date,
     lastSessionDate: row.last_session_date, sessionGoal: row.session_goal, playGroupId: row.play_group_id, playGroupName: row.play_group_name,
     adventureEntityId:row.adventure_entity_id,adventureName:row.adventure_name,
@@ -49,7 +49,11 @@ async function ownedCampaign(c: Context<{ Bindings: Env; Variables: AppVariables
 campaignRoutes.get('/', async (c) => {
   const worldId = c.req.query('worldId');
   const worldFilter = worldId ? ' AND EXISTS(SELECT 1 FROM campaign_entities filter_ce JOIN vault_entities filter_e ON filter_e.id=filter_ce.entity_id WHERE filter_ce.campaign_id=c.id AND filter_e.world_id=?)' : '';
-  const rows = await c.env.DB.prepare(`${SELECT} WHERE c.user_id=?${worldFilter} ORDER BY CASE c.status WHEN 'IN_PROGRESS' THEN 1 WHEN 'PREPARING' THEN 2 ELSE 3 END,c.updated_at DESC`).bind(c.get('user').id, ...(worldId ? [worldId] : [])).all();
+  // F-024 (BATCH13): filtro opcional para a visão "Meus One-Shots".
+  const sessionMode = c.req.query('sessionMode');
+  if (sessionMode && sessionMode !== 'CAMPAIGN' && sessionMode !== 'ONE_SHOT') throw new ApiError(422, 'INVALID_SESSION_MODE', 'Formato de mesa inválido.');
+  const sessionModeFilter = sessionMode ? ' AND c.session_mode=?' : '';
+  const rows = await c.env.DB.prepare(`${SELECT} WHERE c.user_id=?${worldFilter}${sessionModeFilter} ORDER BY CASE c.status WHEN 'IN_PROGRESS' THEN 1 WHEN 'PREPARING' THEN 2 ELSE 3 END,c.updated_at DESC`).bind(c.get('user').id, ...(worldId ? [worldId] : []), ...(sessionMode ? [sessionMode] : [])).all();
   return c.json({ items: (rows.results as unknown as CampaignRow[]).map(present) });
 });
 campaignRoutes.post('/', async (c) => {
@@ -64,8 +68,8 @@ campaignRoutes.post('/', async (c) => {
     ? [c.env.DB.prepare(`INSERT INTO campaign_entities (campaign_id,entity_id,usage_type,created_at) VALUES (?,?,?,?)`)
       .bind(id, input.adventureEntityId, 'ACTIVE', now)]
     : [];
-  await c.env.DB.batch([c.env.DB.prepare(`INSERT INTO campaigns (id,user_id,rpg_id,name,status,game_master,session_zero_date,first_session_date,frequency,next_session_date,session_goal,play_group_id,adventure_entity_id,legacy_members_text,legacy_characters_text,notes,created_at,updated_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
+  await c.env.DB.batch([c.env.DB.prepare(`INSERT INTO campaigns (id,user_id,rpg_id,name,status,session_mode,game_master,session_zero_date,first_session_date,frequency,next_session_date,session_goal,play_group_id,adventure_entity_id,legacy_members_text,legacy_characters_text,notes,created_at,updated_at,completed_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,user.id,input.rpgId,input.name,input.status,input.sessionMode,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency ?? null,
       cleanNullable(input.nextSessionDate),input.sessionGoal ?? null,cleanNullable(input.playGroupId),cleanNullable(input.adventureEntityId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,now,input.status==='COMPLETED'?now:null),...adventureStatement,...memberStatements]);
   return c.json({ item: present(await ownedCampaign(c,id)) },201);
 });
@@ -85,8 +89,8 @@ campaignRoutes.patch('/:id',async(c)=>{const input=await readJson(c,campaignInpu
         ON CONFLICT(campaign_id,entity_id) DO UPDATE SET usage_type=excluded.usage_type`)
       .bind(c.req.param('id'), input.adventureEntityId, 'ACTIVE', now)]
     : [];
-  const [result]=await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,play_group_id=?,adventure_entity_id=?,legacy_members_text=?,legacy_characters_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
-    .bind(input.rpgId,input.name,input.status,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,cleanNullable(input.playGroupId),cleanNullable(input.adventureEntityId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id),...adventureStatement,...memberStatements]);
+  const [result]=await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaigns SET rpg_id=?,name=?,status=?,session_mode=?,game_master=?,session_zero_date=?,first_session_date=?,frequency=?,next_session_date=?,session_goal=?,play_group_id=?,adventure_entity_id=?,legacy_members_text=?,legacy_characters_text=?,notes=?,updated_at=?,completed_at=? WHERE id=? AND user_id=?`)
+    .bind(input.rpgId,input.name,input.status,input.sessionMode,resolvedGameMaster,cleanNullable(input.sessionZeroDate),cleanNullable(input.firstSessionDate),input.frequency??null,cleanNullable(input.nextSessionDate),input.sessionGoal??null,cleanNullable(input.playGroupId),cleanNullable(input.adventureEntityId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,input.status==='COMPLETED'?now:null,c.req.param('id'),user.id),...adventureStatement,...memberStatements]);
   if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.json({item:present(await ownedCampaign(c,c.req.param('id')))});});
 campaignRoutes.delete('/:id',async(c)=>{const result=await c.env.DB.prepare('DELETE FROM campaigns WHERE id=? AND user_id=?').bind(c.req.param('id'),c.get('user').id).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Campanha não encontrada.');return c.body(null,204);});
 
