@@ -326,6 +326,12 @@ export const worldInviteInputSchema = z.strictObject({
   maxUses: z.number().int().min(1).max(100).default(1),
 });
 
+// F-016 (BATCH7): pedido de amizade e bloqueio recebem o id do outro usuário —
+// nunca e-mail (evita reaproveitar o body para vazar/confirmar e-mail cadastrado).
+export const friendTargetInputSchema = z.strictObject({
+  targetUserId: z.string().trim().min(1).max(80),
+});
+
 export const entityRelationInputSchema = z.strictObject({
   sourceEntityId: z.string().trim().min(1).max(80),
   targetEntityId: z.string().trim().min(1).max(80),

@@ -49,6 +49,11 @@
       "name": "DIRECTORY_RATE_LIMITER",
       "namespace_id": "12082605",
       "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "SOCIAL_RATE_LIMITER",
+      "namespace_id": "12082606",
+      "simple": { "limit": 20, "period": 60 }
     }
   ],
   "observability": { "enabled": true }

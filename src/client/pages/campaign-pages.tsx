@@ -164,10 +164,15 @@ export function CampaignFormPage() {
     playGroupId: search.get("playGroupId") ?? "",
   });
   const [error, setError] = useState("");
+  // RPG-1.0-BATCH7: guard `active` evita que a resposta descartável do efeito duplicado pelo
+  // React StrictMode (dev only) sobrescreva `form` depois que o usuário já começou a editar
+  // (mesmo achado real de VaultFormPage/WorldFormPage, via E2E).
   useEffect(() => {
-    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);}).catch(()=>{});
+    let active = true;
+    void Promise.all([api<{ items: Rpg[] }>("/rpgs?pageSize=100&sort=title"),api<{items:PlayGroup[]}>("/groups"),api<{items:AdventureOption[]}>(`/vault?type=ADVENTURE&pageSize=50&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}`)]).then(([rpgResult,groupResult,adventureResult])=>{if(!active)return;setRpgs(rpgResult.items);setGroups(groupResult.items);setAdventures(adventureResult.items);}).catch(()=>{});
     if (id)
       void api<{ item: Campaign }>(`/campaigns/${id}`).then(({ item }) => {
+        if (!active) return;
         setForm({
           rpgId: item.rpgId,
           name: item.name,
@@ -188,11 +193,12 @@ export function CampaignFormPage() {
         // depois da campanha criada (GET /rpgs só lista ativos por padrão) — nunca força
         // o usuário a trocar de RPG só por isso (seção 11 do pedido LIB-006).
         if (item.rpgArchived) {
-          void api<{ item: Rpg }>(`/rpgs/${item.rpgId}`).then(({ item: rpg }) =>
-            setRpgs((current) => (current.some((existing) => existing.id === rpg.id) ? current : [...current, rpg])),
-          ).catch(()=>{});
+          void api<{ item: Rpg }>(`/rpgs/${item.rpgId}`).then(({ item: rpg }) => {
+            if (active) setRpgs((current) => (current.some((existing) => existing.id === rpg.id) ? current : [...current, rpg]));
+          }).catch(()=>{});
         }
-      }).catch((reason:unknown)=>setError(reason instanceof Error?reason.message:'Não foi possível carregar esta campanha.'));
+      }).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar esta campanha.');});
+    return () => { active = false; };
   }, [id,worldId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -570,14 +576,18 @@ export function SessionFormPage() {
     attendeeMemberIds: [] as string[],
   });
   const [error, setError] = useState("");
+  // RPG-1.0-BATCH7: guard `active` evita que a resposta descartável do efeito duplicado pelo
+  // React StrictMode (dev only) sobrescreva `form` depois que o usuário já começou a editar.
   useEffect(() => {
-    void api<{ members: Member[] }>(`/campaigns/${id}`).then(setCampaign).catch(()=>{});
+    let active = true;
+    void api<{ members: Member[] }>(`/campaigns/${id}`).then((result) => { if (active) setCampaign(result); }).catch(()=>{});
     if (sessionId)
       void api<{ item: typeof form }>(
         `/campaigns/${id}/sessions/${sessionId}`,
-      ).then(({ item }) =>
-        setForm({ ...item, playedAt: item.playedAt.slice(0, 10) }),
-      ).catch((reason:unknown)=>setError(reason instanceof Error?reason.message:'Não foi possível carregar esta sessão.'));
+      ).then(({ item }) => {
+        if (active) setForm({ ...item, playedAt: item.playedAt.slice(0, 10) });
+      }).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar esta sessão.');});
+    return () => { active = false; };
   }, [id, sessionId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));

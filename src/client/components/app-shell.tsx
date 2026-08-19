@@ -1,9 +1,10 @@
-import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, X } from 'lucide-react';
+import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
 import { useActiveWorld } from '../world/active-world-context';
 import { CommandPalette } from './command-palette';
+import { NotificationsButton } from '../pages/social-pages';
 
 export function AppShell() {
   const [open, setOpen] = useState(false); const { user, logout } = useAuth(); const navigate = useNavigate();
@@ -12,6 +13,7 @@ export function AppShell() {
     ['/app/library', BookOpen, 'Biblioteca'],
     ['/app/vault', Archive, 'Vault'],
     ['/app/groups', UsersRound, 'Grupos'],
+    ['/app/friends', Users, 'Amigos'],
     ['/app/campaigns', Castle, 'Campanhas'],
     ['/app/worlds', Globe2, 'Mundos'],
   ] as const;
@@ -36,7 +38,7 @@ export function AppShell() {
   return <div className="app-shell"><header className="mobile-header"><button className="icon-button" onClick={() => setOpen(!open)} aria-label={open ? 'Fechar menu' : 'Abrir menu'}>{open ? <X/> : <Menu/>}</button><span className="brand-mark">RPG Manager</span></header>
     <aside className={`sidebar ${open ? 'open' : ''}`}><div><div className="brand"><span className="brand-rune" aria-hidden="true">R</span><div><strong>RPG Manager</strong><small>Huginn &amp; Muninn</small></div></div>
       <label className="world-selector"><span>Contexto ativo</span><select aria-label="Selecionar contexto ativo" disabled={loading} value={activeWorld?.id ?? ''} onChange={(event) => void changeWorld(event.target.value)}><option value="">Nenhum World</option>{worlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
-      <CommandPalette onNavigate={() => setOpen(false)}/>
+      <div className="sidebar-toolbar"><CommandPalette onNavigate={() => setOpen(false)}/><NotificationsButton/></div>
       <nav aria-label="Navegação principal"><NavLink to="/app" end onClick={() => setOpen(false)}><Gauge size={19}/>Visão geral</NavLink></nav>
       <nav className="nav-section" aria-label="Navegação geral"><span className="nav-section-label">Geral</span>{nav(globalLinks)}</nav>
       {worldLinks.length > 0 && <nav className="nav-section" aria-label={`Seção de ${activeWorld!.name}`}><span className="nav-section-label">{activeWorld!.name}</span>{nav(worldLinks)}</nav>}

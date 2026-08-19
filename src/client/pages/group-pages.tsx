@@ -39,7 +39,10 @@ export function GroupsPage() {
 
 export function GroupFormPage() {
   const {id}=useParams(); const navigate=useNavigate(); const [form,setForm]=useState({name:'',notes:''}); const [error,setError]=useState('');
-  useEffect(()=>{if(id)void api<{item:PlayGroup}>(`/groups/${id}`).then(({item})=>setForm({name:item.name,notes:item.notes})).catch((reason:unknown)=>setError(reason instanceof Error?reason.message:'Não foi possível carregar este grupo.'));},[id]);
+  // RPG-1.0-BATCH7: guard `active` evita que a resposta descartável do efeito duplicado pelo
+  // React StrictMode (dev only) sobrescreva `form` depois que o usuário já começou a editar
+  // (mesmo achado real de VaultFormPage/WorldFormPage, via E2E).
+  useEffect(()=>{let active=true;if(id)void api<{item:PlayGroup}>(`/groups/${id}`).then(({item})=>{if(active)setForm({name:item.name,notes:item.notes});}).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar este grupo.');});return()=>{active=false;};},[id]);
   const submit=async(event:FormEvent)=>{event.preventDefault();setError('');try{const result=id?await patchJson<{item:PlayGroup}>(`/groups/${id}`,form):await postJson<{item:PlayGroup}>('/groups',form);navigate(`/app/groups/${result.item.id}`);}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
   return <div className="page narrow"><PageHeader eyebrow={id?'Editar grupo':'Novo grupo'} title="Organize sua mesa" description="Os membros poderão ser reutilizados em vários RPGs e campanhas."/><form className="panel form-grid" onSubmit={submit}><label className="span-2">Nome do grupo<input value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})} maxLength={120} required/></label><label className="span-2">Observações<textarea value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})} maxLength={5000} rows={5}/></label>{error&&<p className="form-error span-2">{error}</p>}<div className="form-actions span-2"><button type="button" className="ghost-button" onClick={()=>navigate(-1)}>Cancelar</button><button className="primary-button">Salvar grupo</button></div></form></div>;
 }

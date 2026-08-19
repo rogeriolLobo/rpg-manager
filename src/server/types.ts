@@ -9,6 +9,7 @@ export interface Env {
   AUTH_RECOVERY_RATE_LIMITER: RateLimit;
   AUTH_SENSITIVE_RATE_LIMITER: RateLimit;
   DIRECTORY_RATE_LIMITER: RateLimit;
+  SOCIAL_RATE_LIMITER: RateLimit;
   PASSWORD_PEPPER?: string;
   TURNSTILE_SECRET_KEY?: string;
   ENVIRONMENT?: string;

@@ -763,6 +763,70 @@ seguintes.
   trava o resto do restore) + `tests/e2e/backup-restore.spec.ts` (fluxo
   completo pela tela de Configurações).
 
+## F-016/F-019 — Social: amizades, bloqueios e notificações — `DONE` (RPG-1.0-BATCH7)
+
+Segundo item do roadmap pós-1.0 (`docs/product/FULL_ROADMAP.md`), na
+ordem de dependência técnica real: F-017 (Biblioteca social) e F-018
+(convites de Grupo/Campanha via amigo) dependem de F-016 existir, então
+esta rodada entrega a base (F-016) e o que decorre diretamente dela sem
+depender de mais nada (F-019 — notificação de pedido/aceite).
+
+- **Migration `0027_social_friendships.sql`** (aditiva): `friend_requests`
+  (pedido pendente) e `friendships` (confirmada, par canônico
+  `user_id_a < user_id_b` — impede duas linhas para o mesmo par sem
+  precisar de índice de expressão) são tabelas separadas, não uma
+  state-machine única — evita o estado ambíguo "quem pode aceitar isto?"
+  exigir sempre checar qual lado é requester. `user_blocks` é
+  independente de amizade (bloquear funciona mesmo sem nunca terem sido
+  amigos). `notifications` com `kind CHECK` fechado (mesma lição do
+  LIB-004B: adicionar valor depois é aditivo, remover não).
+- **Busca reaproveita `GET /directory/users`** (já existia, nunca expõe
+  e-mail, rate-limited) — o status de cada resultado (amigo/pendente/
+  bloqueado) é calculado no cliente cruzando com as listas já
+  carregadas, em vez de anotar um endpoint compartilhado com o fluxo de
+  membros de Grupo/World.
+- **Decisões de segurança/UX:**
+  - Pedido cruzado (B já tinha pedido A) auto-aceita em vez de empilhar
+    um segundo pedido pendente.
+  - Bloquear remove amizade/pedido existente nos dois sentidos e
+    impede novo pedido em qualquer direção enquanto durar.
+  - Aceitar/recusar só pelo addressee, cancelar só pelo requester,
+    remover amizade por qualquer um dos dois — sempre `404` (nunca
+    `403`) para quem não participa, mesmo padrão de não vazar
+    existência já usado no resto do produto.
+  - Notificações são owner-only; `SOCIAL_RATE_LIMITER` novo (20/60s)
+    limita criação de pedido e bloqueio.
+- **UI:** página `/app/friends` (link global "Amigos", mesma seção de
+  Biblioteca/Vault/Grupos/Campanhas/Mundos) e sino de notificações na
+  sidebar (contagem de não lidas, dropdown, marcar lida/todas).
+- **Bug real e sistêmico encontrado e corrigido durante esta rodada
+  (não introduzido por ela — latente desde o BATCH5, achado ao rodar a
+  suíte E2E completa após adicionar o sino de notificações à
+  `AppShell`, presente em TODA página autenticada):** `VaultFormPage` e
+  `WorldFormPage` ganharam um gate de `loading` no BATCH5 para o achado
+  "digitar antes do GET resolver apagava a digitação" — mas o gate só
+  protegia contra a digitação ocorrer ANTES de qualquer resposta
+  chegar. O React StrictMode (`main.tsx`, só em dev) monta esses
+  efeitos duas vezes de propósito, disparando dois GETs reais; sem um
+  guard `active`, a resposta do primeiro GET (descartável) podia
+  resolver DEPOIS do segundo e sobrescrever o formulário no meio da
+  edição, revertendo silenciosamente uma segunda edição em sequência —
+  reproduzido de forma determinística (100% em 3 execuções seguidas
+  antes da correção, 100% estável em 3 execuções depois). Corrigido com
+  o padrão `let active=true; ...; return () => { active=false }` — já
+  usado corretamente em outras páginas do projeto (ex.: `WorldWikiPage`)
+  — aplicado também em `GroupFormPage`, `CampaignFormPage` e
+  `SessionFormPage`, que tinham a mesma lacuna latente (auditado
+  sistematicamente, não só os dois casos que o teste pegou).
+- **Testes:** `tests/integration/social.test.ts` (6 casos — fluxo
+  completo, recusar/cancelar por quem não deveria poder, pedido
+  cruzado, rejeições, bloquear/desbloquear, notificações owner-only) +
+  `tests/e2e/social-friends.spec.ts` (2 cenários, desktop+mobile).
+- **Fora desta rodada, dependência técnica real (não bloqueio):** F-017
+  (Biblioteca social) e F-018 (convites de Grupo/Campanha via amigo)
+  dependem de F-016 já existir — próxima iteração natural do roadmap,
+  não uma omissão.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
