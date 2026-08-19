@@ -4,6 +4,10 @@ export interface Env {
   // docs/library/COVER_STORAGE.md). Nunca usado para nada além de bytes de
   // imagem já validados/reprocessados no navegador antes do upload.
   COVERS_KV: KVNamespace;
+  // F-028 (BATCH15): anexos genéricos (imagem/PDF) ligados a uma Vault Entity — mesmo
+  // padrão Zero Cost de COVERS_KV, namespace próprio para não misturar o domínio de capa
+  // de RPG (catálogo compartilhado) com anexos privados de entidade (owner-only).
+  ASSETS_KV: KVNamespace;
   AUTH_LOGIN_RATE_LIMITER: RateLimit;
   AUTH_REGISTRATION_RATE_LIMITER: RateLimit;
   AUTH_RECOVERY_RATE_LIMITER: RateLimit;

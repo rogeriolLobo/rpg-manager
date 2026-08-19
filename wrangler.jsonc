@@ -22,6 +22,10 @@
     {
       "binding": "COVERS_KV",
       "id": "53c20ff6578a4badb295757917885535"
+    },
+    {
+      "binding": "ASSETS_KV",
+      "id": "49b800c188ac4098a0c5c31cd5df157d"
     }
   ],
   "ratelimits": [

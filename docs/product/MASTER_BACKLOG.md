@@ -1256,6 +1256,54 @@ ter valor real — implementada como VIEW PURA, zero domínio/tabela nova.
   endpoint).
 - Vertical F-026/F-027 (BATCH14) completa. Próximo item da ordem de
   execução do roadmap: BATCH15 — F-028 (Files/Handouts/Assets).
+
+## F-028 — Files/Handouts/Assets — `DONE` (RPG-1.0-BATCH15)
+
+Upload próprio pequeno (mapa, handout digitalizado, ficha em PDF)
+anexado a uma Vault Entity, Zero Cost — generaliza o padrão já provado
+por LIB-005/`COVERS_KV` (`docs/library/COVER_STORAGE.md`) em vez de
+criar um mecanismo novo.
+
+- **Novo namespace `ASSETS_KV`** (Workers KV Free, criado via
+  `wrangler kv namespace create`) — separado de `COVERS_KV` porque a
+  política de leitura é oposta: capa é catálogo público/compartilhável,
+  anexo pode ser mapa/handout privado de mesa. Bytes ficam só no KV;
+  D1 nunca guarda base64/binário.
+- **Migration `0036_file_assets.sql`** (aditiva): tabela `file_assets`
+  (`owner_user_id`, `entity_id` opcional `REFERENCES vault_entities`,
+  `content_type`, `byte_length`, `filename`, `created_at`).
+- **`src/domain/content/file-asset.ts`:** sniff real de magic bytes
+  (JPEG/PNG/WebP/PDF) — nunca confia no `Content-Type` declarado pelo
+  cliente, mesmo princípio de LIB-005. Limite de 5MB por arquivo e
+  quota de 40 arquivos por conta (controla acúmulo dentro do 1GB total
+  do KV Free).
+- **`src/server/routes/files.ts`:** `POST /files` (multipart,
+  valida magic bytes/tamanho/quota/dono da entidade opcional antes de
+  gravar no KV; limpeza best-effort do KV se o D1 falhar depois —
+  nunca deixa órfão), `GET /files` (lista, filtro opcional
+  `?entityId=`), `GET /files/:id/content` (bytes brutos — **owner-only,
+  sempre**, diferente de `COVERS_KV` que é servido publicamente — um
+  anexo pode ser conteúdo privado de mesa), `DELETE /files/:id`
+  (owner-only, remove D1+KV). ID inexistente/de outra conta sempre
+  404 (nunca 403), mesmo padrão anti-enumeração do resto do produto.
+- **Vínculo com Vault Entity é opcional e nunca duplica** — anexar só é
+  permitido a uma entidade do próprio dono (`ownedEntity`); a lista
+  pode existir "solta" (sem `entityId`) ou filtrada por entidade.
+- **UI:** `EntityFilesPanel` (`src/client/pages/file-asset-pages.tsx`)
+  no detalhe da Vault Entity, painel complementar (mesmo princípio de
+  `EntitySheetPanel`: se falhar, não bloqueia a página principal).
+  Botão de excluir ganhou `aria-label` (gap de acessibilidade
+  encontrado e corrigido durante a escrita do teste, não só para o
+  seletor do Playwright).
+- **Testes:** `tests/integration/file-assets.test.ts` (3 casos: upload
+  JPEG+PDF/leitura byte-a-byte/exclusão; rejeita magic bytes inválidos
+  (422)/tamanho acima do limite (413)/IDOR de leitura e exclusão (404
+  em ambos); anexo restrito ao próprio dono da entidade (404 para
+  entidade de outra conta) + filtro `?entityId=`) +
+  `tests/e2e/file-assets.spec.ts` (1 cenário completo — envia, lista,
+  exclui — desktop e mobile).
+- Vertical F-028 (BATCH15) completa. Próximo item da ordem de execução
+  do roadmap: BATCH16 — F-029 (VTT fundação) + F-030 (fog of war).
 - **Achado de hardening para BATCH19:** `tests/e2e/vault-worlds-flow.spec.ts`
   ("getByLabel('Nome')... element was detached from the DOM") voltou a
   flakar no CI (2ª vez nesta sessão, ambas só quando roda no fim de uma
