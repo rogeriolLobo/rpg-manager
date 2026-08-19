@@ -7,7 +7,11 @@ const CSP = [
   // allowlist de hosts aqui não escala para um catálogo mundial de editoras/lojas.
   "img-src 'self' data: https:",
   "font-src 'self'",
-  "connect-src 'self' https://challenges.cloudflare.com",
+  // F-021: fichas em PDF buscam o PDF externo direto do navegador do usuário (nunca pelo
+  // servidor — ver src/client/pdf/sheet-pdf.ts e migrations/0031_sheet_pdf_mapping.sql),
+  // mesma política de "qualquer host HTTPS" já aceita acima para img-src (capas) — uma
+  // allowlist de hosts de PDF não escala mais que uma de editoras de capa.
+  "connect-src 'self' https: https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",

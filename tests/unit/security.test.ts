@@ -49,9 +49,12 @@ describe("segurança", () => {
     expect(csp).not.toContain("script-src 'unsafe-inline'");
     // img-src permite qualquer host HTTPS (LIB-001: capas de RPG vêm de um catálogo mundial de
     // editoras/lojas, o navegador carrega <img> diretamente, o servidor nunca busca essas URLs
-    // — não escala manter uma allowlist fixa de domínios). script-src/style-src continuam
-    // restritos: só a CSP de imagens foi ampliada.
+    // — não escala manter uma allowlist fixa de domínios). connect-src permite qualquer host
+    // HTTPS pela mesma razão (F-021: fichas em PDF buscam o PDF externo direto do navegador,
+    // nunca pelo servidor — ver src/client/pdf/sheet-pdf.ts). script-src/style-src continuam
+    // restritos: só img-src/connect-src foram ampliados.
     expect(csp).toContain("img-src 'self' data: https:;");
+    expect(csp).toContain("connect-src 'self' https: https://challenges.cloudflare.com");
     expect(headers.get("Strict-Transport-Security")).toContain(
       "max-age=31536000",
     );

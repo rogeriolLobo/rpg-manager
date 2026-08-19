@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { validateSheet, type SheetFieldDefinition, type SheetTemplate } from '../../domain/sheets';
+import { validateSheet, type PdfFieldMapping, type SheetFieldDefinition, type SheetTemplate } from '../../domain/sheets';
 import { characterSheetInputSchema, sheetTemplateInputSchema } from '../../shared/validation/schemas';
 import { authorizedEntity, ownedEntity, ownedWorld, type AuthorizedEntityRow } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
@@ -25,8 +25,8 @@ import type { AppVariables, Env } from '../types';
 // Publication/GameSystem no resto do produto).
 
 type AppContext = Context<{ Bindings: Env; Variables: AppVariables }>;
-interface TemplateRow { id:string; owner_user_id:string; world_id:string|null; world_name:string|null; game_system_id:string|null; game_system_name:string|null; name:string; description:string; version:number; field_definitions:string; created_at:string; updated_at:string }
-interface SheetRow { entity_id:string; template_id:string; template_version:number; values_json:string; created_at:string; updated_at:string; template_name:string; current_template_version:number; field_definitions:string }
+interface TemplateRow { id:string; owner_user_id:string; world_id:string|null; world_name:string|null; game_system_id:string|null; game_system_name:string|null; name:string; description:string; version:number; field_definitions:string; pdf_url:string|null; pdf_mapping_json:string; created_at:string; updated_at:string }
+interface SheetRow { entity_id:string; template_id:string; template_version:number; values_json:string; created_at:string; updated_at:string; template_name:string; current_template_version:number; field_definitions:string; pdf_url:string|null; pdf_mapping_json:string }
 interface SheetEntityRow extends AuthorizedEntityRow { entity_type:string; world_id:string|null }
 interface EntityContext { worldId:string|null; gameSystemId:string|null }
 
@@ -37,8 +37,18 @@ function parseFields(json: string, context: string): SheetFieldDefinition[] {
   catch (cause) { throw new Error(`Invalid stored sheet template ${context}`, { cause }); }
 }
 
+function parsePdfMapping(json: string, context: string): Record<string, PdfFieldMapping> {
+  try { return JSON.parse(json) as Record<string, PdfFieldMapping>; }
+  catch (cause) { throw new Error(`Invalid stored pdf mapping ${context}`, { cause }); }
+}
+
 function presentTemplate(row: TemplateRow) {
-  return { id: row.id, worldId: row.world_id, worldName: row.world_name, gameSystemId: row.game_system_id, gameSystemName: row.game_system_name, name: row.name, description: row.description, version: row.version, fields: parseFields(row.field_definitions, row.id), createdAt: row.created_at, updatedAt: row.updated_at };
+  return {
+    id: row.id, worldId: row.world_id, worldName: row.world_name, gameSystemId: row.game_system_id, gameSystemName: row.game_system_name,
+    name: row.name, description: row.description, version: row.version, fields: parseFields(row.field_definitions, row.id),
+    pdfUrl: row.pdf_url, pdfMapping: parsePdfMapping(row.pdf_mapping_json, row.id),
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
 }
 
 const TEMPLATE_SELECT = 'SELECT t.*,w.name world_name,gs.name game_system_name FROM sheet_templates t LEFT JOIN worlds w ON w.id=t.world_id LEFT JOIN game_systems gs ON gs.id=t.game_system_id';
@@ -99,8 +109,8 @@ sheetRoutes.post('/templates', async (c) => {
   if (input.worldId) await ownedWorld(c, input.worldId);
   if (input.gameSystemId) await validGameSystem(c, input.gameSystemId);
   const id = crypto.randomUUID(), now = nowIso();
-  await c.env.DB.prepare('INSERT INTO sheet_templates (id,owner_user_id,world_id,game_system_id,name,description,version,field_definitions,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)')
-    .bind(id, c.get('user').id, input.worldId, input.gameSystemId, input.name, input.description, JSON.stringify(input.fields), now, now).run();
+  await c.env.DB.prepare('INSERT INTO sheet_templates (id,owner_user_id,world_id,game_system_id,name,description,version,field_definitions,pdf_url,pdf_mapping_json,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?,?)')
+    .bind(id, c.get('user').id, input.worldId, input.gameSystemId, input.name, input.description, JSON.stringify(input.fields), input.pdfUrl, JSON.stringify(input.pdfMapping), now, now).run();
   return c.json({ id }, 201);
 });
 
@@ -115,8 +125,8 @@ sheetRoutes.patch('/templates/:id', async (c) => {
     throw new ApiError(409, 'TEMPLATE_FIELDS_IN_USE', 'Remova os valores dos campos excluídos antes de alterar o modelo.');
   const nextFields = JSON.stringify(input.fields);
   const version = nextFields !== current.field_definitions ? current.version + 1 : current.version;
-  await c.env.DB.prepare('UPDATE sheet_templates SET world_id=?,game_system_id=?,name=?,description=?,version=?,field_definitions=?,updated_at=? WHERE id=? AND owner_user_id=?')
-    .bind(input.worldId, input.gameSystemId, input.name, input.description, version, nextFields, nowIso(), c.req.param('id'), c.get('user').id).run();
+  await c.env.DB.prepare('UPDATE sheet_templates SET world_id=?,game_system_id=?,name=?,description=?,version=?,field_definitions=?,pdf_url=?,pdf_mapping_json=?,updated_at=? WHERE id=? AND owner_user_id=?')
+    .bind(input.worldId, input.gameSystemId, input.name, input.description, version, nextFields, input.pdfUrl, JSON.stringify(input.pdfMapping), nowIso(), c.req.param('id'), c.get('user').id).run();
   return c.json({ success: true, version });
 });
 
@@ -130,7 +140,7 @@ sheetRoutes.delete('/templates/:id', async (c) => {
 
 sheetRoutes.get('/entities/:entityId', async (c) => {
   await sheetEntity(c, c.req.param('entityId'), 'read');
-  const row = await c.env.DB.prepare('SELECT s.*,t.name template_name,t.version current_template_version,t.field_definitions FROM character_sheets s JOIN sheet_templates t ON t.id=s.template_id WHERE s.entity_id=?')
+  const row = await c.env.DB.prepare('SELECT s.*,t.name template_name,t.version current_template_version,t.field_definitions,t.pdf_url,t.pdf_mapping_json FROM character_sheets s JOIN sheet_templates t ON t.id=s.template_id WHERE s.entity_id=?')
     .bind(c.req.param('entityId')).first<SheetRow>();
   if (!row) return c.json({ item: null });
   return c.json({ item: {
@@ -138,6 +148,9 @@ sheetRoutes.get('/entities/:entityId', async (c) => {
     templateVersion: row.template_version, currentTemplateVersion: row.current_template_version,
     outdated: row.template_version !== row.current_template_version,
     fields: parseFields(row.field_definitions, row.template_id), values: JSON.parse(row.values_json) as Record<string, unknown>,
+    // F-021: usado pelo cliente para preencher/baixar o PDF do usuário — nunca buscado
+    // aqui no servidor (ver comentário no topo do arquivo e cover-url.ts).
+    pdfUrl: row.pdf_url, pdfMapping: parsePdfMapping(row.pdf_mapping_json, row.template_id),
     createdAt: row.created_at, updatedAt: row.updated_at,
   } });
 });

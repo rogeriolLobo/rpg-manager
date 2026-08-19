@@ -258,6 +258,13 @@ export const sheetFieldSchema = z.strictObject({
   options: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
 }).refine((field) => field.type !== 'CHOICE' || (field.options && field.options.length > 0), { message: 'Campos do tipo CHOICE exigem ao menos uma opção.', path: ['options'] });
 
+// F-021 (BATCH11): mapeamento de campo do modelo para uma posição no PDF externo do
+// usuário — ver src/domain/sheets.ts (PdfFieldMapping) e migrations/0031_sheet_pdf_mapping.sql.
+export const pdfFieldMappingSchema = z.discriminatedUnion('mode', [
+  z.strictObject({ mode: z.literal('ACROFORM'), fieldName: z.string().trim().min(1).max(120) }),
+  z.strictObject({ mode: z.literal('OVERLAY'), page: z.number().int().min(1).max(999), x: z.number().finite(), y: z.number().finite(), fontSize: z.number().finite().min(4).max(72).optional() }),
+]);
+
 // F-023 (BATCH10): gameSystemId é mutuamente exclusivo com worldId — um modelo é global,
 // OU de um World, OU de um Game System (ver migrations/0030_sheet_templates_game_system.sql).
 export const sheetTemplateInputSchema = z.strictObject({
@@ -266,7 +273,13 @@ export const sheetTemplateInputSchema = z.strictObject({
   worldId: z.string().trim().min(1).max(80).nullable(),
   gameSystemId: z.string().trim().min(1).max(80).nullable(),
   fields: z.array(sheetFieldSchema).max(80).refine((fields) => new Set(fields.map((field) => field.key)).size === fields.length, 'As chaves dos campos devem ser únicas.'),
-}).refine((input) => !(input.worldId && input.gameSystemId), { message: 'Um modelo não pode pertencer a um World e a um Game System ao mesmo tempo.', path: ['gameSystemId'] });
+  // F-021: pdfUrl nunca é buscado pelo servidor (mesma política de coverUrl — só validação
+  // sintática/anti-SSRF-por-IP-literal, ver src/shared/security/cover-url.ts).
+  pdfUrl: z.string().trim().max(2048).nullable(),
+  pdfMapping: z.record(z.string(), pdfFieldMappingSchema).default({}),
+}).refine((input) => !(input.worldId && input.gameSystemId), { message: 'Um modelo não pode pertencer a um World e a um Game System ao mesmo tempo.', path: ['gameSystemId'] })
+  .refine((input) => !input.pdfUrl || isPublicHttpsUrl(input.pdfUrl), { message: 'A URL do PDF precisa ser https pública.', path: ['pdfUrl'] })
+  .refine((input) => Object.keys(input.pdfMapping).every((key) => input.fields.some((field) => field.key === key)), { message: 'O mapeamento de PDF só pode referenciar campos existentes no modelo.', path: ['pdfMapping'] });
 
 export const characterSheetInputSchema = z.strictObject({
   templateId: z.string().trim().min(1).max(80),

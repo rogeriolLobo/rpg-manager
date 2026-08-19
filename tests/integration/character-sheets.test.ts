@@ -42,7 +42,7 @@ const entity = (name: string, extra: Record<string, unknown> = {}) => ({
 });
 
 const template = (extra: Record<string, unknown> = {}) => ({
-  name: 'Ficha Neutra', description: '', worldId: null, gameSystemId: null,
+  name: 'Ficha Neutra', description: '', worldId: null, gameSystemId: null, pdfUrl: null,
   fields: [
     { key: 'conceito', label: 'Conceito', type: 'TEXT', required: true },
     { key: 'recursos', label: 'Recursos', type: 'NUMBER', required: true },
@@ -221,5 +221,37 @@ describe('Character Sheet Engine (F-020)', () => {
     // Sem conflito: só Game System, válido.
     const created = await request('/sheets/templates', 'POST', template({ gameSystemId }), owner);
     expect(created.status).toBe(201);
+  });
+
+  it('F-021: cria modelo com PDF vinculado (ACROFORM/OVERLAY), reflete na ficha da entidade, e rejeita URL/mapeamento inválidos', async () => {
+    const owner = await register('sheet-owner-8');
+    const pdfMapping = {
+      conceito: { mode: 'ACROFORM', fieldName: 'txt_conceito' },
+      recursos: { mode: 'OVERLAY', page: 1, x: 100, y: 200, fontSize: 12 },
+    };
+    const templateId = await createTemplate(owner, { pdfUrl: 'https://example.com/ficha.pdf', pdfMapping });
+    const entityId = await createEntity(owner);
+    await request(`/sheets/entities/${entityId}`, 'PUT', { templateId, values: { conceito: 'x', recursos: 1, postura: 'OUSADA' } }, owner);
+
+    const read = await request(`/sheets/entities/${entityId}`, 'GET', undefined, owner);
+    const body = await read.json() as { item: { pdfUrl: string | null; pdfMapping: Record<string, unknown> } };
+    expect(body.item.pdfUrl).toBe('https://example.com/ficha.pdf');
+    expect(body.item.pdfMapping).toEqual(pdfMapping);
+
+    // URL não-https/privada é rejeitada (mesma política de coverUrl).
+    expect((await request('/sheets/templates', 'POST', template({ pdfUrl: 'http://example.com/ficha.pdf' }), owner)).status).toBe(422);
+    expect((await request('/sheets/templates', 'POST', template({ pdfUrl: 'https://127.0.0.1/ficha.pdf' }), owner)).status).toBe(422);
+
+    // Mapeamento referenciando uma chave que não existe no modelo é rejeitado.
+    expect((await request('/sheets/templates', 'POST', template({ pdfMapping: { inexistente: { mode: 'ACROFORM', fieldName: 'x' } } }), owner)).status).toBe(422);
+
+    // PATCH atualiza a URL/mapeamento do PDF sem alterar a versão do modelo (pdfMapping é
+    // só apresentação — não invalida os valores já preenchidos na ficha).
+    const patch = await request(`/sheets/templates/${templateId}`, 'PATCH', template({ pdfUrl: 'https://example.com/ficha-v2.pdf', pdfMapping: { conceito: { mode: 'ACROFORM', fieldName: 'outro_campo' } } }), owner);
+    expect(patch.status).toBe(200);
+    expect((await patch.json() as { version: number }).version).toBe(1);
+    const listed = await request('/sheets/templates', 'GET', undefined, owner);
+    const found = (await listed.json() as { items: Array<{ id: string; pdfUrl: string }> }).items.find((item) => item.id === templateId);
+    expect(found?.pdfUrl).toBe('https://example.com/ficha-v2.pdf');
   });
 });

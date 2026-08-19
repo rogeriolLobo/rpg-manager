@@ -208,8 +208,31 @@
 .template-field .checkbox-row {
   padding-bottom: 0.7rem;
 }
+/* F-020/F-021: opções de CHOICE e mapeamento de PDF podem coexistir com o par
+   chave/rótulo/tipo de .template-field — sempre ocupam a linha inteira em vez de
+   disputar espaço com as 5 colunas fixas do layout base. */
+.template-field > label.span-full,
+.template-field .pdf-field-mapping {
+  grid-column: 1 / -1;
+}
+.template-field .pdf-field-mapping {
+  align-items: end;
+  background: var(--surface-muted);
+  border-radius: 0.6rem;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  padding: 0.6rem;
+}
 .template-list {
   margin-top: 1rem;
+}
+.pdf-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.75rem;
 }
 .vault-detail-grid {
   grid-template-columns: minmax(320px, 0.75fr) minmax(0, 1.5fr);

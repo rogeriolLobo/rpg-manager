@@ -1013,6 +1013,64 @@ campos por RPG.
 - Próximo item da ordem de execução do roadmap: BATCH11 — F-021 (PDF
   Character Sheets), agora como batch próprio.
 
+## F-021 — PDF Character Sheets — `DONE` (RPG-1.0-BATCH11)
+
+Fichas em PDF, reaproveitando por completo o motor de F-020/F-023.
+Dependência nova: `pdf-lib` (MIT, gratuita — pré-autorizada por
+CLAUDE.md §7).
+
+- **Migration `0031_sheet_pdf_mapping.sql`** (aditiva):
+  `sheet_templates.pdf_url` + `pdf_mapping_json`.
+- **Decisão central de licenciamento/Zero Cost:** o PDF em si NUNCA
+  passa pelo servidor do RPG Manager — nem busca, nem armazena, nem
+  redistribui. O servidor só guarda a URL (validada como https pública
+  via `isPublicHttpsUrl`, a mesma função já usada por `coverUrl` — "o
+  servidor nunca busca essa URL") e o mapeamento (metadata de posição/
+  nome de campo). Toda a leitura, detecção de campos, preenchimento e
+  geração do PDF final acontecem no NAVEGADOR do usuário, a cada
+  exportação, via `pdf-lib` — mesma responsabilidade de licenciamento
+  que já vale para `coverUrl`/External Resources (o usuário só deve
+  linkar conteúdo que tem direito de usar).
+- **Dois modos de mapeamento por campo** (`src/domain/sheets.ts`,
+  `PdfFieldMapping`, `validatePdfMapping`): `ACROFORM` (nome de um
+  campo de formulário preenchível já existente no PDF — detectável no
+  navegador via "Detectar campos do PDF", sem o usuário precisar abrir
+  o PDF num editor para descobrir o nome interno do campo) e `OVERLAY`
+  (página/x/y/tamanho de fonte — desenha o valor como texto, para PDFs
+  digitalizados/sem AcroForm). `fillSheetPdf` detecta o tipo real do
+  campo AcroForm (`PDFCheckBox`/`PDFDropdown`/`PDFRadioGroup`/
+  `PDFTextField`) e aplica a operação certa, com aviso (não erro fatal)
+  por campo que falhar, para uma exportação nunca travar por causa de
+  um único mapeamento desatualizado.
+- **CSP:** `connect-src` ampliado de `'self'` para também aceitar
+  `https:` (mesma política já aplicada a `img-src` para `coverUrl`) —
+  necessário porque o preenchimento busca o PDF externo via `fetch()`
+  do navegador. `public/_headers` e `tests/unit/security.test.ts`
+  atualizados juntos (há um teste que trava os dois alinhados).
+- **Performance:** `pdf-lib` é importado dinamicamente dentro de
+  `src/client/pdf/sheet-pdf.ts` (nunca no topo do arquivo) — um import
+  estático quase dobrava o bundle principal (chunk carregado em toda
+  navegação); com import dinâmico, cai num chunk separado, buscado só
+  quando `/app/sheets` ou o painel de ficha com PDF são realmente
+  usados.
+- **Gap do F-020 corrigido de passagem:** o modelo de ficha nunca tinha
+  UI de edição (só criar/excluir) mesmo já existindo `PATCH
+  /sheets/templates/:id` no backend desde o F-020 — corrigido aqui
+  porque o mapeamento de PDF precisa ser ajustável depois de criado
+  (acertar posição x/y na prática exige tentativa e erro). `/app/sheets`
+  ganhou "Editar" por modelo, reaproveitando o mesmo formulário.
+- **Testes:** `tests/unit/sheets.test.ts` (novo, `validatePdfMapping`)
+  + 2 casos novos em `tests/integration/character-sheets.test.ts` (8 no
+  total: PDF persistido/refletido na ficha da entidade + URL insegura
+  rejeitada + mapeamento para chave inexistente rejeitado + PATCH não
+  altera version) + `tests/e2e/character-sheets.spec.ts` estendido com
+  um cenário completo (desktop+mobile): gera um PDF com AcroForm em
+  memória, intercepta o fetch do navegador (`page.route`), detecta o
+  campo, mapeia, vincula à ficha de um Personagem e baixa o PDF
+  preenchido de verdade.
+- Próximo item da ordem de execução do roadmap: BATCH12 — F-022 (Vault
+  avançado).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
