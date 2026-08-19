@@ -1197,6 +1197,41 @@ F-013/F-014) — não é domínio novo.
 - Próximo item da ordem de execução do roadmap: BATCH14 — F-026
   (conteúdo oficial/licenciado) + F-027 (Compendium).
 
+## F-026 — Conteúdo oficial/licenciado — `DONE` (RPG-1.0-BATCH14)
+
+Arquitetura de proveniência para qualquer Vault Entity — nunca copia
+conteúdo protegido, só marca a origem declarada pelo usuário.
+
+- **Migration `0035_vault_entity_provenance.sql`** (aditiva):
+  `vault_entities.content_source` (`USER_CREATED` padrão\|`LICENSED`\|
+  `OFFICIAL_REFERENCE`), `publisher`, `edition`, `license_note`,
+  `content_locked`.
+- **Decisão central:** `OFFICIAL_REFERENCE` é deliberadamente um
+  PONTEIRO ao material oficial (ex.: "Ver Livro X, p.34"), nunca um
+  lugar para colar o texto integral — a UI reforça isso com uma nota
+  explícita no formulário. Se um item específico exigisse bloqueio
+  jurídico, ele seria marcado individualmente — não haveria motivo para
+  bloquear a feature inteira (nenhum caso real disso apareceu).
+- **`content_locked` tem aplicação real, não é só rótulo de UI:**
+  `PATCH /vault/:id` rejeita (409 `CONTENT_LOCKED`) alterar a
+  descrição enquanto travado — protege contra edição acidental de
+  conteúdo oficial/licenciado já registrado. Destravar
+  (`contentLocked:false`) e editar a descrição na MESMA chamada é
+  permitido (o dono está explicitamente assumindo a responsabilidade).
+- **Integração com F-022 (fork):** a cópia preserva a proveniência
+  (origem/publisher/edition/nota — a cópia ainda descreve o mesmo
+  conteúdo de origem) mas NUNCA herda `content_locked` — o usuário
+  forkou justamente para ter uma cópia editável.
+- **UI:** fieldset "Proveniência" no formulário de criar/editar
+  entidade (só expande os campos extras quando a origem não é "Criado
+  por mim"), exibição no painel "Contexto" do detalhe da entidade.
+- **Testes:** `tests/integration/vault-provenance.test.ts` (3 casos:
+  default/aceite de LICENSED-OFFICIAL_REFERENCE com metadata; trava
+  bloqueia descrição mas não outros campos, destravar+editar na mesma
+  chamada funciona; fork preserva proveniência sem herdar trava) +
+  `tests/e2e/vault-provenance.spec.ts` (1 cenário, desktop+mobile).
+- Próximo: F-027 (Compendium), mesmo BATCH14.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

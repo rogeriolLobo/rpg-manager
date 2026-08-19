@@ -82,6 +82,9 @@ const labels: Record<string, string> = {
   ERA: "Era",
   APPROXIMATE: "Aproximada",
   UNKNOWN: "Desconhecida",
+  USER_CREATED: "Criado por mim",
+  LICENSED: "Licenciado",
+  OFFICIAL_REFERENCE: "Referência oficial",
 };
 
 export function displayLabel(value: string | null | undefined): string {

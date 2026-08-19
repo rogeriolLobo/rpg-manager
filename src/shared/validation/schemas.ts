@@ -338,6 +338,8 @@ export const itemDetailsSchema = z.strictObject({
   itemType: trimmed(160).default(''), rarity: trimmed(80).default(''), publicDescription: trimmed(10000).default(''), gmNotes: trimmed(10000).default(''),
 });
 
+// F-026 (BATCH14): proveniência — nunca copia conteúdo protegido, só marca a ORIGEM
+// declarada pelo próprio usuário (ver migrations/0035_vault_entity_provenance.sql).
 export const vaultEntityInputSchema = z.strictObject({
   entityType: z.enum(ENTITY_TYPES),
   name: z.string().trim().min(1).max(160),
@@ -347,6 +349,11 @@ export const vaultEntityInputSchema = z.strictObject({
   worldId: z.string().trim().max(80).nullable().optional(),
   groupId: z.string().trim().max(80).nullable().optional(),
   parentEntityId: z.string().trim().max(80).nullable().optional(),
+  contentSource: z.enum(['USER_CREATED', 'LICENSED', 'OFFICIAL_REFERENCE']).default('USER_CREATED'),
+  publisher: trimmed(160).default(''),
+  edition: trimmed(160).default(''),
+  licenseNote: trimmed(2000).default(''),
+  contentLocked: z.boolean().default(false),
   adventure: adventureDetailsSchema.nullable(),
   lore: loreDetailsSchema.nullable().default(null),
   character: characterDetailsSchema.nullable().default(null),
