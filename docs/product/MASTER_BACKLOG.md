@@ -1156,6 +1156,47 @@ F-013/F-014) — não é domínio novo.
   (`core-flow.spec.ts` estendido com asserção do default "Formato").
 - Próximo: F-025 (Adventures aprofundadas), mesmo BATCH13.
 
+## F-025 — Adventures aprofundadas (acts/scenes/encounters/handouts) — `DONE` (RPG-1.0-BATCH13)
+
+- **Migration `0034_adventure_structure.sql`** (aditiva): `adventure_scenes`
+  (act/título/resumo/texto para ler em voz alta/notas do mestre/concluída),
+  `adventure_encounters` (por cena), `adventure_scene_entities` (many-to-many
+  cena↔Vault Entity, mesmo princípio de `campaign_entities` — nunca
+  duplica NPC/Location/Item já cadastrado), `adventure_handouts` (texto
+  livre e/ou referência a um External Resource do mesmo World, `revealed_at`
+  nulo até o GM revelar).
+- **Decisão de escopo v1:** ferramenta de preparação do GM — leitura e
+  escrita de scenes/encounters/handouts são owned-only (mesmo modelo do
+  Diário/Journal), nunca expostas a Players ainda. Expor handouts
+  revelados/cenas na visão do jogador é responsabilidade de F-033
+  (Player View), que já lista F-025 como dependência no roadmap —
+  `revealed_at` já existe no schema preparado para isso, sem construir a
+  superfície de jogador agora.
+- **`src/server/routes/adventures.ts`**: `GET /adventures/:id` devolve
+  a estrutura agregada (cenas com encontros e entidades aninhados +
+  handouts) numa única chamada. `entity_type` é validado — só entidades
+  `ADVENTURE` têm estrutura. Vincular uma entidade a uma cena exige
+  `ownedEntity` na entidade alvo (nunca cross-account, mesmo dono da
+  Adventure).
+- **UI:** `/app/vault/:id/adventure` (link "Preparar aventura" na
+  entidade Adventure) — cenas expansíveis com encontros/entidades
+  aninhados, seção de handouts com toggle revelado/oculto.
+- **Testes:** `tests/integration/adventures.test.ts` (5 casos: cena+
+  encontro+vínculo de entidade sem duplicar + GET agregado; owner-only/
+  IDOR + `entity_type` inválido; DELETE de cena cascade sem afetar a
+  entidade vinculada; handout com toggle revelado; validação de cena/
+  recurso externo inválidos) + `tests/e2e/adventure-prep.spec.ts` (1
+  cenário completo, desktop+mobile).
+- **Nota de processo:** o `npm run deploy` deste batch foi disparado
+  acidentalmente com o código do F-025 já na working tree mas ainda não
+  commitado (build local reflete o working tree, não HEAD) — corrigido
+  aplicando a migration 0034 e fechando o commit/push imediatamente em
+  seguida, para que HEAD=origin=produção convirjam para o mesmo
+  conteúdo já validado, sem deixar rota nova quebrada em produção no
+  meio do caminho.
+- Próximo item da ordem de execução do roadmap: BATCH14 — F-026
+  (conteúdo oficial/licenciado) + F-027 (Compendium).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

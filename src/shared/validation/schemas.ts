@@ -220,6 +220,40 @@ export const adventureDetailsSchema = z.strictObject({
   rewards: trimmed(10000).default(''),
 });
 
+// F-025 (BATCH13): Adventures aprofundadas — acts/scenes/encounters/handouts, ligados ao
+// Vault Entity ADVENTURE — ver src/server/routes/adventures.ts.
+export const adventureSceneInputSchema = z.strictObject({
+  act: trimmed(120).default(''),
+  title: z.string().trim().min(1).max(160),
+  summary: trimmed(2000).default(''),
+  readAloud: trimmed(5000).default(''),
+  gmNotes: trimmed(10000).default(''),
+  completed: z.boolean().default(false),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
+});
+
+export const adventureEncounterInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  difficulty: trimmed(80).default(''),
+  description: trimmed(5000).default(''),
+  gmNotes: trimmed(10000).default(''),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
+});
+
+export const adventureSceneEntityInputSchema = z.strictObject({
+  entityId: z.string().trim().min(1).max(80),
+  role: trimmed(120).default(''),
+});
+
+export const adventureHandoutInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  content: trimmed(10000).default(''),
+  sceneId: z.string().trim().max(80).nullable().optional(),
+  externalResourceId: z.string().trim().max(80).nullable().optional(),
+  revealed: z.boolean().default(false),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
+});
+
 export const loreDetailsSchema = z.strictObject({
   loreType: z.enum(LORE_TYPES),
   canonStatus: z.enum(LORE_CANON_STATUSES),
@@ -451,6 +485,10 @@ export type WorldInput = z.infer<typeof worldInputSchema>;
 export type VaultEntityInput = z.infer<typeof vaultEntityInputSchema>;
 export type WorldEntityLinkInput = z.infer<typeof worldEntityLinkInputSchema>;
 export type VaultEntityForkInput = z.infer<typeof vaultEntityForkInputSchema>;
+export type AdventureSceneInput = z.infer<typeof adventureSceneInputSchema>;
+export type AdventureEncounterInput = z.infer<typeof adventureEncounterInputSchema>;
+export type AdventureSceneEntityInput = z.infer<typeof adventureSceneEntityInputSchema>;
+export type AdventureHandoutInput = z.infer<typeof adventureHandoutInputSchema>;
 export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
 export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
