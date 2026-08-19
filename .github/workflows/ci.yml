@@ -21,13 +21,18 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Roda dentro do container oficial do Playwright (Chromium + todas as
+    # dependências de SO já pré-instaladas, Node já incluído) — elimina por
+    # completo o "npx playwright install --with-deps", que travou 4x nesta
+    # sessão (às vezes 15-20+ minutos) no apt-get do mirror
+    # azure.archive.ubuntu.com, sempre em "Get: .../noble-security
+    # InRelease" (achado real, ver histórico de runs cancelados por timeout).
+    # Tag fixada na mesma versão de @playwright/test do package.json —
+    # atualizar as duas juntas.
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run lint
@@ -35,5 +40,4 @@ jobs:
       - run: npm run test
       - run: npm run test:integration
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
