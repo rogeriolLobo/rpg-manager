@@ -20,8 +20,13 @@
 /* F-019 (BATCH7): botão de notificações ao lado da paleta de comandos na sidebar. */
 .sidebar-toolbar { display: flex; gap: .5rem; align-items: stretch; margin-bottom: .7rem; }
 .sidebar-toolbar .command-trigger { flex: 1; margin-bottom: 0; }
-.notifications-widget { position: relative; }
-.notifications-widget > .icon-button { color: var(--sidebar-text-muted); border: 1px solid var(--sidebar-border); border-radius: .6rem; width: 2.7rem; height: 2.7rem; }
+/* O botão de sino tinha altura fixa (2.7rem) dentro de um wrapper esticado por
+   align-items:stretch da .sidebar-toolbar — como a altura real da .sidebar-toolbar é
+   ditada pelo .command-trigger (padding próprio, maior que 2.7rem), sobrava espaço morto
+   abaixo do sino e ele ficava desalinhado/"flutuando" em vez de preencher a mesma altura
+   do botão de busca ao lado. Achado real via screenshot do usuário. */
+.notifications-widget { position: relative; display: flex; }
+.notifications-widget > .icon-button { color: var(--sidebar-text-muted); border: 1px solid var(--sidebar-border); border-radius: .6rem; width: 2.7rem; }
 .notification-badge { position: absolute; top: -.25rem; right: -.25rem; min-width: 1.1rem; height: 1.1rem; padding: 0 .3rem; border-radius: 999px; background: var(--danger); color: var(--text-on-brand); font-size: .65rem; font-weight: 700; display: grid; place-items: center; }
 .notifications-dropdown { position: absolute; top: calc(100% + .5rem); right: 0; z-index: 1000; width: min(18rem, calc(100vw - 2.5rem)); max-height: 22rem; overflow-y: auto; }
 .notifications-dropdown ul li { display: flex; align-items: center; gap: .6rem; padding: .5rem 0; color: var(--text-muted); }
