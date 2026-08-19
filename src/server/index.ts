@@ -7,6 +7,7 @@ import { campaignRoutes } from './routes/campaigns';
 import { dashboardRoutes } from './routes/dashboard';
 import { rpgRoutes } from './routes/rpgs';
 import { transferRoutes } from './routes/transfer';
+import { backupRestoreRoutes } from './routes/backup-restore';
 import { groupRoutes } from './routes/groups';
 import { directoryRoutes } from './routes/directory';
 import { worldRoutes } from './routes/worlds';
@@ -110,6 +111,7 @@ app.use('/api/v1/media/*', requireAuth, requireCsrf);
 app.route('/api/v1/media', mediaRoutes);
 app.use('/api/v1/*', requireAuth, requireCsrf);
 app.route('/api/v1', transferRoutes);
+app.route('/api/v1', backupRestoreRoutes);
 app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Endpoint não encontrado.' } }, 404));
 app.onError((error, c) => {
   if (error instanceof ApiError) return c.json({ error: { code: error.code, message: error.message, fields: error.fields }, requestId: c.get('requestId') }, error.status);

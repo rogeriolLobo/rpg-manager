@@ -378,3 +378,4 @@ export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
 export type EventTemporalInput = z.infer<typeof eventTemporalInputSchema>;
 export type CreatureStatTemplateInput = z.infer<typeof creatureStatTemplateInputSchema>;
+export type JournalPageInput = z.infer<typeof journalPageInputSchema>;

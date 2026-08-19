@@ -6,6 +6,7 @@ import { useAuth } from "../auth/auth-context";
 import { PageHeader } from "./dashboard-page";
 import { useTheme } from "../theme/ThemeProvider";
 import type { ThemePreference } from "../theme/theme";
+import { SUPPORTED_BACKUP_SCHEMA_VERSION } from "../../domain/backup/types";
 
 function download(path: string) {
   window.location.assign(`/api/v1${path}`);
@@ -62,6 +63,16 @@ export function SettingsPage() {
             <Download size={17} />
             Baixar CSV
           </button>
+        </section>
+        <section className="panel setting-card">
+          <FileJson />
+          <h2>Restaurar backup</h2>
+          <p>
+            Envie um backup JSON completo (v{SUPPORTED_BACKUP_SCHEMA_VERSION}) para restaurar
+            Worlds, Vault e Diário. Sempre cria registros novos — nunca sobrescreve nem apaga
+            dados existentes. Revise a prévia antes de confirmar.
+          </p>
+          <BackupRestoreForm />
         </section>
         <AboutSettings />
       </div>
@@ -218,6 +229,87 @@ function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
             onClick={() => void confirmImport()}
           >
             Confirmar importação
+          </button>
+        </div>
+      )}
+      {message && <p className="success-message">{message}</p>}
+    </>
+  );
+}
+
+// F-015: mesmo padrão de preview/confirm do ImportForm acima — nada é gravado antes da
+// confirmação explícita, e a prévia sempre mostra contagem + avisos por domínio (ex.: "RPG
+// padrão não encontrado", "jogador vinculado não existe mais") para que a decisão de confirmar
+// seja informada, não um clique cego.
+function BackupRestoreForm() {
+  const [preview, setPreview] = useState<{
+    jobId: string;
+    summary: Record<string, number>;
+    warnings: Array<{ domain: string; oldId: string; message: string }>;
+    canConfirm: boolean;
+  }>();
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(""); setMessage("");
+    const input = event.currentTarget.elements.namedItem("backup") as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = await postJson<NonNullable<typeof preview>>("/import/backup/preview", { backup: await file.text() });
+      setPreview(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível ler este backup.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmRestore = async () => {
+    if (!preview) return;
+    setBusy(true); setError("");
+    try {
+      const result = await postJson<{ restored: Record<string, number> }>("/import/backup/confirm", { jobId: preview.jobId });
+      const parts = Object.entries(result.restored).filter(([, count]) => count > 0).map(([domain, count]) => `${count} ${domain}`);
+      setMessage(parts.length ? `Restaurado: ${parts.join(", ")}.` : "Nada precisou ser restaurado.");
+      setPreview(undefined);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível restaurar este backup.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const summaryLabels: Record<string, string> = { worlds: "Worlds", creatureStatTemplates: "Modelos de ficha", entities: "Entidades do Vault", journalFolders: "Pastas do Diário", journalPages: "Páginas do Diário" };
+  return (
+    <>
+      <form onSubmit={submit}>
+        <label>
+          Arquivo de backup (.json)
+          <input name="backup" type="file" accept=".json,application/json" required />
+        </label>
+        <button className="primary-button" disabled={busy}>Gerar prévia</button>
+      </form>
+      {error && <p className="form-error">{error}</p>}
+      {preview && (
+        <div className="import-preview">
+          <strong>Prévia do restore</strong>
+          <ul className="clean-list">
+            {Object.entries(preview.summary).filter(([, count]) => count > 0).map(([domain, count]) => (
+              <li key={domain}>{summaryLabels[domain] ?? domain}: {count}</li>
+            ))}
+          </ul>
+          {preview.warnings.length > 0 && (
+            <>
+              <p className="section-note">{preview.warnings.length} aviso(s) — referências que não puderam ser preservadas continuam documentadas, o restante é restaurado normalmente:</p>
+              {preview.warnings.map((warning, index) => (
+                <p className="form-error" key={`${warning.domain}-${warning.oldId}-${index}`}>{warning.message}</p>
+              ))}
+            </>
+          )}
+          <button className="primary-button" disabled={!preview.canConfirm || busy} onClick={() => void confirmRestore()}>
+            Confirmar restore
           </button>
         </div>
       )}

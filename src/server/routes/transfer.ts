@@ -274,7 +274,17 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
   // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
   // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).
   const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
-  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems,publicationExternalIds]=await c.env.DB.batch([
+  // F-015: v8 — cobertura completa de todo dado autoral do usuário (achado real da
+  // auditoria de integridade do BATCH5: v7 só tinha a linha-base de Worlds/Vault, sem
+  // campos especializados/Journal/Wiki/Relations/Cartografia/External Resources/
+  // Timeline/Revisions). Cada tabela nova é escopada por JOIN até chegar em
+  // `owner_user_id`/`user_id` do usuário autenticado — nunca um filtro que dependa de
+  // dado vindo do cliente. Ver docs/library/LIBRARY_IMPORT_EXPORT.md ("Cobertura do
+  // backup completo") e docs/product/RPG_MANAGER_FINAL_STATUS.md (seção F-015).
+  const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems,publicationExternalIds,
+    publicationAliases,loreDetails,characterDetails,npcDetails,creatureDetails,creatureStatBlocks,creatureStatTemplates,factionDetails,itemDetails,eventTemporalDetails,
+    journalFolders,journalPages,wikiFolders,wikiEntityMetadata,wikiEntityTags,wikiEntityAliases,worldTags,entityRelations,worldMaps,mapPins,externalResources,worldEras,worldCalendars,entityRevisions,
+  ]=await c.env.DB.batch([
     c.env.DB.prepare('SELECT * FROM rpgs WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT * FROM campaigns WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT m.* FROM campaign_members m JOIN campaigns c ON c.id=m.campaign_id WHERE c.user_id=?').bind(user.id),
@@ -296,6 +306,37 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     // LIB-003: publication_external_ids — vazia hoje (nenhum provider chamado ainda), incluída
     // por completude/futuro (ver docs/library/PUBLICATION_IDENTITY.md).
     c.env.DB.prepare('SELECT DISTINCT pe.* FROM publication_external_ids pe JOIN publications p ON p.id=pe.publication_id JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT DISTINCT pa.* FROM publication_aliases pa JOIN publications p ON p.id=pa.publication_id JOIN rpgs r ON r.publication_id=p.id WHERE r.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT l.* FROM lore_details l JOIN vault_entities e ON e.id=l.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT ch.* FROM character_details ch JOIN vault_entities e ON e.id=ch.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT n.* FROM npc_details n JOIN vault_entities e ON e.id=n.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT cr.* FROM creature_details cr JOIN vault_entities e ON e.id=cr.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT sb.* FROM creature_stat_blocks sb JOIN vault_entities e ON e.id=sb.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT * FROM creature_stat_templates WHERE owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT f.* FROM faction_details f JOIN vault_entities e ON e.id=f.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT i.* FROM item_details i JOIN vault_entities e ON e.id=i.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT ev.* FROM event_temporal_details ev JOIN vault_entities e ON e.id=ev.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT jf.* FROM journal_folders jf JOIN worlds w ON w.id=jf.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT jp.* FROM journal_pages jp JOIN worlds w ON w.id=jp.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wf.* FROM wiki_folders wf JOIN worlds w ON w.id=wf.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wm.* FROM wiki_entity_metadata wm JOIN vault_entities e ON e.id=wm.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wt.* FROM wiki_entity_tags wt JOIN vault_entities e ON e.id=wt.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wa.* FROM wiki_entity_aliases wa JOIN vault_entities e ON e.id=wa.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wt2.* FROM world_tags wt2 JOIN worlds w ON w.id=wt2.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT er.* FROM entity_relations er JOIN worlds w ON w.id=er.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wm3.* FROM world_maps wm3 JOIN worlds w ON w.id=wm3.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT mp.* FROM map_pins mp JOIN world_maps wm4 ON wm4.id=mp.map_id JOIN worlds w ON w.id=wm4.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT xr.* FROM external_resources xr JOIN worlds w ON w.id=xr.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT we.* FROM world_eras we JOIN worlds w ON w.id=we.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT wc.* FROM world_calendars wc JOIN worlds w ON w.id=wc.world_id WHERE w.owner_user_id=?').bind(user.id),
+    // F-001: histórico de revisões inclui o mesmo snapshot já validado no momento de cada
+    // edição — sem bytes arbitrários, é o mesmo JSON de input já usado no restore normal.
+    c.env.DB.prepare('SELECT * FROM entity_revisions WHERE owner_user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),version:7,user:{email:user.email,displayName:user.displayName},data:{rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results,publicationExternalIds:publicationExternalIds.results}});
+  return c.json({exportedAt:nowIso(),schemaVersion:8,user:{email:user.email,displayName:user.displayName},data:{
+    rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,
+    worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results,publicationExternalIds:publicationExternalIds.results,
+    publicationAliases:publicationAliases.results,loreDetails:loreDetails.results,characterDetails:characterDetails.results,npcDetails:npcDetails.results,creatureDetails:creatureDetails.results,creatureStatBlocks:creatureStatBlocks.results,creatureStatTemplates:creatureStatTemplates.results,factionDetails:factionDetails.results,itemDetails:itemDetails.results,eventTemporalDetails:eventTemporalDetails.results,
+    journalFolders:journalFolders.results,journalPages:journalPages.results,wikiFolders:wikiFolders.results,wikiEntityMetadata:wikiEntityMetadata.results,wikiEntityTags:wikiEntityTags.results,wikiEntityAliases:wikiEntityAliases.results,worldTags:worldTags.results,entityRelations:entityRelations.results,worldMaps:worldMaps.results,mapPins:mapPins.results,externalResources:externalResources.results,worldEras:worldEras.results,worldCalendars:worldCalendars.results,entityRevisions:entityRevisions.results,
+  }});
 });

@@ -99,15 +99,80 @@ qualidade) deixou de existir.
 
 ### O que NÃO foi feito agora (decisão registrada, não omissão)
 
-- **Backup JSON completo não inclui F-001** (nem os campos
-  especializados de Vault que ele versiona) — ver `F-015` em
-  `docs/product/MASTER_BACKLOG.md` e `docs/library/LIBRARY_IMPORT_EXPORT.md`.
-  Achado real durante a auditoria de integridade desta sessão, não
-  corrigido agora para não expandir escopo sob pressão de prazo — nenhum
-  dado é perdido hoje (backup é somente leitura, ninguém depende dele
-  para restore ainda).
 - Timeline/Relations/Maps/External Resources sem histórico — avaliar
   necessidade real num ciclo futuro, não implementar preventivamente.
+
+## F-015 — Backup/Restore completo (RPG-1.0-BATCH6)
+
+**Status: `DONE` (escopo v1 — ver limitação documentada abaixo), produção
+validada.**
+
+Primeiro item executado após a correção de direção do responsável do
+produto (congelamento pós-1.0 revogado — ver `docs/product/FULL_ROADMAP.md`),
+por proteger dados antes dos módulos maiores seguintes.
+
+### Export — `GET /api/v1/export`, `schemaVersion: 8`
+
+Cobertura completa de todo dado autoral do usuário — fechou a lacuna
+real achada na auditoria de integridade do BATCH5 (v7 só tinha a
+linha-base de Worlds/Vault). Ver `src/domain/backup/types.ts` e
+`docs/library/LIBRARY_IMPORT_EXPORT.md` para a lista completa de
+domínios.
+
+### Restore — `POST /api/v1/import/backup/preview` + `/confirm`
+
+- **Decisão de segurança central:** restore sempre cria registros
+  **novos** (IDs gerados no servidor via `crypto.randomUUID()`), nunca
+  sobrescreve uma linha existente por ID. Isso elimina de raiz o vetor
+  de IDOR mais óbvio (um JSON manipulado tentando sobrescrever/assumir
+  a linha de outro dono) e o risco de destruir dado real
+  silenciosamente — "detectar conflito" na prática é "nunca há
+  conflito possível", porque nada é sobrescrito.
+  `owner_user_id`/`user_id` do JSON enviado é **sempre** ignorado — o
+  dono do dado restaurado é sempre quem está autenticado (testado
+  explicitamente: restaurar o backup de outra conta não reatribui nada
+  a ela, e a conta original não é alterada).
+- **Toda linha reconstruída é revalidada** pelos MESMOS schemas Zod
+  usados pelo create normal (`vaultEntityInputSchema`,
+  `worldInputSchema`, `journalPageInputSchema`,
+  `creatureStatTemplateInputSchema`) — nunca se confia no shape do
+  JSON enviado além do que esses schemas aceitam.
+- **Referências cruzadas** (World de uma entidade, pai de Location,
+  pasta de página, template de ficha de criatura) só são preservadas
+  quando o alvo também está sendo restaurado na mesma operação — uma
+  referência que aponta para algo fora do escopo do restore é
+  removida (nunca causa erro fatal), com aviso explícito no preview.
+- Preview/confirm com TTL de 30 minutos, tabela dedicada
+  `backup_restore_jobs` (migration `0026`, puramente aditiva — evitou
+  relaxar o `CHECK(kind IN (...))` de `import_jobs`, mesma lição do
+  incidente LIB-004B documentada em
+  `docs/architecture/DATABASE_MIGRATION_SAFETY.md`).
+- Limites explícitos: até 200 Worlds e 1000 entidades/páginas por
+  operação (`422 BACKUP_TOO_LARGE` acima disso) — batch de escrita
+  dentro do orçamento seguro do D1 Free.
+
+**Escopo v1 do restore automatizado (limitação documentada, não
+escondida):** Worlds, Creature Stat Templates, Vault entities (+ todos
+os campos especializados), Journal (pastas+páginas). Groups/Campaigns/
+Library, Wiki (organização), Relations, Cartografia, External
+Resources e Revision History continuam cobertos pelo EXPORT — nenhum
+dado é perdido no backup — mas ainda não têm restore automatizado
+nesta v1. Registrado como próxima iteração natural do F-015, não como
+`OUT_OF_SCOPE`.
+
+### Testes
+
+`tests/integration/backup-restore.test.ts` (7 casos: export v8
+completo, round-trip com hierarquia de Location + ficha de criatura
+com template + pastas de Diário aninhadas — tudo com IDs remapeados,
+nunca reaproveitando os antigos —, restore de backup de outra conta
+cria os dados sob posse de quem restaura sem alterar a conta original,
+job de restore é owner-only [404, não 403], `schemaVersion`
+incompatível rejeitado com 422, JSON malformado rejeitado com 422,
+linha inválida é pulada com aviso sem travar o resto do restore) +
+`tests/e2e/backup-restore.spec.ts` (fluxo completo pela tela de
+Configurações: baixar → prévia → confirmar → conteúdo original
+intacto + cópia restaurada).
 
 ## Matriz final
 
@@ -123,11 +188,11 @@ qualidade) deixou de existir.
 | Cartografia (mapas/pins) | COMPLETE (BATCH3) | idem | — |
 | GM Tools (dados, timer) | COMPLETE (BATCH3) | idem | — |
 | Error handling estrutural (sem spinner infinito) | COMPLETE (BATCH4) | idem | — |
-| **Revision History (F-001)** | **COMPLETE (BATCH5, esta sessão)** | migration 0025, 16 integration + E2E, ver seção acima | Backup completo (F-015) |
-| Backup JSON completo (Worlds/Vault campos especializados + F-001) | PARTIAL, documentado | `F-015`, `LIBRARY_IMPORT_EXPORT.md` | Sessão dedicada futura |
-| Character Sheet Engine | `OUT_OF_SCOPE_1_0` (deliberado) | `CLAUDE.md` §31 | Domínio próprio, fase futura |
-| VTT (realtime, fog of war, movimento) | `OUT_OF_SCOPE_1_0` (deliberado) | `CLAUDE.md` §2, §29 | Fase futura explícita |
-| Social/Amizades | `OUT_OF_SCOPE_1_0` (deliberado) | `CLAUDE.md` §29, §32 | Fase futura, projetado como sistema único quando chegar a hora |
+| **Revision History (F-001)** | **COMPLETE (BATCH5)** | migration 0025, 16 integration + E2E, ver seção acima | — |
+| **Backup/Restore completo (F-015)** | **COMPLETE — v1 (BATCH6)** | migration 0026, 7 integration + E2E, ver seção acima | Restore automatizado de Groups/Campaigns/Wiki/Relations/Cartografia/External Resources/Revision History (documentado, não bloqueante) |
+| Character Sheet Engine (F-020/F-021/F-023) | NOT_STARTED | `docs/product/FULL_ROADMAP.md` | Congelamento pós-1.0 revogado — voltou ao roadmap ativo, ver ordem de execução do roadmap |
+| VTT (F-029..F-032) | NOT_STARTED | `docs/product/FULL_ROADMAP.md` | Idem — realtime (F-031) `BLOCKED` até auditoria de arquitetura zero-cost |
+| Social/Amizades (F-016..F-019) | NOT_STARTED | `docs/product/FULL_ROADMAP.md` | Idem |
 
 ## Prova de release (cadeia HEAD = origin/main = build = produção)
 
@@ -138,11 +203,14 @@ integration/build) e CI (56 E2E desktop+mobile) verdes antes do deploy.
 
 ## Conclusão
 
-F-001 Revision History: implementado, testado (unit+integration+E2E),
-documentado, sem regressão em Vault/Journal/Worlds existentes, sem
-migration destrutiva, autorização revisada e testada explicitamente.
-Dois bugs reais encontrados durante o próprio processo de release foram
-corrigidos na causa raiz (não contornados). Dois achados foram
-registrados como backlog futuro em vez de expandir escopo sob prazo:
-backup completo (F-015) e histórico para tipos de recurso fora do
-escopo atual.
+F-001 Revision History (BATCH5) e F-015 Backup/Restore completo
+(BATCH6): implementados, testados (unit+integration+E2E), documentados,
+sem regressão nos domínios existentes, sem migration destrutiva,
+autorização revisada e testada explicitamente (owner-only para
+histórico; restore nunca sobrescreve, sempre cria registros novos sob
+a posse de quem restaura). Bugs reais encontrados durante o próprio
+processo de release foram corrigidos na causa raiz (não contornados).
+Escopo v1 do restore automatizado (Worlds/Vault/Journal) e itens
+futuros do roadmap (Social, Character Sheet Engine, VTT) seguem
+rastreados em `docs/product/FULL_ROADMAP.md` — não são omissões
+silenciosas.

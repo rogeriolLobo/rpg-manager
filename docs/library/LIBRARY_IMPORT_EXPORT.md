@@ -26,38 +26,42 @@ corrigido para descrever o formato realmente aceito, em vez de prometer
 um round-trip inexistente. Unificar os dois esquemas é uma decisão de
 produto separada, fora de escopo do LIB-007.
 
-### B) Backup completo (JSON estruturado)
+### B) Backup completo (JSON estruturado) — F-015, `schemaVersion: 8`
 
-`GET /api/v1/export` (sem `?format=csv`, o padrão). Cobertura completa
-do domínio de **Library**: `rpgs` (incluindo `archived_at`),
-`publications` (incluindo `cover_asset_id`), `game_systems`,
-`publication_external_ids`, campanhas/sessões/membros/presença, grupos.
-Worlds/Vault estão presentes apenas em nível de **linha-base**
-(`worlds`, `vault_entities`, `adventureDetails`) — ver correção de
-escopo abaixo, achada na auditoria de integridade RPG-1.0-BATCH5.
+`GET /api/v1/export` (sem `?format=csv`, o padrão). Cobertura **completa**
+de todo dado autoral do usuário: `rpgs`/`publications`/`game_systems`/
+`publication_external_ids`/`publication_aliases`, campanhas/sessões/
+membros/presença, grupos, Worlds (+ `world_members`/`world_tags`/
+`world_eras`/`world_calendars`), Vault (`vault_entities` + TODOS os
+campos especializados — `adventure_details`, `lore_details`,
+`character_details`, `npc_details`, `creature_details`,
+`creature_stat_blocks`, `creature_stat_templates`, `faction_details`,
+`item_details`, `event_temporal_details`), Journal (`journal_folders`,
+`journal_pages`), Wiki (`wiki_folders`, `wiki_entity_metadata`,
+`wiki_entity_tags`, `wiki_entity_aliases`), Relations
+(`entity_relations`), Cartografia (`world_maps`, `map_pins`), External
+Resources, e Revision History (`entity_revisions`, F-001). O campo
+top-level mudou de `version` para `schemaVersion` (v7 → v8) — ver
+`src/domain/backup/types.ts`.
 
-**Achado de auditoria (RPG-1.0-BATCH5, não corrigido nesta rodada —
-decisão deliberada de não expandir o backup sob pressão de prazo, ver
-`.claude/CLAUDE.md` §40):** o backup **não** inclui hoje os campos
-especializados de Vault entities (NPC/Creature/Character/Faction/
-Item/Lore — tabelas `npc_details`, `creature_details`,
-`creature_stat_blocks`, `character_details`, `faction_details`,
-`item_details`, `lore_details`), nem Journal (`journal_pages`,
-`journal_folders`), Wiki (`wiki_entity_metadata`, `wiki_entity_tags`,
-`wiki_entity_aliases`, `wiki_folders`, `world_tags`), Relations
-(`entity_relations`), Cartografia (`world_maps`, `map_pins`),
-External Resources (`external_resources`), Timeline/Calendar
-(`world_eras`, `world_calendars`, `event_temporal_details`), nem o
-novo `entity_revisions` (F-001). Restaurar este backup hoje recria a
-entidade base do Vault/World mas perde os campos especializados e
-todo o conteúdo de Worlds além do registro raiz — isso NÃO é um risco
-para os dados reais (nada é apagado, o backup é só leitura), mas é uma
-lacuna real de completude que a redação anterior deste documento
-("contém todas as tabelas") descrevia incorretamente. Registrado como
-item de backlog dedicado (ver `docs/product/MASTER_BACKLOG.md`) para
-uma sessão própria — expandir isso agora, sem tempo para desenhar e
-testar o round-trip completo de cada tabela nova, violaria a mesma
-regra de qualidade que motivou adiar o F-001 originalmente.
+**Restore automatizado (F-015, RPG-1.0-BATCH6):** `POST
+/api/v1/import/backup/preview` (dry-run — valida tudo, remapeia
+referências, nunca grava) + `POST /api/v1/import/backup/confirm`
+(executa o plano já validado). Decisões de arquitetura completas em
+`src/server/routes/backup-restore.ts` e
+`docs/product/RPG_MANAGER_FINAL_STATUS.md` (seção F-015) — resumo:
+restore **sempre cria registros novos** (IDs gerados no servidor, nunca
+sobrescreve nada por ID — elimina o vetor de IDOR mais óbvio e o risco
+de destruir dado real), toda linha reconstruída é revalidada pelos
+MESMOS schemas Zod do create normal, e `owner_user_id`/`user_id` do
+JSON enviado é sempre ignorado — o dono do dado restaurado é sempre
+quem está autenticado. **Escopo v1 do restore automatizado:** Worlds,
+Creature Stat Templates, Vault entities (+ especializados), Journal
+(pastas+páginas). Groups/Campaigns/Library, Wiki (organização),
+Relations, Cartografia, External Resources e Revision History
+continuam cobertos pelo EXPORT (nada é perdido no backup), mas ainda
+não têm restore automatizado — limitação documentada, não escondida,
+próxima iteração natural do F-015.
 
 ## Semântica do preview de import de catálogo
 
@@ -157,6 +161,11 @@ Já existentes antes desta tarefa, auditados e considerados adequados
 - Preview expira em 30 minutos (`import_jobs.expires_at`) — identidade
   sempre reresolvida ao vivo no confirm, nunca confia num
   `resolvedPublicationId` velho.
+- Restore de backup (F-015): até 200 Worlds e 1000 entidades do Vault/
+  1000 páginas de Diário por operação (`backup_restore_jobs`, mesma
+  janela de 30 minutos). Acima disso, `422 BACKUP_TOO_LARGE` — limite
+  deliberado para o batch de escrita continuar dentro do orçamento
+  seguro do D1 Free.
 
 ## Cobertura do backup completo (JSON)
 

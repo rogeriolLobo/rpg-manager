@@ -720,6 +720,49 @@ completo (arquitetura, decisão snapshot-vs-diff, autorização, testes).
   recurso arquivado bloqueia restore) + `tests/e2e/revision-history.spec.ts`
   (fluxo completo Vault + World, desktop/mobile via projects do CI).
 
+## F-015 — Backup/Restore completo — `DONE` (RPG-1.0-BATCH6)
+
+Primeiro item do roadmap pós-1.0 (correção de direção do responsável do
+produto: congelamento revogado, ver `docs/product/FULL_ROADMAP.md`) —
+executado primeiro porque protege dados antes dos módulos maiores
+seguintes.
+
+- **Export `GET /api/v1/export` v8** (`schemaVersion`, era `version`):
+  cobertura completa de todo dado autoral — os campos especializados de
+  Vault, Journal, Wiki, Relations, Cartografia, External Resources,
+  Timeline/Calendar e Revision History que faltavam desde a v7 (achado
+  real do BATCH5) agora estão todos presentes.
+- **Restore `POST /api/v1/import/backup/preview` + `/confirm`**
+  (`src/server/routes/backup-restore.ts`), mesmo padrão preview/confirm
+  com TTL de 30min já usado pelo import de CSV, numa tabela dedicada
+  (`backup_restore_jobs`, migration `0026`, aditiva — evita relaxar o
+  `CHECK(kind IN (...))` de `import_jobs`, mesma lição do incidente
+  LIB-004B).
+- **Decisão de segurança central:** restore sempre cria registros
+  NOVOS (IDs gerados no servidor) — nunca sobrescreve nada por ID.
+  Elimina o vetor de IDOR mais óbvio (JSON manipulado tentando
+  assumir/sobrescrever dado de outro dono) e o risco de destruir dado
+  real silenciosamente; `owner_user_id`/`user_id` do JSON enviado é
+  **sempre** ignorado — o dono do dado restaurado é sempre quem está
+  autenticado (testado explicitamente: restaurar o backup de outra
+  conta não reatribui nada a ela).
+- Toda linha reconstruída é revalidada pelos MESMOS schemas Zod do
+  create normal — nunca confia no shape do JSON além do que esses
+  schemas aceitam.
+- **Escopo v1 do restore automatizado:** Worlds, Creature Stat
+  Templates, Vault entities (+ todos os campos especializados), Journal
+  (pastas+páginas). Groups/Campaigns/Library, Wiki (organização),
+  Relations, Cartografia, External Resources e Revision History
+  continuam cobertos pelo EXPORT (nada é perdido no backup) mas ainda
+  não têm restore automatizado — documentado como próxima iteração
+  natural, não escondido.
+- Testes: `tests/integration/backup-restore.test.ts` (7 casos —
+  export v8 completo, round-trip com hierarquia de Location + ficha de
+  criatura + pastas de Diário aninhadas, IDOR entre contas, job
+  owner-only, versão incompatível, JSON malformado, linha inválida não
+  trava o resto do restore) + `tests/e2e/backup-restore.spec.ts` (fluxo
+  completo pela tela de Configurações).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
@@ -745,7 +788,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |
 | F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `DONE` (LIB-006) |
-| F-015 | Backup JSON completo — incluir campos especializados de Vault (NPC/Creature/Character/Faction/Item/Lore), Journal, Wiki, Relations, Cartografia, External Resources, Timeline/Calendar e `entity_revisions` | P2 | `NOT_STARTED` — achado real na auditoria de integridade RPG-1.0-BATCH5, deliberadamente não implementado agora para não expandir escopo sob pressão de prazo (ver `docs/library/LIBRARY_IMPORT_EXPORT.md`); nenhum dado é perdido hoje (o backup é só leitura, ninguém depende dele para restore ainda), é lacuna de completude, não regressão |
+| F-015 | Backup/Restore completo (export `schemaVersion:8` + restore com preview/confirm) | P2 | `DONE` (RPG-1.0-BATCH6) — export cobre 100% dos domínios; restore automatizado cobre Worlds/Creature Stat Templates/Vault/Journal (escopo v1, ver nota abaixo); Groups/Campaigns/Library/Wiki/Relations/Cartografia/External Resources/Revision History continuam exportados mas sem restore automatizado ainda (documentado, não silenciado) |
 
 Explicitamente fora de escopo (decisão de produto, não backlog):
 VTT, Sheets (motor completo), Social/Amizades.
