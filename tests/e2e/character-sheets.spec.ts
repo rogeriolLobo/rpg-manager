@@ -13,9 +13,6 @@ async function register(page: Page, email: string, name: string) {
   await expect(page).toHaveURL(/\/app$/u);
 }
 
-const isMobileViewport = (page: Page) => (page.viewportSize()?.width ?? 1000) <= 850;
-const openNav = async (page: Page) => { if (isMobileViewport(page)) await page.getByRole("button", { name: "Abrir menu" }).click(); };
-
 test("Ficha de personagem: cria modelo, vincula a um Personagem, valida campos e edita", async ({ page }) => {
   test.setTimeout(60_000);
   const suffix = Date.now();
