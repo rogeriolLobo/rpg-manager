@@ -1231,6 +1231,31 @@ conteúdo protegido, só marca a origem declarada pelo usuário.
   chamada funciona; fork preserva proveniência sem herdar trava) +
   `tests/e2e/vault-provenance.spec.ts` (1 cenário, desktop+mobile).
 - Próximo: F-027 (Compendium), mesmo BATCH14.
+
+## F-027 — Compendium — `DONE` (RPG-1.0-BATCH14)
+
+Reavaliação confirmada: com F-020 (fichas) e F-025 (Adventures
+estruturadas) prontos, uma view agregada de consulta rápida passou a
+ter valor real — implementada como VIEW PURA, zero domínio/tabela nova.
+
+- `/app/compendium` (`src/client/pages/compendium-pages.tsx`) chama o
+  MESMO `GET /vault` já usado pela página Vault (`?type=CREATURE`,
+  `?type=ITEM`, `?type=LORE`, em paralelo), reorganizando a
+  apresentação para consulta durante a mesa — nunca duplica dado.
+  Criaturas mostram o stat block inline, reaproveitando
+  `creature.statBlock` que a API já devolve (nada novo no backend).
+  Filtro por World e busca por nome.
+- Clicar num card abre a MESMA entidade do Vault — Compendium é
+  deliberadamente uma lente, nunca uma segunda cópia de NPC/Creature/
+  Item/Lore (`CLAUDE.md` §17/§25).
+- **Testes:** `tests/e2e/compendium.spec.ts` (1 cenário, desktop/mobile
+  — cria Criatura+Item, confirma agregação, busca filtrando as duas
+  seções ao mesmo tempo, clique leva à mesma entidade). Sem teste de
+  integration novo — não há rota de backend nova para testar (view
+  pura sobre `GET /vault`, já coberto pelos testes existentes desse
+  endpoint).
+- Vertical F-026/F-027 (BATCH14) completa. Próximo item da ordem de
+  execução do roadmap: BATCH15 — F-028 (Files/Handouts/Assets).
 - **Achado de hardening para BATCH19:** `tests/e2e/vault-worlds-flow.spec.ts`
   ("getByLabel('Nome')... element was detached from the DOM") voltou a
   flakar no CI (2ª vez nesta sessão, ambas só quando roda no fim de uma
