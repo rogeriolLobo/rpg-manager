@@ -6,20 +6,21 @@ import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import { PageHeader } from './dashboard-page';
 
-// F-029 (BATCH16): VTT — fundação (Scene/Map/tokens), sem realtime — ver
+// F-029/F-030 (BATCH16): VTT — fundação (Scene/Map/tokens) + fog of war, sem realtime — ver
 // src/server/routes/vtt.ts. Ferramenta de preparação/condução do GM: tudo aqui é owned-only
 // (mesmo modelo do Diário/Adventures). A visão do jogador (o que efetivamente chega no
 // Portal/Player View, F-033) usa GET /vtt/:campaignId/live, filtrado no servidor — não existe
 // aqui ainda porque F-033 está bloqueada aguardando esta fundação.
 
-interface Scene { id:string; mapId:string|null; title:string; imageUrl:string; notes:string; isActive:boolean }
+interface Scene { id:string; mapId:string|null; title:string; imageUrl:string; notes:string; isActive:boolean; fogEnabled:boolean; gridCols:number; gridRows:number }
 interface SceneDetail extends Scene { resolvedImageUrl:string }
 interface Token { id:string; sceneId:string; entityId:string|null; entityName:string|null; entityType:string|null; label:string; x:number; y:number; visibleToPlayers:boolean }
+interface FogCell { col:number; row:number }
 interface WorldOption { id:string; name:string; isOwner:boolean }
 interface MapOption { id:string; title:string }
 interface EntityOption { id:string; name:string; entityType:string }
 
-const emptyScene = { title:'', worldId:'', mapId:'', imageUrl:'', notes:'' };
+const emptyScene = { title:'', worldId:'', mapId:'', imageUrl:'', notes:'', fogEnabled:false, gridCols:'20', gridRows:'20' };
 const emptyToken = { label:'', entityId:'', x:'50', y:'50', visibleToPlayers:false };
 
 export function VttPage(){
@@ -30,7 +31,7 @@ export function VttPage(){
   const [entityOptions,setEntityOptions]=useState<EntityOption[]>([]);
   const [sceneForm,setSceneForm]=useState(emptyScene);
   const [expandedSceneId,setExpandedSceneId]=useState<string|null>(null);
-  const [sceneDetail,setSceneDetail]=useState<Record<string,{item:SceneDetail;tokens:Token[]}>>({});
+  const [sceneDetail,setSceneDetail]=useState<Record<string,{item:SceneDetail;tokens:Token[];fog:FogCell[]}>>({});
   const [tokenForms,setTokenForms]=useState<Record<string,typeof emptyToken>>({});
   const [error,setError]=useState('');
 
@@ -49,7 +50,7 @@ export function VttPage(){
   const scenes=scenesResource.data.items;
 
   const loadSceneDetail=async(sceneId:string)=>{
-    try{const detail=await api<{item:SceneDetail;tokens:Token[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
+    try{const detail=await api<{item:SceneDetail;tokens:Token[];fog:FogCell[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível carregar a cena.');}
   };
   const toggleExpand=(sceneId:string)=>{
@@ -59,7 +60,7 @@ export function VttPage(){
   };
   const createScene=async(event:FormEvent)=>{event.preventDefault();setError('');
     try{
-      await postJson(`/vtt/${campaignId}/scenes`,{title:sceneForm.title,mapId:sceneForm.mapId||null,imageUrl:sceneForm.mapId?'':sceneForm.imageUrl,notes:sceneForm.notes});
+      await postJson(`/vtt/${campaignId}/scenes`,{title:sceneForm.title,mapId:sceneForm.mapId||null,imageUrl:sceneForm.mapId?'':sceneForm.imageUrl,notes:sceneForm.notes,fogEnabled:sceneForm.fogEnabled,gridCols:Number(sceneForm.gridCols||20),gridRows:Number(sceneForm.gridRows||20)});
       setSceneForm(emptyScene);scenesResource.reload();
     }catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível criar a cena.');}
   };
@@ -90,6 +91,14 @@ export function VttPage(){
     try{await deleteApi(`/vtt/${campaignId}/scenes/${sceneId}/tokens/${tokenId}`);void loadSceneDetail(sceneId);}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível excluir o token.');}
   };
+  const toggleFogCell=async(sceneId:string,col:number,row:number,revealed:boolean)=>{setError('');
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/fog/${revealed?'hide':'reveal'}`,{col,row});void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível atualizar a névoa.');}
+  };
+  const resetFog=async(sceneId:string)=>{if(!confirm('Reencobrir a cena inteira?'))return;setError('');
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/fog/reset`,{});void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível reencobrir a cena.');}
+  };
 
   return <div className="page">
     <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga. Ainda sem sincronização em tempo real (F-031)." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
@@ -117,9 +126,18 @@ export function VttPage(){
             {sceneDetail[scene.id].item.resolvedImageUrl
               ?<div className="cartography-image-wrap">
                 <img src={sceneDetail[scene.id].item.resolvedImageUrl} alt={scene.title} referrerPolicy="no-referrer"/>
+                {sceneDetail[scene.id].item.fogEnabled&&<div className="vtt-fog-grid" style={{gridTemplateColumns:`repeat(${sceneDetail[scene.id].item.gridCols},1fr)`,gridTemplateRows:`repeat(${sceneDetail[scene.id].item.gridRows},1fr)`}}>
+                  {Array.from({length:sceneDetail[scene.id].item.gridCols*sceneDetail[scene.id].item.gridRows}).map((_,index)=>{
+                    const cols=sceneDetail[scene.id].item.gridCols;
+                    const col=index%cols, row=Math.floor(index/cols);
+                    const revealed=sceneDetail[scene.id].fog.some((cell)=>cell.col===col&&cell.row===row);
+                    return <button key={`${col}-${row}`} type="button" className={`vtt-fog-cell ${revealed?'vtt-fog-cell-revealed':''}`} aria-label={`Névoa ${col},${row} ${revealed?'revelada':'oculta'}`} onClick={()=>void toggleFogCell(scene.id,col,row,revealed)}/>;
+                  })}
+                </div>}
                 {sceneDetail[scene.id].tokens.map((token)=><button key={token.id} type="button" className={`vtt-token ${token.visibleToPlayers?'':'vtt-token-hidden'}`} style={{left:`${token.x}%`,top:`${token.y}%`}} aria-label={`Token ${token.label}${token.visibleToPlayers?' (visível aos jogadores)':' (oculto)'}`} title={token.label} onClick={()=>void toggleTokenVisible(scene.id,token)}>{token.label.slice(0,2).toUpperCase()}</button>)}
               </div>
               :<p>Sem imagem de fundo.</p>}
+            {sceneDetail[scene.id].item.fogEnabled&&<p className="section-note">Névoa da guerra ativa — clique nas células para revelar/ocultar. <button type="button" className="ghost-button" onClick={()=>void resetFog(scene.id)}>Reencobrir tudo</button></p>}
             <h4>Tokens</h4>
             {sceneDetail[scene.id].tokens.length
               ?<ul className="clean-list">{sceneDetail[scene.id].tokens.map((token)=><li key={token.id}>
@@ -148,6 +166,9 @@ export function VttPage(){
         {sceneForm.worldId&&<label>Mapa<select value={sceneForm.mapId} onChange={(event)=>setSceneForm({...sceneForm,mapId:event.target.value})}><option value="">Nenhum (usar URL de imagem abaixo)</option>{mapOptions.map((mapOption)=><option key={mapOption.id} value={mapOption.id}>{mapOption.title}</option>)}</select></label>}
         {!sceneForm.mapId&&<label>URL da imagem de fundo<input maxLength={2000} placeholder="https://..." value={sceneForm.imageUrl} onChange={(event)=>setSceneForm({...sceneForm,imageUrl:event.target.value})}/></label>}
         <label>Notas<textarea rows={2} maxLength={2000} value={sceneForm.notes} onChange={(event)=>setSceneForm({...sceneForm,notes:event.target.value})}/></label>
+        <label className="checkbox-row"><input type="checkbox" checked={sceneForm.fogEnabled} onChange={(event)=>setSceneForm({...sceneForm,fogEnabled:event.target.checked})}/>Névoa da guerra (F-030) — a cena começa totalmente encoberta para os jogadores</label>
+        {sceneForm.fogEnabled&&<><label>Colunas da grade<input type="number" min={1} max={100} value={sceneForm.gridCols} onChange={(event)=>setSceneForm({...sceneForm,gridCols:event.target.value})}/></label>
+        <label>Linhas da grade<input type="number" min={1} max={100} value={sceneForm.gridRows} onChange={(event)=>setSceneForm({...sceneForm,gridRows:event.target.value})}/></label></>}
         <button className="primary-button">Criar cena</button>
       </form>
     </section>

@@ -1363,6 +1363,42 @@ para depois de uma auditoria de arquitetura zero-cost).
   `tests/e2e/vtt.spec.ts` (1 cenário completo, desktop+mobile).
 - Próximo: F-030 (fog of war), mesmo BATCH16.
 
+## F-030 — VTT — fog of war / visibilidade — `DONE` (RPG-1.0-BATCH16)
+
+Segunda metade do BATCH16, sobre a fundação do F-029.
+
+- **Migration `0038_vtt_fog.sql`** (aditiva): `fog_enabled`/`grid_cols`/
+  `grid_rows` em `vtt_scenes` (default preserva o comportamento
+  anterior: fog desligado, grade 20x20) + `vtt_fog_cells` (PK
+  composta `scene_id,col,row`) — só células REVELADAS são
+  armazenadas (esparso), mais barato no D1 Free do que materializar a
+  grade inteira e mais simples de resetar (apagar tudo = reencobrir a
+  cena inteira).
+- **A barreira real é sempre no servidor, nunca uma máscara CSS** —
+  igual ao princípio de GM_ONLY do resto do produto: em
+  `GET /vtt/:campaignId/live`, quando `fogEnabled`, um token só chega
+  ao jogador se `visible_to_players=1` **E** a célula calculada a
+  partir de `x`/`y` (proporcional ao tamanho da grade da cena) estiver
+  entre as reveladas. Um token totalmente fora da névoa simplesmente
+  não aparece no JSON — não é ocultado visualmente no cliente.
+- **`POST /fog/reveal`** é idempotente (`INSERT OR IGNORE`),
+  **`POST /fog/hide`** remove a célula, **`POST /fog/reset`** apaga
+  todas as células da cena (reencobrir tudo) — as três owner-only,
+  mesma disciplina de `campaigns.ts`. Célula fora da grade da cena
+  (`col`/`row` >= `gridCols`/`gridRows`) é rejeitada com 422.
+- **UI:** checkbox "Névoa da guerra" + colunas/linhas na criação da
+  cena; no detalhe expandido, uma grade clicável sobreposta à imagem
+  (célula escura = oculta, transparente = revelada) e um botão
+  "Reencobrir tudo".
+- **Testes:** `tests/integration/vtt.test.ts` (+3 casos: revelar
+  idempotente/ocultar remove/célula fora da grade 422; IDOR em
+  reveal/hide/reset; visão "ao vivo" só mostra token com célula
+  revelada, e reset reencobre fazendo o token sumir de novo) +
+  `tests/e2e/vtt-fog.spec.ts` (1 cenário, desktop+mobile).
+- Vertical F-029/F-030 (BATCH16) completa. Próximo item da ordem de
+  execução do roadmap: BATCH17 — F-031 (VTT realtime, auditoria
+  zero-cost obrigatória primeiro) + F-032 (iniciativa/combate).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

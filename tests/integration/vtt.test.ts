@@ -183,3 +183,59 @@ describe('VTT — fundação de cenas e tokens (F-029)', () => {
     expect(scenes.items).toHaveLength(0);
   });
 });
+
+describe('VTT — fog of war / visibilidade por grade (F-030)', () => {
+  it('revelar é idempotente, ocultar remove, célula fora da grade é rejeitada (422)', async () => {
+    const owner = await register('vtt-fog-owner-1');
+    const campaignId = await createCampaign(owner);
+    const sceneId = (await (await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Masmorra', mapId: null, imageUrl: 'https://example.com/f.png', notes: '', fogEnabled: true, gridCols: 5, gridRows: 5 }, owner)).json() as { id: string }).id;
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 0, row: 0 }, owner)).status).toBe(201);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 0, row: 0 }, owner)).status).toBe(201); // idempotente
+
+    const detail = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { fog: Array<{ col: number; row: number }> };
+    expect(detail.fog).toEqual([{ col: 0, row: 0 }]);
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 5, row: 0 }, owner)).status).toBe(422); // col fora da grade (0-4)
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/hide`, 'POST', { col: 0, row: 0 }, owner)).status).toBe(200);
+    const afterHide = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { fog: unknown[] };
+    expect(afterHide.fog).toEqual([]);
+  });
+
+  it('IDOR: outsider nunca revela/oculta/reencobre a névoa de cena alheia', async () => {
+    const owner = await register('vtt-fog-owner-2');
+    const outsider = await register('vtt-fog-outsider-2');
+    const campaignId = await createCampaign(owner);
+    const sceneId = (await (await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Cena', mapId: null, imageUrl: 'https://example.com/g.png', notes: '', fogEnabled: true, gridCols: 5, gridRows: 5 }, owner)).json() as { id: string }).id;
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 0, row: 0 }, outsider)).status).toBe(404);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/hide`, 'POST', { col: 0, row: 0 }, outsider)).status).toBe(404);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reset`, 'POST', {}, outsider)).status).toBe(404);
+  });
+
+  it('visão "ao vivo": token só aparece quando sua célula é revelada; reset reencobre e o token some de novo', async () => {
+    const owner = await register('vtt-fog-owner-3');
+    const player = await register('vtt-fog-player-3');
+    const campaignId = await createCampaignWithPlayer(owner, player);
+    const sceneId = (await (await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Sala do Trono', mapId: null, imageUrl: 'https://example.com/h.png', notes: '', fogEnabled: true, gridCols: 10, gridRows: 10 }, owner)).json() as { id: string }).id;
+    // x=5,y=5 numa grade 10x10 cai na célula (0,0); x=95,y=95 cai na célula (9,9).
+    const heroTokenId = (await (await request(`/vtt/${campaignId}/scenes/${sceneId}/tokens`, 'POST', { label: 'Herói', entityId: null, x: 5, y: 5, visibleToPlayers: true }, owner)).json() as { id: string }).id;
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/tokens`, 'POST', { label: 'Fora da luz', entityId: null, x: 95, y: 95, visibleToPlayers: true }, owner);
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/activate`, 'POST', {}, owner);
+
+    // Antes de revelar qualquer célula: nenhum token chega ao jogador, mesmo visibleToPlayers=1.
+    const beforeReveal = await (await request(`/vtt/${campaignId}/live`, 'GET', undefined, player)).json() as { item: { tokens: unknown[]; fogCells: unknown[] } };
+    expect(beforeReveal.item.tokens).toEqual([]);
+    expect(beforeReveal.item.fogCells).toEqual([]);
+
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 0, row: 0 }, owner);
+    const afterReveal = await (await request(`/vtt/${campaignId}/live`, 'GET', undefined, player)).json() as { item: { tokens: Array<{ id: string }>; fogCells: Array<{ col: number; row: number }> } };
+    expect(afterReveal.item.tokens).toEqual([{ id: heroTokenId, label: 'Herói', x: 5, y: 5 }]);
+    expect(afterReveal.item.fogCells).toEqual([{ col: 0, row: 0 }]);
+
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reset`, 'POST', {}, owner);
+    const afterReset = await (await request(`/vtt/${campaignId}/live`, 'GET', undefined, player)).json() as { item: { tokens: unknown[] } };
+    expect(afterReset.item.tokens).toEqual([]);
+  });
+});

@@ -1,29 +1,40 @@
 import { Hono, type Context } from 'hono';
-import { vttSceneInputSchema, vttTokenInputSchema } from '../../shared/validation/schemas';
+import { vttFogCellInputSchema, vttSceneInputSchema, vttTokenInputSchema } from '../../shared/validation/schemas';
 import { ownedEntity } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
-// F-029 (BATCH16): VTT — fundação (Scene/Map/tokens), sem realtime — ver
-// migrations/0037_vtt_foundation.sql. Escrita é sempre owner-only (mesmo modelo de todo o
-// resto de campaigns.ts — membros com is_game_master=1 hoje só têm leitura em qualquer parte
-// do produto, nunca escrita; não é uma restrição nova criada aqui).
+// F-029/F-030 (BATCH16): VTT — fundação (Scene/Map/tokens) + fog of war, sem realtime — ver
+// migrations/0037_vtt_foundation.sql e migrations/0038_vtt_fog.sql. Escrita é sempre
+// owner-only (mesmo modelo de todo o resto de campaigns.ts — membros com is_game_master=1
+// hoje só têm leitura em qualquer parte do produto, nunca escrita; não é uma restrição nova
+// criada aqui).
 //
 // GET /:campaignId/live é o único ponto do VTT onde alguém além do dono lê dados — por isso o
 // filtro de visibilidade é aplicado sempre, para todo mundo, mesmo o dono (quem quiser o
-// estado completo usa GET /scenes/:sceneId, owner-only). Decisão de segurança deliberada: a
-// visão "ao vivo" NUNCA inclui entityId/entityName/entityType do token, só id/label/x/y — um
-// token vinculado a uma Vault Entity PRIVATE/GM_ONLY marcado (por engano ou não)
-// visible_to_players=1 não pode vazar o nome/tipo dessa entidade para o jogador; ele só vê o
-// rótulo livre que o mestre digitou no token, nunca um atalho para o registro do Vault.
+// estado completo usa GET /scenes/:sceneId, owner-only). Decisões de segurança deliberadas:
+// (1) a visão "ao vivo" NUNCA inclui entityId/entityName/entityType do token, só
+// id/label/x/y — um token vinculado a uma Vault Entity PRIVATE/GM_ONLY marcado (por engano ou
+// não) visible_to_players=1 não pode vazar o nome/tipo dessa entidade para o jogador; (2)
+// quando fog_enabled, um token só chega ao jogador se também estiver numa célula revelada —
+// igual GM_ONLY, a barreira é sempre no servidor, nunca uma máscara CSS por cima da imagem.
 
 type AppContext = Context<{ Bindings: Env; Variables: AppVariables }>;
-interface SceneRow { id: string; campaign_id: string; map_id: string | null; title: string; image_url: string; notes: string; is_active: number; created_at: string; updated_at: string }
+interface SceneRow { id: string; campaign_id: string; map_id: string | null; title: string; image_url: string; notes: string; is_active: number; fog_enabled: number; grid_cols: number; grid_rows: number; created_at: string; updated_at: string }
 interface TokenRow { id: string; scene_id: string; entity_id: string | null; label: string; x: number; y: number; visible_to_players: number; created_at: string; updated_at: string; entity_name?: string | null; entity_type?: string | null }
+interface FogCellRow { col: number; row: number }
 
 export const vttRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-function presentScene(row: SceneRow) { return { id: row.id, mapId: row.map_id, title: row.title, imageUrl: row.image_url, notes: row.notes, isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at }; }
+function presentScene(row: SceneRow) { return { id: row.id, mapId: row.map_id, title: row.title, imageUrl: row.image_url, notes: row.notes, isActive: Boolean(row.is_active), fogEnabled: Boolean(row.fog_enabled), gridCols: row.grid_cols, gridRows: row.grid_rows, createdAt: row.created_at, updatedAt: row.updated_at }; }
+// col/row da célula de fog em que um token cai, dado o tamanho normalizado (0-100) da grade da
+// cena — usado tanto para validar reveal/hide quanto para filtrar tokens em /live.
+function tokenFogCell(scene: SceneRow, token: { x: number; y: number }): { col: number; row: number } {
+  return {
+    col: Math.min(scene.grid_cols - 1, Math.max(0, Math.floor((token.x / 100) * scene.grid_cols))),
+    row: Math.min(scene.grid_rows - 1, Math.max(0, Math.floor((token.y / 100) * scene.grid_rows))),
+  };
+}
 function presentToken(row: TokenRow) { return { id: row.id, sceneId: row.scene_id, entityId: row.entity_id, entityName: row.entity_name ?? null, entityType: row.entity_type ?? null, label: row.label, x: row.x, y: row.y, visibleToPlayers: Boolean(row.visible_to_players), createdAt: row.created_at, updatedAt: row.updated_at }; }
 function presentPlayerToken(row: TokenRow) { return { id: row.id, label: row.label, x: row.x, y: row.y }; }
 
@@ -64,8 +75,8 @@ vttRoutes.post('/:campaignId/scenes', async (c) => {
   if (!input.mapId && !input.imageUrl) throw new ApiError(422, 'INVALID_BACKGROUND', 'Informe um mapa da Cartografia ou uma URL de imagem de fundo.');
   await validMap(c, input.mapId);
   const id = crypto.randomUUID(), now = nowIso();
-  await c.env.DB.prepare('INSERT INTO vtt_scenes (id,campaign_id,map_id,title,image_url,notes,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?)')
-    .bind(id, campaignId, input.mapId ?? null, input.title, input.imageUrl, input.notes, now, now).run();
+  await c.env.DB.prepare('INSERT INTO vtt_scenes (id,campaign_id,map_id,title,image_url,notes,is_active,fog_enabled,grid_cols,grid_rows,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?,?,?,?)')
+    .bind(id, campaignId, input.mapId ?? null, input.title, input.imageUrl, input.notes, Number(input.fogEnabled), input.gridCols, input.gridRows, now, now).run();
   return c.json({ id }, 201);
 });
 
@@ -74,7 +85,8 @@ vttRoutes.get('/:campaignId/scenes/:sceneId', async (c) => {
   const scene = await ownedScene(c, campaignId, sceneId);
   const tokens = await c.env.DB.prepare('SELECT t.*,ve.name entity_name,ve.entity_type entity_type FROM vtt_tokens t LEFT JOIN vault_entities ve ON ve.id=t.entity_id WHERE t.scene_id=? ORDER BY t.created_at').bind(sceneId).all<TokenRow>();
   const resolvedImageUrl = await resolveImageUrl(c, scene);
-  return c.json({ item: { ...presentScene(scene), resolvedImageUrl }, tokens: tokens.results.map(presentToken) });
+  const fog = await c.env.DB.prepare('SELECT col,row FROM vtt_fog_cells WHERE scene_id=?').bind(sceneId).all<FogCellRow>();
+  return c.json({ item: { ...presentScene(scene), resolvedImageUrl }, tokens: tokens.results.map(presentToken), fog: fog.results });
 });
 
 vttRoutes.patch('/:campaignId/scenes/:sceneId', async (c) => {
@@ -83,8 +95,8 @@ vttRoutes.patch('/:campaignId/scenes/:sceneId', async (c) => {
   const input = await readJson(c, vttSceneInputSchema);
   if (!input.mapId && !input.imageUrl) throw new ApiError(422, 'INVALID_BACKGROUND', 'Informe um mapa da Cartografia ou uma URL de imagem de fundo.');
   await validMap(c, input.mapId);
-  await c.env.DB.prepare('UPDATE vtt_scenes SET map_id=?,title=?,image_url=?,notes=?,updated_at=? WHERE id=?')
-    .bind(input.mapId ?? null, input.title, input.imageUrl, input.notes, nowIso(), sceneId).run();
+  await c.env.DB.prepare('UPDATE vtt_scenes SET map_id=?,title=?,image_url=?,notes=?,fog_enabled=?,grid_cols=?,grid_rows=?,updated_at=? WHERE id=?')
+    .bind(input.mapId ?? null, input.title, input.imageUrl, input.notes, Number(input.fogEnabled), input.gridCols, input.gridRows, nowIso(), sceneId).run();
   return c.json({ success: true });
 });
 
@@ -145,6 +157,35 @@ vttRoutes.delete('/:campaignId/scenes/:sceneId/tokens/:tokenId', async (c) => {
   return c.body(null, 204);
 });
 
+async function cellInRange(scene: SceneRow, col: number, row: number): Promise<void> {
+  if (col >= scene.grid_cols || row >= scene.grid_rows) throw new ApiError(422, 'INVALID_CELL', 'Célula fora da grade da cena.');
+}
+
+vttRoutes.post('/:campaignId/scenes/:sceneId/fog/reveal', async (c) => {
+  const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
+  const scene = await ownedScene(c, campaignId, sceneId);
+  const input = await readJson(c, vttFogCellInputSchema);
+  await cellInRange(scene, input.col, input.row);
+  await c.env.DB.prepare('INSERT OR IGNORE INTO vtt_fog_cells (scene_id,col,row,revealed_at) VALUES (?,?,?,?)').bind(sceneId, input.col, input.row, nowIso()).run();
+  return c.json({ success: true }, 201);
+});
+
+vttRoutes.post('/:campaignId/scenes/:sceneId/fog/hide', async (c) => {
+  const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
+  const scene = await ownedScene(c, campaignId, sceneId);
+  const input = await readJson(c, vttFogCellInputSchema);
+  await cellInRange(scene, input.col, input.row);
+  await c.env.DB.prepare('DELETE FROM vtt_fog_cells WHERE scene_id=? AND col=? AND row=?').bind(sceneId, input.col, input.row).run();
+  return c.json({ success: true });
+});
+
+vttRoutes.post('/:campaignId/scenes/:sceneId/fog/reset', async (c) => {
+  const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
+  await ownedScene(c, campaignId, sceneId);
+  await c.env.DB.prepare('DELETE FROM vtt_fog_cells WHERE scene_id=?').bind(sceneId).run();
+  return c.json({ success: true });
+});
+
 vttRoutes.get('/:campaignId/live', async (c) => {
   const campaignId = c.req.param('campaignId'); const userId = c.get('user').id;
   const access = await c.env.DB.prepare(`SELECT c.id,
@@ -155,5 +196,15 @@ vttRoutes.get('/:campaignId/live', async (c) => {
   if (!scene) return c.json({ item: null });
   const resolvedImageUrl = await resolveImageUrl(c, scene);
   const tokens = await c.env.DB.prepare('SELECT * FROM vtt_tokens WHERE scene_id=? AND visible_to_players=1 ORDER BY created_at').bind(scene.id).all<TokenRow>();
-  return c.json({ item: { id: scene.id, title: scene.title, imageUrl: resolvedImageUrl, tokens: tokens.results.map(presentPlayerToken) } });
+  let visibleTokens = tokens.results;
+  let fogCells: FogCellRow[] = [];
+  if (scene.fog_enabled) {
+    const fog = await c.env.DB.prepare('SELECT col,row FROM vtt_fog_cells WHERE scene_id=?').bind(scene.id).all<FogCellRow>();
+    fogCells = fog.results;
+    const revealed = new Set(fogCells.map((cell) => `${cell.col}:${cell.row}`));
+    // Igual GM_ONLY: um token só chega ao jogador se estiver numa célula revelada — a barreira
+    // é aplicada aqui, no servidor, nunca uma máscara visual por cima da imagem no cliente.
+    visibleTokens = visibleTokens.filter((token) => { const cell = tokenFogCell(scene, token); return revealed.has(`${cell.col}:${cell.row}`); });
+  }
+  return c.json({ item: { id: scene.id, title: scene.title, imageUrl: resolvedImageUrl, fogEnabled: Boolean(scene.fog_enabled), gridCols: scene.grid_cols, gridRows: scene.grid_rows, fogCells, tokens: visibleTokens.map(presentPlayerToken) } });
 });

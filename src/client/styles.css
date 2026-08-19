@@ -740,6 +740,24 @@ label small {
   opacity: 0.75;
 }
 
+/* F-030 (BATCH16): grade de névoa da guerra sobre a cena — barreira real fica no servidor
+   (GET /vtt/:campaignId/live só devolve tokens em célula revelada); esta grade é só a
+   ferramenta do GM para pintar/despintar o que já foi revelado. */
+.vtt-fog-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+.vtt-fog-cell {
+  border: 1px solid rgb(0 0 0 / 0.08);
+  background: rgb(20 10 10 / 0.55);
+  cursor: pointer;
+  padding: 0;
+}
+.vtt-fog-cell-revealed {
+  background: transparent;
+}
+
 /* F-004 (GM Tools): rolador de dados + timer, 100% client-side. */
 .gm-tools-grid {
   display: grid;
