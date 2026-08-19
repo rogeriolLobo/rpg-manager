@@ -56,7 +56,13 @@ test("F-001: histórico de revisões de uma entidade do Vault — editar, ver hi
   // confiar em getByRole('heading', ...) sem nível quando um preview secundário pode conter o
   // mesmo texto.
   page.once("dialog", (dialog) => void dialog.accept());
+  const vaultRestoreResponse = page.waitForResponse((response) => response.request().method() === "POST" && /\/vault\/.+\/revisions\/\d+\/restore$/u.test(response.url()));
   await items.nth(1).getByRole("button", { name: "Restaurar" }).click();
+  expect((await vaultRestoreResponse).status()).toBe(200);
+  // Espera o modal fechar de verdade (não infere isso do texto da página — evita repetir o
+  // achado real documentado acima: um heading "Versão Original" pode existir num preview
+  // secundário mesmo com o modal ainda aberto).
+  await expect(page.getByRole("dialog", { name: "Histórico de revisões" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Versão Original" })).toBeVisible();
 
   // O histórico ganhou uma 3ª revisão (RESTORE) — nada foi apagado.
@@ -83,7 +89,10 @@ test("F-001: histórico de um World — mesmo contrato, botão contextual na pr�
   await page.getByRole("button", { name: "Histórico" }).click();
   await expect(page.locator(".revision-item")).toHaveCount(2);
   page.once("dialog", (dialog) => void dialog.accept());
+  const worldRestoreResponse = page.waitForResponse((response) => response.request().method() === "POST" && /\/worlds\/.+\/revisions\/\d+\/restore$/u.test(response.url()));
   await page.locator(".revision-item").nth(1).getByRole("button", { name: "Restaurar" }).click();
+  expect((await worldRestoreResponse).status()).toBe(200);
+  await expect(page.getByRole("dialog", { name: "Histórico de revisões" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Mundo Original" })).toBeVisible();
 });
 

@@ -36,7 +36,9 @@ test("F-015: restaurar um backup completo pela tela de Configurações", async (
   await expect(restoreSection.getByText(/Restaurado:/u)).toBeVisible();
 
   // O World original continua intacto e agora existe uma 2ª cópia restaurada — nada foi
-  // sobrescrito nem destruído.
+  // sobrescrito nem destruído. Escopado aos cards da listagem (não a getByText solto — o
+  // nome do World também aparece no seletor de "World ativo" da navegação, então um locator
+  // sem escopo conta essas ocorrências também, não só os dois Worlds reais).
   await page.goto("/app/worlds");
-  await expect(page.getByText("Mundo do Backup")).toHaveCount(2);
+  await expect(page.locator(".world-card").filter({ hasText: "Mundo do Backup" })).toHaveCount(2);
 });
