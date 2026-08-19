@@ -1426,8 +1426,13 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `DONE` (LIB-006) |
 | F-015 | Backup/Restore completo (export `schemaVersion:8` + restore com preview/confirm) | P2 | `DONE` (RPG-1.0-BATCH6) — export cobre 100% dos domínios; restore automatizado cobre Worlds/Creature Stat Templates/Vault/Journal (escopo v1, ver nota abaixo); Groups/Campaigns/Library/Wiki/Relations/Cartografia/External Resources/Revision History continuam exportados mas sem restore automatizado ainda (documentado, não silenciado) |
 
-Explicitamente fora de escopo (decisão de produto, não backlog):
-VTT, Sheets (motor completo), Social/Amizades.
+**Nota (2026-08-19, correção de direção do responsável do produto):** a
+linha "Explicitamente fora de escopo: VTT, Sheets, Social/Amizades" que
+existia aqui é da era 1.0 e está **desatualizada** — o congelamento
+pós-1.0 foi revogado. Todos os três já têm itens `DONE` (F-016..F-029).
+`docs/product/FULL_ROADMAP.md` é a fonte de verdade viva para F-016 em
+diante (esta tabela para de ser atualizada em F-015); não repetir os
+itens novos aqui para evitar duas fontes divergentes.
 
 ## Regra de bloqueio
 
