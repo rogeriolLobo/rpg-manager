@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { authorizedWorld, entityAuthorizationPredicate, entityAuthorizationValues } from '../content/authorization';
+import { authorizedWorld, entityAuthorizationPredicate, entityAuthorizationValues, worldEntityDiscoveryPredicate } from '../content/authorization';
 import { ApiError } from '../http';
 import type { AppVariables, Env } from '../types';
 
@@ -16,7 +16,9 @@ searchRoutes.get('/', async (c) => {
   const worldId = c.req.query('worldId') || null;
   if (worldId) await authorizedWorld(c, worldId);
   const pattern = searchPattern(query);
-  const entityWorld = worldId ? 'AND e.world_id=?' : '';
+  // F-022 (BATCH12): entidades linkadas ao World (world_entity_links) também aparecem na
+  // busca escopada por World — ver worldEntityDiscoveryPredicate.
+  const entityWorld = worldId ? `AND ${worldEntityDiscoveryPredicate()}` : '';
   const journalWorld = worldId ? 'AND p.world_id=?' : '';
   const [entities, worlds, campaigns, groups, rpgs, journal] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT e.id,e.name,e.summary,e.entity_type subtype,e.world_id worldId,w.name worldName,'ENTITY' kind
@@ -25,7 +27,7 @@ searchRoutes.get('/', async (c) => {
       AND (e.name LIKE ? ESCAPE '\\' OR e.summary LIKE ? ESCAPE '\\' OR EXISTS(
         SELECT 1 FROM wiki_entity_aliases a WHERE a.entity_id=e.id AND a.alias LIKE ? ESCAPE '\\'))
       ORDER BY CASE WHEN e.name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,e.updated_at DESC LIMIT 12`)
-      .bind(...entityAuthorizationValues(userId), ...(worldId ? [worldId] : []), pattern, pattern, pattern, pattern),
+      .bind(...entityAuthorizationValues(userId), ...(worldId ? [worldId, worldId] : []), pattern, pattern, pattern, pattern),
     c.env.DB.prepare(`SELECT w.id,w.name,w.description summary,NULL subtype,w.id worldId,w.name worldName,'WORLD' kind
       FROM worlds w WHERE (w.owner_user_id=? OR (w.archived_at IS NULL AND w.visibility='GROUP' AND EXISTS(
         SELECT 1 FROM world_members wm WHERE wm.world_id=w.id AND wm.user_id=?)))

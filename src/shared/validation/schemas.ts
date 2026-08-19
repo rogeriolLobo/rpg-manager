@@ -319,6 +319,21 @@ export const vaultEntityInputSchema = z.strictObject({
   item: itemDetailsSchema.nullable().default(null),
 });
 
+// F-022 (BATCH12): LINK explícito de uma entidade num World diferente do seu world_id
+// dono — ver migrations/0032_world_entity_links.sql e src/server/routes/vault.ts.
+export const worldEntityLinkInputSchema = z.strictObject({
+  worldId: z.string().trim().min(1).max(80),
+});
+
+// F-022: FORK explícito (COPY) — cria uma entidade nova independente. Todos os campos são
+// overrides opcionais sobre a entidade original; omitir = manter o valor original.
+export const vaultEntityForkInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160).optional(),
+  worldId: z.string().trim().max(80).nullable().optional(),
+  visibility: z.enum(ENTITY_VISIBILITIES).optional(),
+  groupId: z.string().trim().max(80).nullable().optional(),
+});
+
 export const wikiFolderInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   parentFolderId: z.string().trim().max(80).nullable().default(null),
@@ -431,6 +446,8 @@ export type CampaignInput = z.infer<typeof campaignInputSchema>;
 export type SessionInput = z.infer<typeof sessionInputSchema>;
 export type WorldInput = z.infer<typeof worldInputSchema>;
 export type VaultEntityInput = z.infer<typeof vaultEntityInputSchema>;
+export type WorldEntityLinkInput = z.infer<typeof worldEntityLinkInputSchema>;
+export type VaultEntityForkInput = z.infer<typeof vaultEntityForkInputSchema>;
 export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
 export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;

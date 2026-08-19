@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono';
 import { canonicalizeRelationEndpoints, isGenealogyRelation, validateRelation } from '../../domain/content/relations';
 import { RELATION_TYPES, type RelationType } from '../../domain/content/types';
 import { entityRelationInputSchema, type EntityRelationInput } from '../../shared/validation/schemas';
-import { entityAuthorizationPredicate, entityAuthorizationValues, authorizedWorld, ownedWorld } from '../content/authorization';
+import { entityAuthorizationPredicate, entityAuthorizationValues, authorizedWorld, ownedWorld, worldEntityDiscoveryPredicate } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
@@ -158,7 +158,10 @@ relationRoutes.get('/worlds/:worldId', async (c) => {
     WHERE ${relationWhere.join(' AND ')} ORDER BY r.updated_at DESC LIMIT 500`)
     .bind(world.id, ...relationAuthorizationValues(userId), ...relationFilters).all<RelationRow>();
 
-  const nodeWhere = ['e.world_id=?', 'e.archived_at IS NULL', entityAuthorizationPredicate('e')];
+  // F-022 (BATCH12): entidades linkadas ao World (world_entity_links) também podem
+  // aparecer como nó do grafo — relações continuam escopadas ao World onde foram
+  // criadas (r.world_id / visible_relation.world_id=e.world_id, inalterado).
+  const nodeWhere = [worldEntityDiscoveryPredicate('e'), 'e.archived_at IS NULL', entityAuthorizationPredicate('e')];
   if (query.includeDisconnected !== 'true') {
     nodeWhere.push(`EXISTS(SELECT 1 FROM entity_relations visible_relation
       WHERE visible_relation.world_id=e.world_id AND visible_relation.archived_at IS NULL
@@ -166,7 +169,7 @@ relationRoutes.get('/worlds/:worldId', async (c) => {
   }
   const nodeRows = await c.env.DB.prepare(`SELECT e.id,e.name,e.entity_type,e.visibility FROM vault_entities e
     WHERE ${nodeWhere.join(' AND ')} ORDER BY e.name COLLATE NOCASE LIMIT 500`)
-    .bind(world.id, ...entityAuthorizationValues(userId)).all<EntityReferenceRow>();
+    .bind(world.id, world.id, ...entityAuthorizationValues(userId)).all<EntityReferenceRow>();
 
   const visibleNodeIds = new Set(nodeRows.results.map((node) => node.id));
   const relations = relationRows.results.filter((relation) => visibleNodeIds.has(relation.source_entity_id) && visibleNodeIds.has(relation.target_entity_id));

@@ -96,3 +96,12 @@ export async function ownedWorld(c: AppContext,id:string):Promise<AuthorizedWorl
   if(!row)throw new ApiError(404,'NOT_FOUND','Mundo não encontrado.');
   return {...row,is_world_member:1};
 }
+
+// F-022 (BATCH12): predicado de DESCOBERTA por World — NUNCA de autorização (sempre
+// combinado com entityAuthorizationPredicate/entityAuthorizationColumns na mesma query,
+// nunca usado sozinho). Uma entidade "pertence" ao seu world_id OU foi explicitamente
+// linkada nele (world_entity_links, ver migrations/0032_world_entity_links.sql) — o LINK
+// nunca amplia QUEM pode ver a entidade, só EM QUAIS Worlds ela é descoberta (Wiki/Vault
+// filtrado por World/busca). Bind: worldId duas vezes (mesmo valor).
+export const worldEntityDiscoveryPredicate = (alias = 'e'): string =>
+  `(${alias}.world_id=? OR EXISTS(SELECT 1 FROM world_entity_links wel WHERE wel.world_id=? AND wel.entity_id=${alias}.id))`;

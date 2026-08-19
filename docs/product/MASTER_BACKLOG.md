@@ -1071,35 +1071,68 @@ CLAUDE.md §7).
 - Próximo item da ordem de execução do roadmap: BATCH12 — F-022 (Vault
   avançado).
 
-## F-022 — Vault avançado (LINK/FORK entre Worlds) — `IN_PROGRESS` (AUDIT, RPG-1.0-BATCH12)
+## F-022 — Vault avançado (LINK/FORK entre Worlds) — `DONE` (RPG-1.0-BATCH12)
 
-AUDIT concluído, implementação ainda não iniciada (parada em fronteira
-limpa de batch — nenhum código parcial/quebrado deixado para trás).
-
-- **Achado 1 — reuso entre Campaigns/Adventures já está satisfeito**:
+- **Achado 1 — reuso entre Campaigns/Adventures já estava satisfeito**:
   `campaign_entities` (migration 0007) já é many-to-many
   campaign↔entity desde a base do produto — uma Adventure (ou
   qualquer outra entidade) já pode ser `REFERENCE`/`ACTIVE` em várias
-  Campaigns simultaneamente, sem duplicação. Não é um gap real.
-- **Achado 2 — o gap real é reuso entre Worlds**: `vault_entities.world_id`
-  é uma coluna única (0 ou 1 World). `src/server/routes/knowledge.ts`
-  (Wiki) filtra estritamente por `e.world_id=?` — hoje não existe
-  nenhum jeito de uma entidade aparecer/ser referenciável a partir de
-  um segundo World sem reatribuir `world_id` (o que a remove do
-  primeiro).
-- **Plano v1 (não implementado):**
-  1. `world_entity_links (world_id, entity_id, created_at)` — LINK
-     many-to-many, nunca altera `world_id` original nem autorização (a
-     visibilidade da entidade continua mandando quem vê o quê); Wiki/
-     Graph/Timeline passam a considerar link OU world_id dono.
-  2. `POST /vault/:id/fork` — COPY explícito (nunca automático,
-     cria entidade nova independente, sem vínculo de volta ao
-     original) — a regra de "não duplicar NPC/Location/etc."
-     (`CLAUDE.md` §17/25) é sobre duplicação IMPLÍCITA, não sobre um
-     fork pedido deliberadamente pelo usuário.
-- Próximo passo: implementar o plano acima seguindo o mesmo ciclo
-  AUDIT→PLAN→IMPLEMENT→TEST→GATES→DOCS→COMMIT→PUSH→CI→MIGRATION→
-  DEPLOY→VERIFY já usado nos batches anteriores.
+  Campaigns simultaneamente, sem duplicação. Não era um gap real.
+- **Achado 2 — o gap real era reuso entre Worlds**: `vault_entities.world_id`
+  é uma coluna única (0 ou 1 World).
+- **Migration `0032_world_entity_links.sql`** (aditiva): `world_entity_links
+  (world_id, entity_id, created_at)` — LINK many-to-many. `worldEntityDiscoveryPredicate`
+  (`src/server/content/authorization.ts`) é o único ponto que sabe resolver
+  "esta entidade pertence a este World OU foi linkada nele" — sempre
+  combinado com `entityAuthorizationPredicate` na mesma query, nunca
+  usado sozinho (LINK é só descoberta, nunca autorização). Aplicado em:
+  `GET /vault?worldId=`, Wiki (`knowledge.ts`: listagem, tags, aliases,
+  backlinks), busca escopada por World (`search.ts`), nós do Grafo
+  (`relations.ts` — relações em si continuam presas ao World onde foram
+  criadas, só o NÓ da entidade passa a poder aparecer via link).
+  **Timeline deliberadamente excluída** e documentada em código: a data
+  de um EVENT é interpretada sob o calendário/eras de UM World
+  específico — linkar mudaria a interpretação da data sem reprojeção,
+  o que seria semanticamente incorreto; fica para um redesenho futuro
+  se necessário.
+- **`POST /vault/:id/fork`** (COPY explícito, nunca automático — a regra
+  de "não duplicar NPC/Location/etc." do `CLAUDE.md` §17/25 é sobre
+  duplicação IMPLÍCITA, não sobre um fork pedido deliberadamente pelo
+  usuário): reaproveita `buildEntityCreateStatements`/`validateReferences`
+  (extraídos do `POST /` original — um fork É um create normal, nunca
+  um caminho paralelo). Aceita overrides opcionais (nome/World/
+  visibilidade/grupo); nunca copia `parentEntityId` (hierarquia de
+  Location fica presa ao World de origem) nem o vínculo de ficha de
+  criatura (`statBlock` referencia um template de um World específico).
+- **Autorização:** LINK e FORK são owner-only (`ownedEntity`/`ownedWorld`),
+  mesmo limite de "sem co-edição" do resto do domínio Vault — nunca
+  cross-account. Testado explicitamente que LINK nunca amplia quem vê
+  uma entidade (Player membro de um World não ganha acesso a uma
+  entidade GM_ONLY só por ela estar linkada lá).
+- **UI:** painel "Worlds vinculados" na página de detalhe do Vault
+  (vincular/desvincular, só para o dono) e botão "Duplicar" (fork
+  rápido com valores padrão — overrides ficam disponíveis via API para
+  uma futura UI mais rica, sem bloquear o v1).
+- **Achado de infraestrutura de CI corrigido nesta rodada (não é do
+  F-022, mas bloqueava o push dele):** `npx playwright install
+  --with-deps chromium` travou 4 vezes nesta sessão (às vezes 15-20+
+  minutos) no `apt-get` do mirror `azure.archive.ubuntu.com`, sempre
+  parado em `Get: .../noble-security InRelease`. Corrigido de raiz:
+  `.github/workflows/ci.yml` passou a rodar o job `validate` dentro do
+  container oficial `mcr.microsoft.com/playwright:v1.62.1-noble`
+  (Chromium + dependências de SO + Node já inclusos), eliminando o
+  `apt-get` do job inteiro em vez de só re-tentar a cada vez que travava.
+- **Testes:** `tests/integration/vault-links-fork.test.ts` (6 casos: link
+  não move a entidade + aparece/some da Wiki do World B ao
+  vincular/desvincular sem nunca remover a entidade + busca respeita o
+  link; outsider/IDOR/duplicado idempotente/`ALREADY_OWNING_WORLD`;
+  LINK nunca amplia autorização — GM_ONLY continua invisível para
+  Player mesmo linkado; fork gera ID novo e edição do fork nunca altera
+  o original; fork aceita overrides e nunca copia parentEntityId; fork
+  IDOR + World de destino inválido rejeitado) + `tests/e2e/vault-links-fork.spec.ts`
+  (1 cenário completo, desktop+mobile).
+- Próximo item da ordem de execução do roadmap: BATCH13 — F-024
+  (One-Shots) + F-025 (Adventures aprofundadas).
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)

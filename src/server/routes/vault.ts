@@ -2,10 +2,10 @@ import { Hono, type Context } from 'hono';
 import { canArchiveEntity, canDeleteEntity, canEditEntity, canRestoreEntity, resolveEntityVisibility } from '../../domain/content/permissions';
 import { validateAdventureDetails, validateLocationParent, validateLoreDetails } from '../../domain/content/validation';
 import { validateCreatureStatValues, validateSpecializedDetails } from '../../domain/content/specialized';
-import { ENTITY_TYPES, ENTITY_VISIBILITIES, type CreatureStatFieldDefinition, type VaultEntityType } from '../../domain/content/types';
-import { vaultEntityInputSchema, type VaultEntityInput } from '../../shared/validation/schemas';
+import { ENTITY_TYPES, ENTITY_VISIBILITIES, type AdventureType, type CreatureStatFieldDefinition, type LoreCanonStatus, type LoreType, type VaultEntityType } from '../../domain/content/types';
+import { vaultEntityForkInputSchema, vaultEntityInputSchema, worldEntityLinkInputSchema, type VaultEntityInput } from '../../shared/validation/schemas';
 import { ApiError, nowIso, readJson } from '../http';
-import { authorizedEntity, entityAccessContext, entityAuthorizationColumns, entityAuthorizationPredicate, entityAuthorizationValues, ownedEntity, type AuthorizedEntityRow } from '../content/authorization';
+import { authorizedEntity, entityAccessContext, entityAuthorizationColumns, entityAuthorizationPredicate, entityAuthorizationValues, ownedEntity, ownedWorld, worldEntityDiscoveryPredicate, type AuthorizedEntityRow } from '../content/authorization';
 import { getRevision, listRevisions, parseRevisionNumber, parseSnapshot, recordRevisionStatement } from '../content/revisions';
 import type { AppVariables, Env } from '../types';
 
@@ -56,9 +56,21 @@ export function specializedStatements(c:AppContext,input:VaultEntityInput,entity
 
 vaultRoutes.get('/metadata',async(c)=>{const userId=c.get('user').id;const [worlds,groups,campaigns,locations]=await c.env.DB.batch([c.env.DB.prepare("SELECT id,name FROM worlds WHERE owner_user_id=? AND archived_at IS NULL ORDER BY name").bind(userId),c.env.DB.prepare('SELECT id,name FROM play_groups WHERE user_id=? ORDER BY name').bind(userId),c.env.DB.prepare("SELECT id,name FROM campaigns WHERE user_id=? ORDER BY name").bind(userId),c.env.DB.prepare("SELECT id,name,world_id worldId FROM vault_entities WHERE owner_user_id=? AND entity_type='LOCATION' AND archived_at IS NULL ORDER BY name").bind(userId)]);return c.json({worlds:worlds.results,groups:groups.results,campaigns:campaigns.results,locations:locations.results});});
 
-vaultRoutes.get('/',async(c)=>{const userId=c.get('user').id,query=c.req.query();const page=Math.max(1,Number.parseInt(query.page??'1',10)||1),pageSize=Math.min(50,Math.max(1,Number.parseInt(query.pageSize??'18',10)||18));const archive=query.archive??'active';if(!['active','archived','all'].includes(archive))throw new ApiError(422,'INVALID_FILTER','Filtro de arquivo inválido.');const where=[entityAuthorizationPredicate()];const filterValues:unknown[]=[];if(archive==='active')where.push('e.archived_at IS NULL');else if(archive==='archived'){where.push('e.archived_at IS NOT NULL','e.owner_user_id=?');filterValues.push(userId);}if(query.type){if(!ENTITY_TYPES.includes(query.type as VaultEntityType))throw new ApiError(422,'INVALID_TYPE','Tipo de entidade inválido.');where.push('e.entity_type=?');filterValues.push(query.type);}if(query.worldId){where.push('e.world_id=?');filterValues.push(query.worldId);}if(query.visibility){if(!ENTITY_VISIBILITIES.includes(query.visibility as typeof ENTITY_VISIBILITIES[number]))throw new ApiError(422,'INVALID_VISIBILITY','Visibilidade inválida.');where.push('e.visibility=?');filterValues.push(query.visibility);}if(query.search){where.push("e.name LIKE ? ESCAPE '\\'");filterValues.push(`%${query.search.slice(0,100).replaceAll('\\','\\\\').replaceAll('%','\\%').replaceAll('_','\\_')}%`);}const orders:Record<string,string>={recent:'e.updated_at DESC',name:'e.name COLLATE NOCASE',oldest:'e.created_at'};if(query.sort&&!orders[query.sort])throw new ApiError(422,'INVALID_SORT','Ordenação inválida.');const authColumnsValues=[userId,userId,userId,userId],authWhereValues=entityAuthorizationValues(userId),clause=where.join(' AND ');const [rows,count]=await c.env.DB.batch([c.env.DB.prepare(`${SELECT},${entityAuthorizationColumns()} ${JOINS} WHERE ${clause} ORDER BY ${orders[query.sort??'recent']} LIMIT ? OFFSET ?`).bind(...authColumnsValues,...authWhereValues,...filterValues,pageSize,(page-1)*pageSize),c.env.DB.prepare(`SELECT COUNT(*) total FROM vault_entities e WHERE ${clause}`).bind(...authWhereValues,...filterValues)]);return c.json({items:(rows.results as unknown as EntityRow[]).map((row)=>present(row,userId)),pagination:{page,pageSize,total:Number((count.results[0] as {total:number}).total)}});});
+vaultRoutes.get('/',async(c)=>{const userId=c.get('user').id,query=c.req.query();const page=Math.max(1,Number.parseInt(query.page??'1',10)||1),pageSize=Math.min(50,Math.max(1,Number.parseInt(query.pageSize??'18',10)||18));const archive=query.archive??'active';if(!['active','archived','all'].includes(archive))throw new ApiError(422,'INVALID_FILTER','Filtro de arquivo inválido.');const where=[entityAuthorizationPredicate()];const filterValues:unknown[]=[];if(archive==='active')where.push('e.archived_at IS NULL');else if(archive==='archived'){where.push('e.archived_at IS NOT NULL','e.owner_user_id=?');filterValues.push(userId);}if(query.type){if(!ENTITY_TYPES.includes(query.type as VaultEntityType))throw new ApiError(422,'INVALID_TYPE','Tipo de entidade inválido.');where.push('e.entity_type=?');filterValues.push(query.type);}if(query.worldId){where.push(worldEntityDiscoveryPredicate());filterValues.push(query.worldId,query.worldId);}if(query.visibility){if(!ENTITY_VISIBILITIES.includes(query.visibility as typeof ENTITY_VISIBILITIES[number]))throw new ApiError(422,'INVALID_VISIBILITY','Visibilidade inválida.');where.push('e.visibility=?');filterValues.push(query.visibility);}if(query.search){where.push("e.name LIKE ? ESCAPE '\\'");filterValues.push(`%${query.search.slice(0,100).replaceAll('\\','\\\\').replaceAll('%','\\%').replaceAll('_','\\_')}%`);}const orders:Record<string,string>={recent:'e.updated_at DESC',name:'e.name COLLATE NOCASE',oldest:'e.created_at'};if(query.sort&&!orders[query.sort])throw new ApiError(422,'INVALID_SORT','Ordenação inválida.');const authColumnsValues=[userId,userId,userId,userId],authWhereValues=entityAuthorizationValues(userId),clause=where.join(' AND ');const [rows,count]=await c.env.DB.batch([c.env.DB.prepare(`${SELECT},${entityAuthorizationColumns()} ${JOINS} WHERE ${clause} ORDER BY ${orders[query.sort??'recent']} LIMIT ? OFFSET ?`).bind(...authColumnsValues,...authWhereValues,...filterValues,pageSize,(page-1)*pageSize),c.env.DB.prepare(`SELECT COUNT(*) total FROM vault_entities e WHERE ${clause}`).bind(...authWhereValues,...filterValues)]);return c.json({items:(rows.results as unknown as EntityRow[]).map((row)=>present(row,userId)),pagination:{page,pageSize,total:Number((count.results[0] as {total:number}).total)}});});
 
-vaultRoutes.post('/',async(c)=>{const input=await readJson(c,vaultEntityInputSchema);await validateReferences(c,input,null);const id=crypto.randomUUID(),now=nowIso(),userId=c.get('user').id;const statements:D1PreparedStatement[]=[c.env.DB.prepare(`INSERT INTO vault_entities (id,owner_user_id,world_id,group_id,parent_entity_id,entity_type,name,summary,description,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,userId,input.worldId??null,input.groupId??null,input.parentEntityId??null,input.entityType,input.name,input.summary,input.description,input.visibility,now,now)];if(input.adventure)statements.push(c.env.DB.prepare('INSERT INTO adventure_details (entity_id,adventure_type,recommended_sessions,notes,premise,hooks,key_scenes,rewards) VALUES (?,?,?,?,?,?,?,?)').bind(id,input.adventure.adventureType,input.adventure.recommendedSessions,input.adventure.notes,input.adventure.premise,input.adventure.hooks,input.adventure.keyScenes,input.adventure.rewards));if(input.entityType==='LORE'){const lore=input.lore??{loreType:'CUSTOM',canonStatus:'DRAFT',source:''};statements.push(c.env.DB.prepare('INSERT INTO lore_details (entity_id,lore_type,canon_status,source) VALUES (?,?,?,?)').bind(id,lore.loreType,lore.canonStatus,lore.source));}statements.push(...specializedStatements(c,input,id));
+// F-022 (BATCH12): extraído do POST / para ser reaproveitado pelo FORK (POST /:id/fork) —
+// um fork É um create normal (mesmo caminho de escrita/validação), nunca um segundo
+// caminho paralelo, mesmo princípio já aplicado a buildEntityUpdateStatements.
+function buildEntityCreateStatements(c:AppContext,input:VaultEntityInput,id:string,now:string,userId:string):D1PreparedStatement[]{
+  const statements:D1PreparedStatement[]=[c.env.DB.prepare(`INSERT INTO vault_entities (id,owner_user_id,world_id,group_id,parent_entity_id,entity_type,name,summary,description,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,userId,input.worldId??null,input.groupId??null,input.parentEntityId??null,input.entityType,input.name,input.summary,input.description,input.visibility,now,now)];
+  if(input.adventure)statements.push(c.env.DB.prepare('INSERT INTO adventure_details (entity_id,adventure_type,recommended_sessions,notes,premise,hooks,key_scenes,rewards) VALUES (?,?,?,?,?,?,?,?)').bind(id,input.adventure.adventureType,input.adventure.recommendedSessions,input.adventure.notes,input.adventure.premise,input.adventure.hooks,input.adventure.keyScenes,input.adventure.rewards));
+  if(input.entityType==='LORE'){const lore=input.lore??{loreType:'CUSTOM',canonStatus:'DRAFT',source:''};statements.push(c.env.DB.prepare('INSERT INTO lore_details (entity_id,lore_type,canon_status,source) VALUES (?,?,?,?)').bind(id,lore.loreType,lore.canonStatus,lore.source));}
+  statements.push(...specializedStatements(c,input,id));
+  return statements;
+}
+
+vaultRoutes.post('/',async(c)=>{const input=await readJson(c,vaultEntityInputSchema);await validateReferences(c,input,null);const id=crypto.randomUUID(),now=nowIso(),userId=c.get('user').id;
+  const statements=buildEntityCreateStatements(c,input,id,now,userId);
   // F-001: revisão inicial — mesma transação do create, nunca um passo separado que possa falhar sozinho.
   statements.push(recordRevisionStatement(c.env.DB,{resourceType:'VAULT_ENTITY',resourceId:id,ownerUserId:userId,actorUserId:userId,action:'CREATE',snapshot:input,now}));
   await c.env.DB.batch(statements);return c.json({id},201);});
@@ -97,3 +109,50 @@ vaultRoutes.post('/:id/revisions/:number/restore',async(c)=>{const current=await
 vaultRoutes.post('/:id/archive',async(c)=>{const entity=await ownedEntity(c,c.req.param('id'));if(entity.archived_at)throw new ApiError(409,'ALREADY_ARCHIVED','A entidade já está arquivada.');const now=nowIso();await c.env.DB.prepare('UPDATE vault_entities SET archived_at=?,updated_at=? WHERE id=? AND owner_user_id=?').bind(now,now,c.req.param('id'),c.get('user').id).run();return c.json({success:true});});
 vaultRoutes.post('/:id/restore',async(c)=>{const entity=await ownedEntity(c,c.req.param('id'));if(!entity.archived_at)throw new ApiError(409,'NOT_ARCHIVED','A entidade não está arquivada.');await c.env.DB.prepare('UPDATE vault_entities SET archived_at=NULL,updated_at=? WHERE id=? AND owner_user_id=?').bind(nowIso(),c.req.param('id'),c.get('user').id).run();return c.json({success:true});});
 vaultRoutes.delete('/:id',async(c)=>{await ownedEntity(c,c.req.param('id'));const dependency=await c.env.DB.prepare(`SELECT (SELECT COUNT(*) FROM campaign_entities WHERE entity_id=?) campaignLinks,(SELECT COUNT(*) FROM campaigns WHERE adventure_entity_id=?) primaryAdventure,(SELECT COUNT(*) FROM vault_entities WHERE parent_entity_id=?) children`).bind(c.req.param('id'),c.req.param('id'),c.req.param('id')).first<{campaignLinks:number;primaryAdventure:number;children:number}>();if(Number(dependency?.campaignLinks)||Number(dependency?.primaryAdventure)||Number(dependency?.children))throw new ApiError(409,'ENTITY_HAS_DEPENDENCIES','Arquive a entidade ou remova primeiro seus vínculos.');await c.env.DB.prepare('DELETE FROM vault_entities WHERE id=? AND owner_user_id=?').bind(c.req.param('id'),c.get('user').id).run();return c.body(null,204);});
+
+// F-022 (BATCH12): Vault avançado — LINK (world_entity_links) nunca altera world_id nem
+// autorização, só amplia em quais Worlds a entidade é descoberta (Wiki/Vault filtrado por
+// World/busca — ver worldEntityDiscoveryPredicate). Owner-only (mesmo limite de "sem
+// co-edição" de todo o domínio Vault): só quem é dono da entidade E do World de destino
+// pode criar/remover um link — nunca cross-account.
+vaultRoutes.get('/:id/links',async(c)=>{const entity=await ownedEntity(c,c.req.param('id'));const rows=await c.env.DB.prepare('SELECT wel.world_id worldId,w.name worldName FROM world_entity_links wel JOIN worlds w ON w.id=wel.world_id WHERE wel.entity_id=? ORDER BY w.name COLLATE NOCASE').bind(entity.id).all();return c.json({items:rows.results});});
+
+vaultRoutes.post('/:id/links',async(c)=>{const entity=await ownedEntity(c,c.req.param('id'))as EntityRow;const input=await readJson(c,worldEntityLinkInputSchema);await ownedWorld(c,input.worldId);if(input.worldId===entity.world_id)throw new ApiError(422,'ALREADY_OWNING_WORLD','Esta entidade já pertence a este World.');await c.env.DB.prepare('INSERT OR IGNORE INTO world_entity_links (world_id,entity_id,created_at) VALUES (?,?,?)').bind(input.worldId,entity.id,nowIso()).run();return c.json({success:true},201);});
+
+vaultRoutes.delete('/:id/links/:worldId',async(c)=>{const entity=await ownedEntity(c,c.req.param('id'));await c.env.DB.prepare('DELETE FROM world_entity_links WHERE world_id=? AND entity_id=?').bind(c.req.param('worldId'),entity.id).run();return c.body(null,204);});
+
+// F-022: FORK (COPY) explícito — cria uma entidade NOVA e independente (nunca sincroniza
+// de volta com a original). Reaproveita buildEntityCreateStatements/validateReferences —
+// um fork É um create normal, só com os valores iniciais vindos da entidade de origem em
+// vez de um formulário em branco. Nunca copia parentEntityId (hierarquia de Location fica
+// presa ao World de origem — evitar ciclos/inconsistência entre World de origem e destino)
+// nem o vínculo de ficha de criatura (statBlock referencia um template de um World
+// específico, que pode não existir/ser diferente no World de destino).
+vaultRoutes.post('/:id/fork',async(c)=>{
+  const source=await ownedEntity(c,c.req.param('id'));
+  const row=await c.env.DB.prepare(`${SELECT} ${JOINS} WHERE e.id=?`).bind(source.id).first<EntityRow>();
+  if(!row)throw new ApiError(404,'NOT_FOUND','Entidade não encontrada.');
+  const overrides=await readJson(c,vaultEntityForkInputSchema);
+  const visibility=overrides.visibility??(row.visibility as typeof ENTITY_VISIBILITIES[number]);
+  const input:VaultEntityInput={
+    entityType:row.entity_type,
+    name:overrides.name??`${row.name} (cópia)`,
+    summary:row.summary,description:row.description,visibility,
+    worldId:overrides.worldId!==undefined?overrides.worldId:row.world_id,
+    groupId:overrides.groupId!==undefined?overrides.groupId:(visibility==='GROUP'?row.group_id:null),
+    parentEntityId:null,
+    adventure:row.entity_type==='ADVENTURE'?{adventureType:row.adventure_type as AdventureType,recommendedSessions:row.recommended_sessions,notes:row.adventure_notes??'',premise:row.adventure_premise??'',hooks:row.adventure_hooks??'',keyScenes:row.adventure_key_scenes??'',rewards:row.adventure_rewards??''}:null,
+    lore:row.entity_type==='LORE'?{loreType:row.lore_type as LoreType,canonStatus:row.lore_canon_status as LoreCanonStatus,source:row.lore_source??''}:null,
+    character:row.entity_type==='CHARACTER'?{playerUserId:row.player_user_id,pronouns:row.character_pronouns??'',concept:row.character_concept??'',status:row.character_status??'',notes:row.character_notes??''}:null,
+    npc:row.entity_type==='NPC'?{role:row.npc_role??'',occupation:row.npc_occupation??'',motivation:row.npc_motivation??'',publicNotes:row.npc_public_notes??'',gmNotes:row.npc_gm_notes??''}:null,
+    creature:row.entity_type==='CREATURE'?{classification:row.creature_classification??'',habitat:row.creature_habitat??'',behavior:row.creature_behavior??'',dangerNotes:row.creature_danger_notes??'',statBlock:null}:null,
+    faction:row.entity_type==='FACTION'?{purpose:row.faction_purpose??'',scope:row.faction_scope??'',status:row.faction_status??'',publicDescription:row.faction_public_description??'',gmNotes:row.faction_gm_notes??''}:null,
+    item:row.entity_type==='ITEM'?{itemType:row.item_type??'',rarity:row.item_rarity??'',publicDescription:row.item_public_description??'',gmNotes:row.item_gm_notes??''}:null,
+  };
+  await validateReferences(c,input,null);
+  const id=crypto.randomUUID(),now=nowIso(),userId=c.get('user').id;
+  const statements=buildEntityCreateStatements(c,input,id,now,userId);
+  statements.push(recordRevisionStatement(c.env.DB,{resourceType:'VAULT_ENTITY',resourceId:id,ownerUserId:userId,actorUserId:userId,action:'CREATE',snapshot:input,now}));
+  await c.env.DB.batch(statements);
+  return c.json({id},201);
+});

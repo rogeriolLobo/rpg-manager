@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { ENTITY_TYPES, type VaultEntityType } from '../../domain/content/types';
 import { extractWikiMentions, normalizeEditorialLabel } from '../../domain/content/wiki';
 import { wikiEntityOrganizationSchema, wikiFolderInputSchema, worldTagInputSchema } from '../../shared/validation/schemas';
-import { authorizedEntity, authorizedWorld, entityAuthorizationPredicate, entityAuthorizationValues, ownedEntity, ownedWorld } from '../content/authorization';
+import { authorizedEntity, authorizedWorld, entityAuthorizationPredicate, entityAuthorizationValues, ownedEntity, ownedWorld, worldEntityDiscoveryPredicate } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
@@ -32,8 +32,10 @@ knowledgeRoutes.get('/:worldId', async (c) => {
   const query = c.req.query();
   const page = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(query.pageSize ?? '24', 10) || 24));
-  const where = ['e.world_id=?', 'e.archived_at IS NULL', entityAuthorizationPredicate()];
-  const values: unknown[] = [worldId, ...entityAuthorizationValues(userId)];
+  // F-022 (BATCH12): entidades LINKADAS a este World (world_entity_links) também aparecem
+  // na Wiki, sem nunca terem sido "movidas" do World de origem — ver worldEntityDiscoveryPredicate.
+  const where = [worldEntityDiscoveryPredicate(), 'e.archived_at IS NULL', entityAuthorizationPredicate()];
+  const values: unknown[] = [worldId, worldId, ...entityAuthorizationValues(userId)];
   if (query.type) {
     if (!ENTITY_TYPES.includes(query.type as VaultEntityType)) throw new ApiError(422, 'INVALID_TYPE', 'Tipo de entidade inválido.');
     where.push('e.entity_type=?'); values.push(query.type);
@@ -61,10 +63,10 @@ knowledgeRoutes.get('/:worldId', async (c) => {
     c.env.DB.prepare('SELECT id,parent_folder_id parentFolderId,name,sort_order sortOrder FROM wiki_folders WHERE world_id=? ORDER BY sort_order,name COLLATE NOCASE').bind(worldId),
     c.env.DB.prepare('SELECT id,name FROM world_tags WHERE world_id=? ORDER BY name COLLATE NOCASE').bind(worldId),
     c.env.DB.prepare(`SELECT et.entity_id entityId,t.id,t.name FROM wiki_entity_tags et JOIN world_tags t ON t.id=et.tag_id
-      JOIN vault_entities e ON e.id=et.entity_id WHERE e.world_id=? AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()}
-      ORDER BY t.name COLLATE NOCASE`).bind(worldId, ...authValues),
+      JOIN vault_entities e ON e.id=et.entity_id WHERE ${worldEntityDiscoveryPredicate()} AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()}
+      ORDER BY t.name COLLATE NOCASE`).bind(worldId, worldId, ...authValues),
     c.env.DB.prepare(`SELECT a.entity_id entityId,a.id,a.alias FROM wiki_entity_aliases a JOIN vault_entities e ON e.id=a.entity_id
-      WHERE e.world_id=? AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()} ORDER BY a.alias COLLATE NOCASE`).bind(worldId, ...authValues),
+      WHERE ${worldEntityDiscoveryPredicate()} AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()} ORDER BY a.alias COLLATE NOCASE`).bind(worldId, worldId, ...authValues),
   ]);
   return c.json({
     world: { id: world.id, name: String(world.name), isOwner: world.owner_user_id === userId },
@@ -81,13 +83,16 @@ knowledgeRoutes.get('/:worldId/entities/:entityId/backlinks', async (c) => {
   const worldId = c.req.param('worldId');
   await authorizedWorld(c, worldId);
   const target = await authorizedEntity(c, c.req.param('entityId'));
-  if (target.world_id !== worldId) throw new ApiError(404, 'NOT_FOUND', 'Entidade não encontrada neste World.');
+  if (target.world_id !== worldId) {
+    const linked = await c.env.DB.prepare('SELECT 1 FROM world_entity_links WHERE world_id=? AND entity_id=?').bind(worldId, target.id).first();
+    if (!linked) throw new ApiError(404, 'NOT_FOUND', 'Entidade não encontrada neste World.');
+  }
   const aliases = await c.env.DB.prepare('SELECT alias FROM wiki_entity_aliases WHERE entity_id=?').bind(target.id).all<{ alias: string }>();
   const targetNames = new Set([normalizeEditorialLabel(String(target.name)), ...aliases.results.map((item) => normalizeEditorialLabel(item.alias))]);
   const userId = c.get('user').id;
   const sources = await c.env.DB.prepare(`SELECT e.id,e.name,e.entity_type entityType,e.description FROM vault_entities e
-    WHERE e.world_id=? AND e.id<>? AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()} ORDER BY e.name COLLATE NOCASE`)
-    .bind(worldId, target.id, ...entityAuthorizationValues(userId)).all<{ id: string; name: string; entityType: string; description: string }>();
+    WHERE ${worldEntityDiscoveryPredicate()} AND e.id<>? AND e.archived_at IS NULL AND ${entityAuthorizationPredicate()} ORDER BY e.name COLLATE NOCASE`)
+    .bind(worldId, worldId, target.id, ...entityAuthorizationValues(userId)).all<{ id: string; name: string; entityType: string; description: string }>();
   return c.json({ items: sources.results.filter((source) => extractWikiMentions(source.description).some((mention) => targetNames.has(mention))).map(({ description: _description, ...source }) => source) });
 });
 

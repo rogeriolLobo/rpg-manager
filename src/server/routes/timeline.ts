@@ -81,6 +81,12 @@ timelineRoutes.get('/worlds/:worldId', async (c) => {
   const world = await authorizedWorld(c, c.req.param('worldId'));
   const query = c.req.query();
   if (query.precision && !TEMPORAL_PRECISIONS.includes(query.precision as TemporalPrecision)) throw new ApiError(422, 'INVALID_PRECISION', 'Precisão temporal inválida.');
+  // F-022 (BATCH12): Timeline deliberadamente NÃO considera world_entity_links — a data de
+  // um evento (event_temporal_data) é interpretada sob o calendário/eras de UM World
+  // específico (world_calendars/world_eras); um EVENT linkado a um segundo World teria sua
+  // data reinterpretada sob um sistema de calendário diferente do que a gerou, o que seria
+  // semanticamente incorreto. Fora de escopo do v1 (exigiria reprojeção de data entre
+  // calendários, não só descoberta) — ver docs/product/MASTER_BACKLOG.md, seção F-022.
   const where = ['e.world_id=?', "e.entity_type='EVENT'", 'e.archived_at IS NULL', entityAuthorizationPredicate('e')];
   const filterValues: unknown[] = [];
   if (query.eraId) { where.push('d.era_id=?'); filterValues.push(query.eraId); }
