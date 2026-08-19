@@ -1071,6 +1071,36 @@ CLAUDE.md §7).
 - Próximo item da ordem de execução do roadmap: BATCH12 — F-022 (Vault
   avançado).
 
+## F-022 — Vault avançado (LINK/FORK entre Worlds) — `IN_PROGRESS` (AUDIT, RPG-1.0-BATCH12)
+
+AUDIT concluído, implementação ainda não iniciada (parada em fronteira
+limpa de batch — nenhum código parcial/quebrado deixado para trás).
+
+- **Achado 1 — reuso entre Campaigns/Adventures já está satisfeito**:
+  `campaign_entities` (migration 0007) já é many-to-many
+  campaign↔entity desde a base do produto — uma Adventure (ou
+  qualquer outra entidade) já pode ser `REFERENCE`/`ACTIVE` em várias
+  Campaigns simultaneamente, sem duplicação. Não é um gap real.
+- **Achado 2 — o gap real é reuso entre Worlds**: `vault_entities.world_id`
+  é uma coluna única (0 ou 1 World). `src/server/routes/knowledge.ts`
+  (Wiki) filtra estritamente por `e.world_id=?` — hoje não existe
+  nenhum jeito de uma entidade aparecer/ser referenciável a partir de
+  um segundo World sem reatribuir `world_id` (o que a remove do
+  primeiro).
+- **Plano v1 (não implementado):**
+  1. `world_entity_links (world_id, entity_id, created_at)` — LINK
+     many-to-many, nunca altera `world_id` original nem autorização (a
+     visibilidade da entidade continua mandando quem vê o quê); Wiki/
+     Graph/Timeline passam a considerar link OU world_id dono.
+  2. `POST /vault/:id/fork` — COPY explícito (nunca automático,
+     cria entidade nova independente, sem vínculo de volta ao
+     original) — a regra de "não duplicar NPC/Location/etc."
+     (`CLAUDE.md` §17/25) é sobre duplicação IMPLÍCITA, não sobre um
+     fork pedido deliberadamente pelo usuário.
+- Próximo passo: implementar o plano acima seguindo o mesmo ciclo
+  AUDIT→PLAN→IMPLEMENT→TEST→GATES→DOCS→COMMIT→PUSH→CI→MIGRATION→
+  DEPLOY→VERIFY já usado nos batches anteriores.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
