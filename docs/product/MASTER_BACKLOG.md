@@ -1315,6 +1315,54 @@ criar um mecanismo novo.
   candidato a dividir a suíte E2E em mais de um job paralelo ou
   adicionar uma guarda explícita de estabilidade nesse teste específico.
 
+## F-029 — VTT — fundação (Scene/Map/tokens) — `DONE` (RPG-1.0-BATCH16)
+
+Primeira metade do BATCH16. Ferramenta de mesa própria da Campaign
+(não do World — diferente de Cartografia/F-002), deliberadamente SEM
+realtime ainda (`CLAUDE.md` §29: adiado, nunca cancelado — F-031 fica
+para depois de uma auditoria de arquitetura zero-cost).
+
+- **Migration `0037_vtt_foundation.sql`** (aditiva): `vtt_scenes`
+  (`campaign_id`, `map_id` opcional -> `world_maps` de F-002, `image_url`
+  própria como alternativa, `is_active`, `notes` — `CHECK` garante pelo
+  menos um fundo definido) e `vtt_tokens` (`scene_id`, `entity_id`
+  opcional -> `vault_entities`, `label`, `x`/`y` normalizados 0-100
+  como `map_pins`, `visible_to_players`). Índice único parcial garante
+  só uma cena `is_active=1` por campanha por vez.
+- **Escrita sempre owner-only** — mesmo modelo de todo o resto de
+  `campaigns.ts`; membros com `is_game_master=1` continuam só-leitura
+  em qualquer parte do produto (não é uma restrição nova).
+- **`GET /vtt/:campaignId/live`** é o único ponto do produto onde um
+  jogador (`campaign_members.user_id` ativo, incluindo co-mestres) lê
+  diretamente um sub-recurso de Campaign — sempre filtrado no
+  servidor, nunca por CSS: só a cena com `is_active=1` e só tokens com
+  `visible_to_players=1`. **Decisão de segurança deliberada:** o
+  payload do jogador NUNCA inclui `entityId`/`entityName`/`entityType`
+  do token — só `id`/`label`/`x`/`y`. Um token vinculado (por engano ou
+  não) a uma Vault Entity PRIVATE/GM_ONLY e marcado
+  `visible_to_players=1` não pode vazar o nome/tipo dessa entidade;
+  o jogador só vê o rótulo livre que o mestre digitou.
+- A imagem de fundo (mapa da Cartografia ou `image_url` própria) é
+  resolvida no servidor tanto no detalhe do GM quanto em `/live` — o
+  cliente do jogador nunca precisa chamar `/cartography` diretamente
+  (o World do mapa pode não ser um World ao qual esse jogador tenha
+  acesso; Campaign e World são independentes por invariante de
+  produto).
+- **UI:** `/app/campaigns/:id/vtt` (link "Mesa Virtual" no detalhe da
+  Campaign) — cenas expansíveis com a imagem de fundo, tokens
+  posicionados por `x`/`y` (verde = visível aos jogadores, cinza =
+  oculto), ativar/encerrar cena, criar cena com seletor opcional de
+  World→Mapa da Cartografia ou URL de imagem direta.
+- **Testes:** `tests/integration/vtt.test.ts` (6 casos: CRUD de
+  cena+token com fundo obrigatório validado; só uma cena ativa por vez;
+  IDOR de leitura/escrita + token não pode apontar para entidade de
+  outro dono; mapa de outro dono rejeitado (422) + ID inexistente
+  sempre 404; visão "ao vivo" filtrando corretamente, sem vazar
+  entityId/entityName mesmo do token visível, `item:null` sem cena
+  ativa, 404 para não-membro; exclusão de cena com cascade de tokens) +
+  `tests/e2e/vtt.spec.ts` (1 cenário completo, desktop+mobile).
+- Próximo: F-030 (fog of war), mesmo BATCH16.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

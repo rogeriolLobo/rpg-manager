@@ -716,6 +716,30 @@ label small {
   }
 }
 
+/* F-029 (BATCH16): VTT — token sobre a cena, mesmo princípio de posicionamento normalizado
+   (x/y em %) do .map-pin acima. Verde = visível aos jogadores, cinza = oculto (GM only). */
+.vtt-token {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--success);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+}
+.vtt-token-hidden {
+  background: var(--text-muted);
+  opacity: 0.75;
+}
+
 /* F-004 (GM Tools): rolador de dados + timer, 100% client-side. */
 .gm-tools-grid {
   display: grid;

@@ -441,6 +441,12 @@ export function CampaignDetailPage() {
               Editar
             </Link>
             <Link
+              className="ghost-button link-button"
+              to={`/app/campaigns/${id}/vtt`}
+            >
+              Mesa Virtual
+            </Link>
+            <Link
               className="primary-button link-button"
               to={`/app/campaigns/${id}/sessions/new`}
             >

@@ -254,6 +254,22 @@ export const adventureHandoutInputSchema = z.strictObject({
   sortOrder: z.number().int().min(0).max(9999).default(0),
 });
 
+// F-029 (BATCH16): VTT — fundação (Scene/tokens), ver src/server/routes/vtt.ts.
+export const vttSceneInputSchema = z.strictObject({
+  title: z.string().trim().min(1).max(160),
+  mapId: z.string().trim().max(80).nullable().optional(),
+  imageUrl: trimmed(2000).default(''),
+  notes: trimmed(2000).default(''),
+});
+
+export const vttTokenInputSchema = z.strictObject({
+  label: z.string().trim().min(1).max(160),
+  entityId: z.string().trim().max(80).nullable().optional(),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  visibleToPlayers: z.boolean().default(false),
+});
+
 export const loreDetailsSchema = z.strictObject({
   loreType: z.enum(LORE_TYPES),
   canonStatus: z.enum(LORE_CANON_STATUSES),
@@ -496,6 +512,8 @@ export type AdventureSceneInput = z.infer<typeof adventureSceneInputSchema>;
 export type AdventureEncounterInput = z.infer<typeof adventureEncounterInputSchema>;
 export type AdventureSceneEntityInput = z.infer<typeof adventureSceneEntityInputSchema>;
 export type AdventureHandoutInput = z.infer<typeof adventureHandoutInputSchema>;
+export type VttSceneInput = z.infer<typeof vttSceneInputSchema>;
+export type VttTokenInput = z.infer<typeof vttTokenInputSchema>;
 export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
 export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
