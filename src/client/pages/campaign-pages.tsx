@@ -17,6 +17,7 @@ import {
   PageHeader,
 } from "./dashboard-page";
 import { displayLabel } from "../labels";
+import { InviteFriendPanel } from "./social-pages";
 
 interface Campaign {
   id: string;
@@ -493,6 +494,7 @@ export function CampaignDetailPage() {
           )}
           {data.item.legacyCharactersText && <p className="legacy-note"><strong>Personagens legados:</strong> {data.item.legacyCharactersText}</p>}
         </section>
+        <InviteFriendPanel targetType="CAMPAIGN" targetId={id!}/>
         <section className="panel">
           <h2>Planejamento</h2>
           <dl className="stacked-dl">

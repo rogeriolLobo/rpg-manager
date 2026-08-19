@@ -827,6 +827,67 @@ depender de mais nada (F-019 — notificação de pedido/aceite).
   dependem de F-016 já existir — próxima iteração natural do roadmap,
   não uma omissão.
 
+## F-017/F-018 — Social + Biblioteca/Grupos/Campanhas — `DONE` (RPG-1.0-BATCH8)
+
+Fecha a vertical Social (F-016..F-019) por completo — F-017/F-018
+dependiam de F-016 (`DONE` no BATCH7) e foram implementados no próximo
+ponto tecnicamente apropriado, sem deixar a vertical parcialmente
+concluída.
+
+- **Migration `0028_social_library_invites.sql`** (aditiva): `ALTER
+  TABLE user_preferences ADD COLUMN library_visible_to_friends`
+  (`DEFAULT 0` — desligado por padrão, ninguém vê a Biblioteca de
+  outra conta sem essa ação consciente do dono), `rpg_social_interest`
+  (nova tabela, chave é `rpg_id`), `social_invites` (convite
+  explícito de Grupo/Campanha). `notifications.kind` (fechado desde o
+  BATCH7) foi ampliado via o procedimento de
+  `docs/architecture/DATABASE_MIGRATION_SAFETY.md` — seguro aqui
+  porque nada referencia `notifications.id` via FK e a tabela estava
+  vazia em produção, mas seguido por disciplina/precedente.
+- **F-017 — decisão de segurança central:** campos privados (notas,
+  prioridade, grupo, mestre, data planejada) NUNCA entram no SELECT
+  que alimenta a Biblioteca de amigos — não é uma filtragem que possa
+  vazar por engano, o dado nunca sai do servidor para esses campos. O
+  campo pessoal `wants_to_play` também nunca é exposto — o sinal
+  social é `rpg_social_interest`, deliberadamente uma tabela/conceito
+  separado (o pedido de roadmap exigia essa distinção explicitamente).
+  RPGs arquivados nunca aparecem na visão do amigo.
+- **F-018 — decisão de segurança central:** convite nunca cria membro
+  diretamente — só a ação explícita de aceitar (pelo convidado) cria a
+  linha em `play_group_members`/`campaign_members`, reaproveitando as
+  MESMAS tabelas e a MESMA coluna `user_id` que o fluxo antigo de
+  "adicionar conta cadastrada" já usava (nenhum sistema de membership
+  paralelo). Só o dono do Grupo/Campanha pode convidar, só quem já é
+  amigo do dono pode ser convidado. Papel GM continua exclusivo (mesma
+  invariante do fluxo antigo, reaplicada no aceite do convite).
+  Remoção de membro (funcionalidade já existente, não alterada) segue
+  preservando histórico — `campaign_session_attendance` é append-only
+  e não referencia `campaign_members` de forma que a remoção apague
+  sessões passadas.
+- **UI:** `/app/friends` ganhou link "Ver biblioteca" por amigo, nova
+  página `/app/friends/:userId/library`, seção "Convites de Grupo/
+  Campanha" (recebidos/enviados); Configurações ganhou o toggle
+  "Compartilhar minha Biblioteca com amigos"; RPG detail ganhou
+  "Marcar interesse social" (separado do checkbox "Quero jogar" do
+  formulário de edição); GroupDetailPage/CampaignDetailPage ganharam o
+  painel reutilizável "Convidar amigo" (`InviteFriendPanel`).
+- **Bugs reais de TESTE (não de produto) corrigidos durante a
+  escrita:** asserção `toBe(true)` contra um campo `EXISTS(...)` do
+  SQLite (retorna `1`/`0`, não `true`/`false` — mesma convenção já
+  usada em `hasPlayed`/`wantsToPlay` no resto do produto, corrigido
+  para `toBeTruthy()`/`toBeFalsy()`); teste E2E clicando num link para
+  a MESMA rota em que já estava (no-op de navegação do React Router —
+  corrigido com reload explícito); locator ambíguo casando com uma
+  `<option>` invisível de um dropdown e com um heading que continha o
+  mesmo texto como substring (corrigido com locator mais específico e
+  `exact:true`).
+- **Testes:** `tests/integration/social-library-invites.test.ts` (5
+  casos) + `tests/e2e/social-library-invites.spec.ts` (2 cenários,
+  desktop+mobile).
+- **Vertical Social (F-016..F-019) agora completa.** Próximo item da
+  ordem de execução do roadmap: BATCH9 — Character Sheet Engine base
+  (F-020).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

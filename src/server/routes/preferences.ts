@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { activeWorldPreferenceSchema, themePreferenceSchema } from '../../shared/validation/schemas';
+import { activeWorldPreferenceSchema, libraryVisibilityPreferenceSchema, themePreferenceSchema } from '../../shared/validation/schemas';
 import { authorizedWorld } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
@@ -41,4 +41,19 @@ preferenceRoutes.patch('/active-world', async (c) => {
     ON CONFLICT(user_id) DO UPDATE SET active_world_id=excluded.active_world_id,updated_at=excluded.updated_at`)
     .bind(userId, input.activeWorldId, nowIso()).run();
   return c.json({ activeWorldId: input.activeWorldId });
+});
+
+// F-017 (BATCH8): opt-in explícito de visibilidade da Biblioteca para amigos —
+// desligado por padrão (ver migration 0028).
+preferenceRoutes.get('/library-visibility', async (c) => {
+  const preference = await c.env.DB.prepare('SELECT library_visible_to_friends visible FROM user_preferences WHERE user_id=?')
+    .bind(c.get('user').id).first<{ visible: number | null }>();
+  return c.json({ libraryVisibleToFriends: Boolean(preference?.visible) });
+});
+preferenceRoutes.patch('/library-visibility', async (c) => {
+  const input = await readJson(c, libraryVisibilityPreferenceSchema); const userId = c.get('user').id;
+  await c.env.DB.prepare(`INSERT INTO user_preferences (user_id,library_visible_to_friends,updated_at) VALUES (?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET library_visible_to_friends=excluded.library_visible_to_friends,updated_at=excluded.updated_at`)
+    .bind(userId, Number(input.libraryVisibleToFriends), nowIso()).run();
+  return c.json({ libraryVisibleToFriends: input.libraryVisibleToFriends });
 });

@@ -281,9 +281,13 @@ rpgRoutes.post('/', async (c) => {
 rpgRoutes.get('/:id', async (c) => {
   const row = await c.env.DB.prepare(`${SELECT} WHERE r.id=? AND r.user_id=?`).bind(c.req.param('id'), c.get('user').id).first<RpgRow>();
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'RPG não encontrado.');
-  const campaigns = await c.env.DB.prepare('SELECT id,name,status,next_session_date nextSessionDate FROM campaigns WHERE rpg_id=? AND user_id=? ORDER BY created_at DESC')
-    .bind(row.id, c.get('user').id).all();
-  return c.json({ item: present(row), campaigns: campaigns.results });
+  // F-017 (BATCH8): consulta separada, deliberadamente fora do SELECT/present() compartilhado
+  // por list/archive/restore — só a tela de detalhe precisa desse dado.
+  const [campaigns, interest] = await c.env.DB.batch([
+    c.env.DB.prepare('SELECT id,name,status,next_session_date nextSessionDate FROM campaigns WHERE rpg_id=? AND user_id=? ORDER BY created_at DESC').bind(row.id, c.get('user').id),
+    c.env.DB.prepare('SELECT 1 FROM rpg_social_interest WHERE rpg_id=?').bind(row.id),
+  ]);
+  return c.json({ item: { ...present(row), socialInterest: interest.results.length > 0 }, campaigns: campaigns.results });
 });
 
 rpgRoutes.patch('/:id', async (c) => {

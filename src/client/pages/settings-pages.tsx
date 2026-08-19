@@ -1,4 +1,4 @@
-import { Download, FileJson, FileSpreadsheet, Info, Monitor, Moon, Palette, Sun, Trash2 } from "lucide-react";
+import { Download, FileJson, FileSpreadsheet, Info, Monitor, Moon, Palette, Sun, Trash2, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, deleteApi, patchJson, postJson } from "../api/client";
@@ -20,6 +20,7 @@ export function SettingsPage() {
         description="Escolha como a biblioteca aparece, importe sua planilha ou leve uma cópia dos seus dados."
       />
       <AppearanceSettings />
+      <PrivacySocialSettings />
       <div className="settings-grid">
         <section className="panel setting-card">
           <FileSpreadsheet />
@@ -126,6 +127,50 @@ function AppearanceSettings() {
     </fieldset>
     {error&&<p className="form-error" role="alert">{error}</p>}
   </section>;
+}
+// F-017 (BATCH8): opt-in explícito — desligado por padrão, ninguém vê a Biblioteca de
+// outra conta sem essa ação consciente do dono. Nunca expõe notas/prioridade/grupo/
+// mestre/data planejada nem o campo pessoal "Quero jogar" — só o que já é seguro
+// mostrar a amigos (ver src/server/routes/social.ts).
+function PrivacySocialSettings() {
+  const [visible, setVisible] = useState<boolean>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api<{ libraryVisibleToFriends: boolean }>("/preferences/library-visibility")
+      .then((result) => { if (active) setVisible(result.libraryVisibleToFriends); })
+      .catch(() => { if (active) setVisible(false); });
+    return () => { active = false; };
+  }, []);
+  const toggle = async (next: boolean) => {
+    setError("");
+    setVisible(next);
+    try {
+      await patchJson("/preferences/library-visibility", { libraryVisibleToFriends: next });
+    } catch (reason) {
+      setVisible(!next);
+      setError(reason instanceof Error ? reason.message : "Não foi possível salvar esta preferência.");
+    }
+  };
+  return (
+    <section className="panel privacy-social-settings" aria-labelledby="privacy-social-heading">
+      <div className="section-heading">
+        <div>
+          <Users />
+          <h2 id="privacy-social-heading">Privacidade social</h2>
+          <p className="section-note">
+            Controla o que seus amigos podem ver. Notas, prioridade, grupo, mestre e
+            data planejada nunca são compartilhados, mesmo com esta opção ligada.
+          </p>
+        </div>
+      </div>
+      <label className="checkbox">
+        <input type="checkbox" checked={Boolean(visible)} disabled={visible === undefined} onChange={(event) => void toggle(event.target.checked)} />
+        Compartilhar minha Biblioteca com amigos
+      </label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+    </section>
+  );
 }
 function ImportForm({kind}:{kind:"catalog"|"campaigns"}) {
   type PreviewItem = {

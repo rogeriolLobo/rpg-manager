@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, BookOpen, Grid2X2, List, Plus, Search } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, Grid2X2, Heart, List, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Link,
@@ -6,7 +6,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { api, ClientApiError, patchJson, postJson } from "../api/client";
+import { api, ClientApiError, deleteApi, patchJson, postJson } from "../api/client";
 import { useResource } from "../api/use-resource";
 import { ResourceFallback } from "../components/resource-state";
 import { MAX_COVER_ASSET_BYTES } from "../../domain/rpg/cover-asset";
@@ -52,6 +52,9 @@ export interface Rpg {
   recommendationScore: number;
   readiness: string;
   nextAction: string;
+  // F-017 (BATCH8): sinal social, separado do campo pessoal `wantsToPlay` — só
+  // presente na resposta de GET /rpgs/:id (detalhe), não na listagem.
+  socialInterest?: boolean;
 }
 // LIB-004/LIB-004A: resultado de busca (catálogo interno, Open Library ou
 // importação por URL) — espelha BookMetadataResult
@@ -1091,7 +1094,7 @@ export function RpgDetailPage() {
     if (!confirm(`Arquivar “${item.title}”? Ele será removido da Biblioteca ativa, mas seus dados serão preservados e poderá ser restaurado depois.${campaignNote}`)) return;
     try {
       const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/archive`, {});
-      resource.mutate((current) => ({ ...current, item: updated }));
+      resource.mutate((current) => ({ ...current, item: { ...updated, socialInterest: current.item.socialInterest } }));
     } catch (reason) {
       alert(reason instanceof Error ? reason.message : "Não foi possível arquivar este RPG.");
     }
@@ -1099,9 +1102,18 @@ export function RpgDetailPage() {
   const restore = async () => {
     try {
       const { item: updated } = await postJson<{ item: Rpg }>(`/rpgs/${item.id}/restore`, {});
-      resource.mutate((current) => ({ ...current, item: updated }));
+      resource.mutate((current) => ({ ...current, item: { ...updated, socialInterest: current.item.socialInterest } }));
     } catch (reason) {
       alert(reason instanceof Error ? reason.message : "Não foi possível restaurar este RPG.");
+    }
+  };
+  const toggleSocialInterest = async () => {
+    try {
+      if (item.socialInterest) await deleteApi(`/social/interest/${item.id}`);
+      else await postJson(`/social/interest/${item.id}`, {});
+      resource.mutate((current) => ({ ...current, item: { ...current.item, socialInterest: !current.item.socialInterest } }));
+    } catch (reason) {
+      alert(reason instanceof Error ? reason.message : "Não foi possível atualizar o interesse social.");
     }
   };
   return (
@@ -1195,6 +1207,17 @@ export function RpgDetailPage() {
           ) : (
             <p>Nenhuma campanha ligada a este RPG.</p>
           )}
+          {/* F-017 (BATCH8): sinal social, separado do checkbox pessoal "Quero jogar" do
+              formulário de edição — visível a amigos só se a Biblioteca estiver compartilhada
+              (Configurações → Privacidade social). */}
+          <button
+            type="button"
+            className={item.socialInterest ? "secondary-button" : "ghost-button"}
+            onClick={() => void toggleSocialInterest()}
+          >
+            <Heart size={17} fill={item.socialInterest ? "currentColor" : "none"} />
+            {item.socialInterest ? "Interesse social marcado" : "Marcar interesse social"}
+          </button>
           {item.archivedAt ? (
             <button className="primary-button" onClick={() => void restore()}>
               <ArchiveRestore size={17} />

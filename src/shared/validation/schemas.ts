@@ -190,6 +190,11 @@ export const activeWorldPreferenceSchema = z.strictObject({
   activeWorldId: z.string().trim().max(80).nullable(),
 });
 
+// F-017 (BATCH8): opt-in explícito — ninguém vê a Biblioteca de outra conta por padrão.
+export const libraryVisibilityPreferenceSchema = z.strictObject({
+  libraryVisibleToFriends: z.boolean(),
+});
+
 export const worldInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(160),
   description: trimmed(10000).default(''),
@@ -330,6 +335,15 @@ export const worldInviteInputSchema = z.strictObject({
 // nunca e-mail (evita reaproveitar o body para vazar/confirmar e-mail cadastrado).
 export const friendTargetInputSchema = z.strictObject({
   targetUserId: z.string().trim().min(1).max(80),
+});
+
+// F-018 (BATCH8): convite de Grupo/Campanha para um amigo — distinto do fluxo já
+// existente de adicionar qualquer conta diretamente (playGroupMemberCreateSchema).
+export const socialInviteInputSchema = z.strictObject({
+  inviteeUserId: z.string().trim().min(1).max(80),
+  targetType: z.enum(['GROUP', 'CAMPAIGN']),
+  targetId: z.string().trim().min(1).max(80),
+  role: z.enum(['PLAYER', 'GM']).default('PLAYER'),
 });
 
 export const entityRelationInputSchema = z.strictObject({
