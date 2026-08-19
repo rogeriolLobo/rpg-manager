@@ -43,5 +43,8 @@ test("Dashboard → Nova ideia → salva no Diário do World escolhido, sem dupl
 
   await page.getByRole("link", { name: "Ver no Diário" }).click();
   await expect(page).toHaveURL(/\/journal$/u);
-  await expect(page.getByText("Uma masmorra flutuante")).toBeVisible();
+  // getByText sozinho é ambíguo aqui de propósito: o título da página aberta aparece duas vezes
+  // (o item ativo na lista lateral E o heading do editor, layout mestre-detalhe padrão do Diário)
+  // — só o heading é role="heading", então é o locator preciso para "a página certa abriu".
+  await expect(page.getByRole("heading", { name: "Uma masmorra flutuante", exact: true })).toBeVisible();
 });

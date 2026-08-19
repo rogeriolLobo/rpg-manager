@@ -96,7 +96,9 @@ test("RPG Manager 1.0 — smoke de release: Ideas, External Resources, Global Se
   await expect(page.getByText("Ideia salva no Diário.")).toBeVisible();
   await page.getByRole("link", { name: "Ver no Diário" }).click();
   await expect(page).toHaveURL(/\/journal$/u);
-  await expect(page.getByText(`${PREFIX} Idea`)).toBeVisible();
+  // getByText sozinho é ambíguo aqui de propósito: o título da página aberta aparece na lista
+  // lateral (item ativo) E no heading do editor — só o heading é role="heading".
+  await expect(page.getByRole("heading", { name: `${PREFIX} Idea`, exact: true })).toBeVisible();
 
   // ── B. External Resources (URL HTTPS estável de fixture, sem fetch server-side) ──
   await page.goto(`/app/worlds/${worldId}/resources`);
