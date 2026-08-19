@@ -1231,6 +1231,16 @@ conteúdo protegido, só marca a origem declarada pelo usuário.
   chamada funciona; fork preserva proveniência sem herdar trava) +
   `tests/e2e/vault-provenance.spec.ts` (1 cenário, desktop+mobile).
 - Próximo: F-027 (Compendium), mesmo BATCH14.
+- **Achado de hardening para BATCH19:** `tests/e2e/vault-worlds-flow.spec.ts`
+  ("getByLabel('Nome')... element was detached from the DOM") voltou a
+  flakar no CI (2ª vez nesta sessão, ambas só quando roda no fim de uma
+  fila longa e sequencial de ~76 testes, workers:1) — sempre passa
+  isolado localmente (confirmado as duas vezes). Consistente com
+  degradação de recursos acumulada ao longo de uma fila sequencial
+  longa, não com uma regressão real de código. `gh run rerun --failed`
+  resolveu as duas vezes. Anotado para revisão no hardening final —
+  candidato a dividir a suíte E2E em mais de um job paralelo ou
+  adicionar uma guarda explícita de estabilidade nesse teste específico.
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
