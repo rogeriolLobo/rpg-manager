@@ -109,3 +109,45 @@ interrompe o desenvolvimento (ver `CLAUDE.md`, autonomia, e seção 15 do
 pedido que originou este documento). O smoke read-only de produção e a
 suíte de integração/unit continuam sendo verificados localmente com
 confiança total (não dependem de navegador).
+
+## Addendum — RPG-1.0-BATCH5 (F-001): dois bugs reais achados pelo CI, mais uma evidência de degradação transitória de infra
+
+Depois do push inicial do F-001, o CI (referência autoritativa) pegou
+dois problemas reais que a suíte local, já classificada como
+`ENVIRONMENT_LIMITATION`, não conseguiu diferenciar de ruído — cada um
+investigado até causa raiz, nenhum classificado como flake sem evidência
+(seção 11/13 do `CLAUDE.md`):
+
+1. **`PRODUCT_BUG` real, pré-existente (não introduzido pelo F-001):**
+   `VaultFormPage` e `WorldFormPage` renderizavam o formulário de edição
+   imediatamente com valores em branco, e um `useEffect` assíncrono
+   sobrescrevia o estado quando o GET do recurso respondia — se o
+   usuário digitasse antes da resposta chegar, a digitação era apagada
+   silenciosamente. `RpgFormFields` (`library-pages.tsx`) já tinha o gate
+   correto (`loading` + fallback); Vault e World não. O novo E2E de
+   edição+histórico (rápido e determinístico o bastante) foi o primeiro a
+   expor isso de forma confiável. Corrigido com o mesmo padrão de gate.
+2. **`TEST_BUG` real, na minha própria suíte nova:** `restore()` do
+   `RevisionHistoryModal` chama um `confirm()` nativo (mesmo padrão já
+   usado em outros pontos do app) — `revision-history.spec.ts` não
+   registrava `page.once('dialog', ...)` antes do clique em
+   "Restaurar", então o Playwright descartava o dialog por padrão, o
+   restore nunca rodava de verdade, e uma assert seguinte passava por
+   falso positivo (casava com o `<h3>` de um preview deixado aberto, já
+   que `getByRole('heading', ...)` sem `level` casa qualquer h1–h6).
+   Corrigido registrando o handler antes do clique, no mesmo padrão já
+   usado corretamente em `release-1.0-smoke.spec.ts` para o pin de
+   Cartografia.
+3. **Evidência de degradação transitória da infra do CI** (não do
+   produto, não do código deste batch): uma rodada intermediária do CI,
+   já com os dois fixes acima aplicados, falhou de novo — mas desta vez
+   `vault-worlds-flow.spec.ts` (não tocado por nenhum commit deste
+   batch, 100% estável em toda a sessão) travou por 90s inteiros num
+   `.fill()` trivial, nas duas tentativas, nos dois projects. Isso não é
+   compatível com um bug determinístico de código — é o sintoma
+   clássico de um runner do GitHub Actions degradado naquele momento.
+   Em vez de reescrever testes ou aumentar timeout às cegas para
+   acomodar isso, a suíte foi re-executada (`gh run rerun --failed`) —
+   passou 100% limpa na rodada seguinte, confirmando a hipótese sem
+   mascarar um bug real (se tivesse falhado de novo com o mesmo sintoma
+   determinístico, a investigação continuaria).
