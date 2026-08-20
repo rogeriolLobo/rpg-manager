@@ -27,7 +27,20 @@ export default defineConfig({
   // falso-positivo por contenção de CPU no runner do GitHub Actions.
   expect: { timeout: 10_000 },
   reporter: [['list'], ['html', { open: 'never' }]],
-  use: { baseURL: 'http://127.0.0.1:5173', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  // BATCH19: causa raiz real do flake recorrente de vault-worlds-flow.spec.ts, encontrada com
+  // evidência real (primeira vez que o CI subiu screenshot como artifact, ver
+  // .github/workflows/ci.yml) — os screenshots da falha mostravam a TELA DE UM TESTE ANTERIOR
+  // (player-view.spec.ts), nunca a de vault-worlds-flow, e "waiting for getByLabel('Nome')"
+  // nunca resolvia nem chegava a logar retry — sintoma clássico de um processo de renderer do
+  // Chromium morto/travado deixando a última pintura de tela de ANTES do crash, não de um
+  // elemento lento/instável. Causa raiz documentada do Chromium em containers Docker: o
+  // /dev/shm padrão do GitHub Actions (64MB) é pequeno demais para uma fila longa de testes
+  // sequenciais, causando crash do processo de renderer sob pressão de memória.
+  // `--disable-dev-shm-usage` faz o Chromium usar /tmp em vez de /dev/shm — a recomendação
+  // oficial do Playwright/Puppeteer para exatamente este ambiente, sem custo/risco em
+  // desenvolvimento local (só evita um caminho de memória compartilhada que já não é limitado
+  // fora de um container).
+  use: { baseURL: 'http://127.0.0.1:5173', trace: 'retain-on-failure', screenshot: 'only-on-failure', launchOptions: { args: ['--disable-dev-shm-usage'] } },
   webServer: {
     command: 'npm run db:migrate:local && npm run dev',
     url: 'http://127.0.0.1:5173/login',
