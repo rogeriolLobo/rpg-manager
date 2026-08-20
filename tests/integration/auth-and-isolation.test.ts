@@ -379,6 +379,21 @@ describe("API real com D1", () => {
     const exactEmailSearch = await request('/directory/users?q=narrator-public@example.com','GET',undefined,owner.cookie);
     expect(((await exactEmailSearch.json()) as {items:unknown[]}).items).toEqual([{id:narrator.user.id,displayName:'narrator-public'}]);
   });
+  it("busca por e-mail/nome longos (até 254 caracteres aceitos no input) nunca quebra com erro cru de SQL (achado real: D1 rejeita LIKE acima de um limite bem menor que 254)", async () => {
+    const owner = await register("directory-longsearch-owner@example.com");
+    // 60+ caracteres — plausível para uma conta real (nome composto/e-mail corporativo longo),
+    // e o suficiente para ter estourado "LIKE or GLOB pattern too complex" antes do fix (achado
+    // real via E2E: tests/e2e/social-library-invites.spec.ts).
+    const longEmail = `directory-longsearch-friend-${'x'.repeat(40)}@example.com`;
+    const friend = await register(longEmail);
+    const byExactLongEmail = await request(`/directory/users?q=${encodeURIComponent(longEmail)}`,'GET',undefined,owner.cookie);
+    expect(byExactLongEmail.status).toBe(200);
+    expect(((await byExactLongEmail.json()) as {items:Array<{id:string}>}).items).toEqual([{id:friend.user.id,displayName:expect.any(String)}]);
+    // Nome parcial longo (LIKE truncado internamente) — nunca 500, sempre uma resposta válida
+    // (pode não achar nada, o que é aceitável: o que não pode acontecer é o servidor quebrar).
+    const byLongPartialName = await request(`/directory/users?q=${encodeURIComponent(longEmail.slice(0,80))}`,'GET',undefined,owner.cookie);
+    expect(byLongPartialName.status).toBe(200);
+  });
   it("vincula contas ao grupo, mantém um narrador e aplica o narrador à campanha", async () => {
     const owner = await register("linked-owner@example.com");
     const firstNarrator = await register("first-narrator@example.com");

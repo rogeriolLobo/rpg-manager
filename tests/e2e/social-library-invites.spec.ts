@@ -119,3 +119,76 @@ test("Convite de amigo para Grupo: só amigo aparece na lista, precisa aceitar p
 
   await friendContext.close();
 });
+
+// Seção 11 do pedido de finalização: fecha a jornada social completa que ainda faltava por
+// cima das duas acima (biblioteca compartilhada, convite de Grupo) — convite de CAMPAIGN (não
+// Grupo) até aparecer em Minhas Mesas, e a prova de que bloquear impede um NOVO convite (não só
+// um novo pedido de amizade, já coberto em social-friends.spec.ts).
+test("Convite de amigo para Campaign: aparece em Minhas Mesas; bloquear remove a amizade e impede novo convite", async ({ page, browser }) => {
+  test.setTimeout(60_000);
+  const suffix = Date.now();
+  const ownerEmail = `e2e-campaign-invite-owner-${suffix}@example.com`;
+  const friendEmail = `e2e-campaign-invite-friend-${suffix}@example.com`;
+  await register(page, ownerEmail, `Dono Campanha ${suffix}`);
+
+  const friendContext = await browser.newContext();
+  const friendPage = await friendContext.newPage();
+  await register(friendPage, friendEmail, `Amigo Campanha ${suffix}`);
+
+  await openNav(page);
+  await page.getByRole("link", { name: "Amigos" }).click();
+  await page.getByLabel(/Buscar pessoas/u).fill(friendEmail);
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await page.getByRole("listitem").filter({ hasText: `Amigo Campanha ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
+  await openNav(friendPage);
+  await friendPage.getByRole("link", { name: "Amigos" }).click();
+  await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+
+  await page.goto("/app/library/new");
+  await page.getByLabel("Título", { exact: true }).fill(`RPG Convite Campanha ${suffix}`);
+  await page.getByLabel("Categoria").selectOption("fantasia");
+  await page.getByLabel("Subgênero").selectOption("alta-fantasia");
+  await page.getByRole("button", { name: "Salvar RPG" }).click();
+  await expect(page.getByRole("heading", { name: `RPG Convite Campanha ${suffix}` })).toBeVisible();
+  await page.getByRole("link", { name: "Criar campanha" }).click();
+  // Espera a lista de RPGs assentar antes de confirmar a pré-seleção via query param (?rpgId=) —
+  // mesmo cuidado de vault-worlds-flow.spec.ts com corridas de fetch assíncrono.
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await page.getByLabel("Nome da campanha").fill(`Mesa Convite Campanha ${suffix}`);
+  await page.getByRole("button", { name: "Salvar campanha" }).click();
+  await expect(page.getByRole("heading", { name: `Mesa Convite Campanha ${suffix}` })).toBeVisible({ timeout: 15_000 });
+
+  // Convite de Campaign (role padrão "Jogador") pelo mesmo painel "Convidar amigo" já usado
+  // para Grupo — targetType diferente, mesmo componente (InviteFriendPanel).
+  await page.getByRole("heading", { name: "Convidar amigo" }).waitFor();
+  await page.getByLabel("Amigo").selectOption({ label: `Amigo Campanha ${suffix}` });
+  await page.getByRole("button", { name: "Convidar" }).click();
+  await expect(page.getByText("Convite enviado.")).toBeVisible();
+
+  await friendPage.reload();
+  await expect(friendPage.getByRole("heading", { name: /Convites de Grupo\/Campanha/u })).toBeVisible();
+  await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+
+  // Aparece em Minhas Mesas — o jogador descobre a campanha sem link do mestre.
+  await openNav(friendPage);
+  await friendPage.getByRole("link", { name: "Minhas Mesas" }).click();
+  await expect(friendPage.getByRole("heading", { name: `Mesa Convite Campanha ${suffix}` })).toBeVisible();
+
+  // Bloquear: amizade some, e o amigo bloqueado nem aparece mais no seletor de "Convidar amigo"
+  // (InviteFriendPanel só lista /social/friends) — novo convite fica estruturalmente impedido,
+  // não só rejeitado depois pelo servidor.
+  await openNav(page);
+  await page.getByRole("link", { name: "Amigos" }).click();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("listitem").filter({ hasText: `Amigo Campanha ${suffix}` }).getByRole("button", { name: "Bloquear" }).click();
+  await expect(page.getByRole("heading", { name: /Amigos \(0\)/u })).toBeVisible();
+
+  await page.goto(`/app/campaigns`);
+  await page.getByRole("heading", { name: `Mesa Convite Campanha ${suffix}`, level: 2 }).click();
+  // Sem amigos, o painel inteiro de convite não renderiza (ver InviteFriendPanel: retorna null
+  // quando a lista de amigos está vazia) — a única forma de "impedir" que é genuinamente
+  // impossível de contornar pela UI, mais forte que só um botão desabilitado.
+  await expect(page.getByRole("heading", { name: "Convidar amigo" })).toHaveCount(0);
+
+  await friendContext.close();
+});
