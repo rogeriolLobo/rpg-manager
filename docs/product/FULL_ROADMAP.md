@@ -24,13 +24,13 @@ IDs seguem a sequência já usada em `MASTER_BACKLOG.md` (F-001..F-015).
 | F-004 | GM Tools (dados, timer) | `DONE` (BATCH3) |
 | F-005 | Ideas / Quick Capture | `DONE` (BATCH2) |
 | F-006 a F-014 | (busca, invites, quests/handouts via Vault, compendium via Vault, split de domínio Library, capa+KV, Open Library, dedup ISBN, archive) | `DONE` |
-| F-015 | Backup/Restore JSON completo | `DONE` (BATCH6) — export v8 completo; restore v1 cobre Worlds/Creature Stat Templates/Vault/Journal, resto exportado sem restore automatizado ainda |
+| F-015 | Backup/Restore JSON completo | `DONE` (BATCH6, revalidado BATCH19) — export v9 completo (cobre todos os domínios criados até agora: Social, Sheets, world_entity_links, Adventures, Files metadata, VTT); restore v1 cobre Worlds/Creature Stat Templates/Vault/Journal/world_entity_links, resto exportado sem restore automatizado ainda |
 
 ## Roadmap planejado ainda não iniciado
 
 | ID | FEATURE | STATUS_ATUAL | PLANEJADA? | DEPENDÊNCIAS | RISCO | MIGRATION? | BACKEND | FRONTEND | TESTES | STATUS |
 |---|---|---|---|---|---|---|---|---|---|---|
-| F-015 | Backup/Restore completo, versionado (`schemaVersion`) | Export v8 cobre 100% dos domínios; restore v1 cobre Worlds/Creature Stat Templates/Vault (+especializados)/Journal — Groups/Campaigns/Library/Wiki/Relations/Cartografia/External Resources/Revision History exportados, restore automatizado pendente | Sim — `CLAUDE.md` §22 do pedido original de finalização | Nenhuma (todos os domínios já existem) | Médio — mitigado: restore sempre cria registros novos, nunca sobrescreve | Não (`backup_restore_jobs`, migration 0026, aditiva) | `DONE` | `DONE` | `DONE` | `DONE` (v1 — restore do restante é item futuro, não bloqueante) |
+| F-015 | Backup/Restore completo, versionado (`schemaVersion`) | Revalidado (BATCH19): export v9 cobre 100% dos domínios, incluindo todos os criados desde o BATCH6 original (Social, Sheets, world_entity_links, Adventures estruturadas, Files/Handouts metadata, VTT); restore v1 cobre Worlds/Creature Stat Templates/Vault (+especializados)/Journal/world_entity_links (extensão BATCH19) — Groups/Campaigns/Library/Wiki/Relations/Cartografia/External Resources/Revision History/Social/Sheets/Adventures/Files/VTT exportados, restore automatizado pendente (limitação documentada, não bloqueante) | Sim — `CLAUDE.md` §22 do pedido original de finalização | Nenhuma (todos os domínios já existem) | Médio — mitigado: restore sempre cria registros novos, nunca sobrescreve | Não (`backup_restore_jobs`, migration 0026, aditiva) | `DONE` | `DONE` | `DONE` | `DONE` (v1 — restore do restante é item futuro, não bloqueante; BATCH19 fechou a lacuna real de export incompleto) |
 | F-016 | Social — amizades (busca, pedido, aceitar, recusar, cancelar, remover, bloquear) | Implementado: `friend_requests`+`friendships`+`user_blocks` (migration 0027), busca reaproveita `GET /directory/users` existente (nunca expõe e-mail), pedido cruzado auto-aceita, bloquear remove amizade/pedido nos dois sentidos e impede novo pedido | Sim — `CLAUDE.md` §32 | F-015 (backup deve cobrir dados sociais desde o início — ver nota BATCH7 abaixo) | Alto — superfície de IDOR/privacidade nova, mitigada com testes dedicados | Sim — `friend_requests`,`friendships`,`user_blocks` (0027, aditiva) | `DONE` | `DONE` | `DONE` (6 integration + 2 E2E desktop/mobile) | `DONE` (BATCH7) |
 | F-017 | Social + Biblioteca (visão parcial da Library de amigos, RPGs em comum, interesse social ≠ campo pessoal "Quero jogar") | Implementado: opt-in explícito (`user_preferences.library_visible_to_friends`, desligado por padrão), `rpg_social_interest` separado de `wants_to_play` (nunca exposto), `GET /social/friends/:userId/library` nunca retorna notes/priority/playGroupNotes/playGroupId/gameMaster/plannedPlayDate | Sim — `CLAUDE.md` §32 | F-016 (`DONE`) | Alto — mitigado: opt-in por padrão desligado, campos privados nunca no SELECT, testado explicitamente (achado real corrigido durante a rodada: 0/1 do SQLite vs `boolean` no teste, não é bug de produto) | Sim — `user_preferences.library_visible_to_friends`,`rpg_social_interest` (migration 0028, aditiva) | `DONE` | `DONE` | `DONE` (3 integration + parte do E2E) | `DONE` (BATCH8) |
 | F-018 | Social + Grupos/Campanhas (convidar amigo, propostas de mesa, guests) | Implementado: `social_invites` (convite explícito, distinto do fluxo já existente de adicionar qualquer conta cadastrada direto), só amigo pode ser convidado, só dono do Grupo/Campanha convida, aceitar cria `play_group_members`/`campaign_members` vinculado (`user_id`) — remoção de membro (já existente) continua preservando histórico (sessions/attendance append-only, não alterado) | Sim — `CLAUDE.md` §32 | F-016 (`DONE`) | Médio — mitigado: convite nunca cria membro direto, só após aceite; papel GM continua exclusivo (mesma invariante do fluxo antigo) | Sim — `social_invites` (migration 0028, aditiva) | `DONE` | `DONE` | `DONE` (3 integration + parte do E2E) | `DONE` (BATCH8) |
@@ -80,9 +80,28 @@ WebSocket, polling preservado como fallback, `DONE` de verdade — ver
 F-034 (`DONE` — F-033: "Minhas Mesas", "Meu Personagem", Handouts
 revelados, entrada na Mesa Virtual, notificações contextuais adiadas
 para BATCH19; F-034: "Preparação da Adventure" + anexos F-028
-embutidos direto na tela do VTT) → daqui em diante, planejado: BATCH19
-hardening final + F-015 revalidado cobrindo todos os domínios novos
-(Social, Sheets, Vault avançado, Adventures, Files, VTT).
+embutidos direto na tela do VTT) → BATCH19 hardening final + F-015
+revalidado (`DONE` — CI sobe trace/screenshot como artifact em falha
+para investigação real de flake; export v9 cobre 100% dos domínios
+criados desde o BATCH6 original — Social, Sheets, world_entity_links,
+Adventures estruturadas, Files/Handouts metadata, VTT; restore v1
+estendido para cobrir world_entity_links, mesma fronteira documentada
+do escopo v1 preservada para o restante — ver
+`docs/library/LIBRARY_IMPORT_EXPORT.md`).
+
+`RPG MANAGER — PLANNED_ROADMAP_COMPLETE` alcançado: todo item de F-022
+a F-034 está `DONE`, F-015 foi revalidado cobrindo os domínios novos, e
+CI/deploy/produção convergem — ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md`
+para o relatório final. Achado residual não bloqueante, documentado
+para uma sessão futura com evidência real (agora capturável via CI
+artifact): `tests/e2e/vault-worlds-flow.spec.ts` segue com flake
+intermitente sob carga de CI (`getByLabel('Nome')` não resolve por até
+270s) — resolvido por `gh run rerun --failed` em toda ocorrência desta
+sessão, nunca bloqueou um release; um fix definitivo provavelmente
+exige trocar o webServer de E2E de `vite dev` (StrictMode + compile
+sob demanda) para build de produção servido, mudança de infraestrutura
+maior demais para investigar às cegas sem a evidência visual que o
+artifact upload agora permite coletar na próxima ocorrência.
 
 ## Critério de conclusão
 

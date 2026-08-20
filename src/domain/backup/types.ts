@@ -3,19 +3,26 @@
 //
 // SUPPORTED_SCHEMA_VERSION: a v1 do restore exige exatamente esta versão do
 // export (ver GET /api/v1/export em transfer.ts). Um backup de uma versão
-// anterior (ex.: v7, sem os domínios novos) precisa ser reexportado antes de
-// poder ser restaurado — não há shim de compatibilidade retroativa nesta v1
+// anterior (ex.: v8, sem os domínios do BATCH19) precisa ser reexportado antes
+// de poder ser restaurado — não há shim de compatibilidade retroativa nesta v1
 // (decisão registrada, não omissão: um shim exigiria manter para sempre o
 // mapeamento de todo schema antigo, custo real sem usuário afetado hoje).
-export const SUPPORTED_BACKUP_SCHEMA_VERSION = 8;
+export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
 
 // Escopo de restore automatizado da v1 (ver docs/product/RPG_MANAGER_FINAL_STATUS.md,
 // seção F-015): Worlds, Vault entities (+ todos os campos especializados),
-// Creature Stat Templates (dependência de Creature) e Journal (pastas+páginas).
+// Creature Stat Templates (dependência de Creature), Journal (pastas+páginas),
+// world_entity_links (F-022 — extensão BATCH19: liga dois IDs já restaurados na
+// mesma operação, sem domínio/parsing próprio).
 // Groups/Campaigns/Library, Wiki (organização), Relations, Cartografia,
-// External Resources, Timeline/Calendar e Revision History continuam
-// cobertos pelo EXPORT (nenhum dado é perdido no backup), mas ainda não têm
-// restore automatizado — documentado como limitação conhecida, não escondida.
+// External Resources, Timeline/Calendar, Revision History, Social (F-016/018/019),
+// Sheets (F-020/021), Adventures estruturadas (F-025), Files/Handouts metadata
+// (F-028) e VTT (F-029/030/031/032) continuam cobertos pelo EXPORT (nenhum dado
+// é perdido no backup), mas ainda não têm restore automatizado — documentado
+// como limitação conhecida, não escondida (BATCH19 revalidou a cobertura do
+// export para 100% dos domínios; restore automatizado do restante fica para uma
+// iteração futura se houver demanda real, mesma decisão já tomada para
+// Groups/Campaigns desde o BATCH6 original).
 export interface BackupRestoreWarning { domain: string; oldId: string; message: string }
 
 export interface BackupRestorePreviewSummary {
@@ -24,4 +31,5 @@ export interface BackupRestorePreviewSummary {
   entities: number;
   journalFolders: number;
   journalPages: number;
+  worldEntityLinks: number;
 }

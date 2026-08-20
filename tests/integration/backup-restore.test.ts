@@ -71,7 +71,7 @@ describe('F-015: Backup/Restore completo', () => {
     await request(`/journal/${worldId}/pages`, 'POST', { title: 'Página', content: 'conteúdo', folderId: null }, owner);
 
     const backup = await exportBackup(owner);
-    expect(backup.schemaVersion).toBe(8);
+    expect(backup.schemaVersion).toBe(9);
     expect(backup.data.creatureStatTemplates).toHaveLength(1);
     expect(backup.data.creatureDetails).toHaveLength(1);
     expect(backup.data.creatureStatBlocks).toHaveLength(1);
@@ -204,5 +204,99 @@ describe('F-015: Backup/Restore completo', () => {
     expect(previewBody.summary.worlds).toBe(1); // só o World válido entra no plano
     expect(previewBody.warnings.some((warning) => warning.domain === 'worlds')).toBe(true);
     expect(previewBody.canConfirm).toBe(true); // o resto do restore continua disponível
+  });
+
+  // BATCH19: revalidação do F-015 cobrindo os domínios criados desde a v8 original (Social,
+  // Sheets, world_entity_links, Adventures estruturadas, Files metadata, VTT) — ver
+  // src/domain/backup/types.ts para o raciocínio completo do escopo v9.
+  it('export v9 inclui todos os domínios criados desde a v8 (Social/Sheets/LINK/Adventures/Files/VTT)', async () => {
+    const owner = await register('backup-export-v9');
+    const friend = await register('backup-export-v9-friend');
+
+    // Social (F-016/018/019).
+    await request(`/social/requests`, 'POST', { targetUserId: friend.userId }, owner);
+
+    // Sheets (F-020/021).
+    const worldId = await createWorld(owner, 'Mundo Ficha');
+    const templateResponse = await request('/sheets/templates', 'POST', { name: 'Modelo', description: '', worldId, gameSystemId: null, fields: [{ key: 'forca', label: 'Força', type: 'NUMBER', required: false }], pdfUrl: null, pdfMapping: {} }, owner);
+    expect(templateResponse.status).toBe(201);
+    const templateId = ((await templateResponse.json()) as { id: string }).id;
+    const characterId = await createEntity(owner, { entityType: 'CHARACTER', name: 'Personagem', worldId });
+    await request(`/sheets/entities/${characterId}`, 'PUT', { templateId, values: { forca: 10 } }, owner);
+
+    // world_entity_links (F-022).
+    const otherWorldId = await createWorld(owner, 'Outro Mundo');
+    await request(`/vault/${characterId}/links`, 'POST', { worldId: otherWorldId }, owner);
+
+    // Adventures estruturadas (F-025) + Files/Handouts metadata (F-028).
+    const adventureId = await createEntity(owner, { entityType: 'ADVENTURE', name: 'Aventura', adventure: { adventureType: 'ONE_SHOT', recommendedSessions: null, notes: '', premise: '', hooks: '', keyScenes: '', rewards: '' } });
+    const sceneResponse = await request(`/adventures/${adventureId}/scenes`, 'POST', { act: '', title: 'Cena', summary: '', readAloud: '', gmNotes: '', completed: false, sortOrder: 0 }, owner);
+    expect(sceneResponse.status).toBe(201);
+    const sceneId = ((await sceneResponse.json()) as { id: string }).id;
+    await request(`/adventures/${adventureId}/scenes/${sceneId}/encounters`, 'POST', { name: 'Encontro', difficulty: '', description: '', gmNotes: '', sortOrder: 0 }, owner);
+    await request(`/adventures/${adventureId}/scenes/${sceneId}/entities`, 'POST', { entityId: characterId, role: '' }, owner);
+    await request(`/adventures/${adventureId}/handouts`, 'POST', { title: 'Handout', content: '', sceneId: null, externalResourceId: null, revealed: false, sortOrder: 0 }, owner);
+
+    // Campaign + VTT (F-029/030/032).
+    const rpgResponse = await request('/rpgs', 'POST', { title: 'RPG VTT', categoryId: null, subgenreId: null, readingStatus: 'READING', hasPlayed: false, wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', playGroupId: null, plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '', notes: '', coverUrl: null }, owner);
+    const rpgId = ((await rpgResponse.json()) as { item: { id: string } }).item.id;
+    const campaignResponse = await request('/campaigns', 'POST', { rpgId, name: 'Campanha VTT', status: 'PLANNING', gameMaster: '', playGroupId: null, adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: null, nextSessionDate: null, sessionGoal: null, legacyMembersText: '', legacyCharactersText: '', notes: '' }, owner);
+    const campaignId = ((await campaignResponse.json()) as { item: { id: string } }).item.id;
+    const vttSceneResponse = await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Cena VTT', mapId: null, imageUrl: 'https://example.com/mapa.png', notes: '', fogEnabled: true, gridCols: 5, gridRows: 5 }, owner);
+    expect(vttSceneResponse.status).toBe(201);
+    const vttSceneId = ((await vttSceneResponse.json()) as { id: string }).id;
+    await request(`/vtt/${campaignId}/scenes/${vttSceneId}/tokens`, 'POST', { label: 'Token', entityId: null, x: 10, y: 10, visibleToPlayers: false }, owner);
+    await request(`/vtt/${campaignId}/scenes/${vttSceneId}/fog/reveal`, 'POST', { col: 0, row: 0 }, owner);
+    await request(`/vtt/${campaignId}/scenes/${vttSceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'Combatente', initiative: 10, hpCurrent: null, hpMax: null, notes: '', visibleToPlayers: false }] }, owner);
+
+    const backup = await exportBackup(owner);
+    expect(backup.schemaVersion).toBe(9);
+    expect((backup.data.friendRequests as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.sheetTemplates as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.characterSheets as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.worldEntityLinks as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.adventureScenes as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.adventureEncounters as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.adventureSceneEntities as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.adventureHandouts as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.vttScenes as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.vttTokens as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.vttFogCells as unknown[]).length).toBeGreaterThan(0);
+    expect((backup.data.vttCombatants as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('world_entity_links: round-trip restaura o vínculo com os IDs NOVOS de World e entidade; vínculo sem os dois lados no backup vira aviso, nunca quebra o restore', async () => {
+    const owner = await register('backup-link-roundtrip');
+    const homeWorldId = await createWorld(owner, 'World de Origem');
+    const linkedWorldId = await createWorld(owner, 'World Vinculado');
+    const entityId = await createEntity(owner, { entityType: 'NPC', name: 'NPC Vinculado', worldId: homeWorldId });
+    await request(`/vault/${entityId}/links`, 'POST', { worldId: linkedWorldId }, owner);
+
+    const backup = await exportBackup(owner);
+    expect((backup.data.worldEntityLinks as unknown[])).toHaveLength(1);
+    // Injeta um segundo vínculo cujo World alvo não existe neste backup (simula um World que
+    // não pôde ser restaurado) — precisa virar aviso, nunca travar o restore inteiro.
+    (backup.data.worldEntityLinks as Array<Record<string, unknown>>).push({ world_id: 'world-inexistente', entity_id: entityId, created_at: '2026-01-01T00:00:00.000Z' });
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: { worldEntityLinks: number }; warnings: Array<{ domain: string }>; canConfirm: boolean };
+    expect(previewBody.summary.worldEntityLinks).toBe(1); // só o vínculo válido entra no plano
+    expect(previewBody.warnings.some((warning) => warning.domain === 'worldEntityLinks')).toBe(true);
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: { worldEntityLinks: number } };
+    expect(confirmBody.restored.worldEntityLinks).toBe(1);
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredEntityWorldId = worldItems.find((item) => item.name === 'World de Origem' && item.id !== homeWorldId)!.id;
+    const restoredEntities = await request(`/vault?worldId=${restoredEntityWorldId}&pageSize=50`, 'GET', undefined, owner);
+    const restoredEntityId = ((await restoredEntities.json()) as { items: Array<{ id: string }> }).items[0].id;
+    const restoredLinkedWorldId = worldItems.find((item) => item.name === 'World Vinculado' && item.id !== linkedWorldId)!.id;
+
+    const links = await request(`/vault/${restoredEntityId}/links`, 'GET', undefined, owner);
+    const linkItems = ((await links.json()) as { items: Array<{ worldId: string }> }).items;
+    expect(linkItems).toHaveLength(1);
+    expect(linkItems[0].worldId).toBe(restoredLinkedWorldId); // ID NOVO, nunca o antigo
   });
 });

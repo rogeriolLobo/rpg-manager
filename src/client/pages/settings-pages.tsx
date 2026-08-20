@@ -326,7 +326,7 @@ function BackupRestoreForm() {
       setBusy(false);
     }
   };
-  const summaryLabels: Record<string, string> = { worlds: "Worlds", creatureStatTemplates: "Modelos de ficha", entities: "Entidades do Vault", journalFolders: "Pastas do Diário", journalPages: "Páginas do Diário" };
+  const summaryLabels: Record<string, string> = { worlds: "Worlds", creatureStatTemplates: "Modelos de ficha", entities: "Entidades do Vault", journalFolders: "Pastas do Diário", journalPages: "Páginas do Diário", worldEntityLinks: "Vínculos entre Worlds" };
   return (
     <>
       <form onSubmit={submit}>

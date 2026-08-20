@@ -149,7 +149,7 @@ describe('LIB-002: Game System + Publication + User Library Entry', () => {
     await request('/rpgs', 'POST', { ...rpg, title: 'Outro RPG de B', isbn: '0306406152' }, b.cookie, b.csrf);
     const exported = await request('/export', 'GET', undefined, a.cookie);
     const body = (await exported.json()) as { schemaVersion: number; data: { publications: Array<{ title: string }>; gameSystems: Array<{ name: string }>; publicationExternalIds: unknown[] } };
-    expect(body.schemaVersion).toBe(8);
+    expect(body.schemaVersion).toBe(9);
     expect(body.data.publications).toHaveLength(1);
     expect(body.data.publications[0].title).toBe('Chamado de Cthulhu');
     expect(body.data.gameSystems).toHaveLength(1);

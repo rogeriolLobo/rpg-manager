@@ -26,7 +26,7 @@ corrigido para descrever o formato realmente aceito, em vez de prometer
 um round-trip inexistente. Unificar os dois esquemas é uma decisão de
 produto separada, fora de escopo do LIB-007.
 
-### B) Backup completo (JSON estruturado) — F-015, `schemaVersion: 8`
+### B) Backup completo (JSON estruturado) — F-015, `schemaVersion: 9`
 
 `GET /api/v1/export` (sem `?format=csv`, o padrão). Cobertura **completa**
 de todo dado autoral do usuário: `rpgs`/`publications`/`game_systems`/
@@ -40,12 +40,20 @@ campos especializados — `adventure_details`, `lore_details`,
 `journal_pages`), Wiki (`wiki_folders`, `wiki_entity_metadata`,
 `wiki_entity_tags`, `wiki_entity_aliases`), Relations
 (`entity_relations`), Cartografia (`world_maps`, `map_pins`), External
-Resources, e Revision History (`entity_revisions`, F-001). O campo
-top-level mudou de `version` para `schemaVersion` (v7 → v8) — ver
-`src/domain/backup/types.ts`.
+Resources, Revision History (`entity_revisions`, F-001), e — desde a
+v9/BATCH19 — Social (`friend_requests`, `friendships`, `user_blocks`,
+`social_invites`, `notifications`), Sheets (`sheet_templates`,
+`character_sheets`, F-020/021), LINK cross-World
+(`world_entity_links`, F-022), Adventures estruturadas
+(`adventure_scenes`, `adventure_encounters`, `adventure_scene_entities`,
+`adventure_handouts`, F-025), Files/Handouts metadata (`file_assets` —
+só metadata, os bytes vivem no `ASSETS_KV`, fora do escopo de um
+backup JSON, F-028) e VTT (`vtt_scenes`, `vtt_tokens`, `vtt_fog_cells`,
+`vtt_combatants`, F-029/030/032). O campo top-level mudou de `version`
+para `schemaVersion` (v7 → v8 → v9) — ver `src/domain/backup/types.ts`.
 
-**Restore automatizado (F-015, RPG-1.0-BATCH6):** `POST
-/api/v1/import/backup/preview` (dry-run — valida tudo, remapeia
+**Restore automatizado (F-015, RPG-1.0-BATCH6, estendido no BATCH19):**
+`POST /api/v1/import/backup/preview` (dry-run — valida tudo, remapeia
 referências, nunca grava) + `POST /api/v1/import/backup/confirm`
 (executa o plano já validado). Decisões de arquitetura completas em
 `src/server/routes/backup-restore.ts` e
@@ -57,11 +65,14 @@ MESMOS schemas Zod do create normal, e `owner_user_id`/`user_id` do
 JSON enviado é sempre ignorado — o dono do dado restaurado é sempre
 quem está autenticado. **Escopo v1 do restore automatizado:** Worlds,
 Creature Stat Templates, Vault entities (+ especializados), Journal
-(pastas+páginas). Groups/Campaigns/Library, Wiki (organização),
-Relations, Cartografia, External Resources e Revision History
-continuam cobertos pelo EXPORT (nada é perdido no backup), mas ainda
-não têm restore automatizado — limitação documentada, não escondida,
-próxima iteração natural do F-015.
+(pastas+páginas), e — desde o BATCH19 — `world_entity_links` (liga dois
+IDs já restaurados na mesma operação, sem domínio próprio). Groups/
+Campaigns/Library, Wiki (organização), Relations, Cartografia, External
+Resources, Revision History, Social, Sheets, Adventures estruturadas,
+Files/Handouts metadata e VTT continuam cobertos pelo EXPORT (nada é
+perdido no backup), mas ainda não têm restore automatizado — limitação
+documentada, não escondida, próxima iteração natural do F-015 se houver
+demanda real.
 
 ## Semântica do preview de import de catálogo
 

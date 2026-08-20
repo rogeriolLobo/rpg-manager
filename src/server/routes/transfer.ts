@@ -274,16 +274,22 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
   // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
   // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).
   const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
-  // F-015: v8 — cobertura completa de todo dado autoral do usuário (achado real da
+  // F-015: v9 — cobertura completa de todo dado autoral do usuário (achado real da
   // auditoria de integridade do BATCH5: v7 só tinha a linha-base de Worlds/Vault, sem
   // campos especializados/Journal/Wiki/Relations/Cartografia/External Resources/
-  // Timeline/Revisions). Cada tabela nova é escopada por JOIN até chegar em
-  // `owner_user_id`/`user_id` do usuário autenticado — nunca um filtro que dependa de
-  // dado vindo do cliente. Ver docs/library/LIBRARY_IMPORT_EXPORT.md ("Cobertura do
-  // backup completo") e docs/product/RPG_MANAGER_FINAL_STATUS.md (seção F-015).
+  // Timeline/Revisions; v9/BATCH19 fecha a mesma lacuna para os domínios criados desde
+  // então: Social, Sheets, world_entity_links, Adventures estruturadas, Files/Handouts
+  // (só metadata — bytes vivem no KV, fora do escopo de um backup JSON, mesmo princípio
+  // já aplicado a coverUrl/mídia externa) e VTT). Cada tabela nova é escopada por JOIN até
+  // chegar em `owner_user_id`/`user_id` do usuário autenticado — nunca um filtro que
+  // dependa de dado vindo do cliente. Ver docs/library/LIBRARY_IMPORT_EXPORT.md
+  // ("Cobertura do backup completo") e docs/product/RPG_MANAGER_FINAL_STATUS.md (F-015).
   const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems,publicationExternalIds,
     publicationAliases,loreDetails,characterDetails,npcDetails,creatureDetails,creatureStatBlocks,creatureStatTemplates,factionDetails,itemDetails,eventTemporalDetails,
     journalFolders,journalPages,wikiFolders,wikiEntityMetadata,wikiEntityTags,wikiEntityAliases,worldTags,entityRelations,worldMaps,mapPins,externalResources,worldEras,worldCalendars,entityRevisions,
+    friendRequests,friendships,userBlocks,socialInvites,notifications,sheetTemplates,characterSheets,worldEntityLinks,
+    adventureScenes,adventureEncounters,adventureSceneEntities,adventureHandouts,fileAssets,
+    vttScenes,vttTokens,vttFogCells,vttCombatants,
   ]=await c.env.DB.batch([
     c.env.DB.prepare('SELECT * FROM rpgs WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT * FROM campaigns WHERE user_id=?').bind(user.id),
@@ -332,11 +338,42 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     // F-001: histórico de revisões inclui o mesmo snapshot já validado no momento de cada
     // edição — sem bytes arbitrários, é o mesmo JSON de input já usado no restore normal.
     c.env.DB.prepare('SELECT * FROM entity_revisions WHERE owner_user_id=?').bind(user.id),
+    // F-016/F-018/F-019 (Social): referenciam outro usuário nos dois sentidos — inclui a linha
+    // se o dono do backup for QUALQUER um dos dois lados (é o estado da CONTA, não só do que
+    // ela iniciou). userId do outro lado nunca é remapeado no restore (é uma conta real, não um
+    // registro deste backup) — ver limitação documentada abaixo.
+    c.env.DB.prepare('SELECT * FROM friend_requests WHERE requester_user_id=? OR addressee_user_id=?').bind(user.id,user.id),
+    c.env.DB.prepare('SELECT * FROM friendships WHERE user_id_a=? OR user_id_b=?').bind(user.id,user.id),
+    c.env.DB.prepare('SELECT * FROM user_blocks WHERE blocker_user_id=? OR blocked_user_id=?').bind(user.id,user.id),
+    c.env.DB.prepare('SELECT * FROM social_invites WHERE inviter_user_id=? OR invitee_user_id=?').bind(user.id,user.id),
+    c.env.DB.prepare('SELECT * FROM notifications WHERE user_id=?').bind(user.id),
+    // F-020/F-021 (Sheets).
+    c.env.DB.prepare('SELECT * FROM sheet_templates WHERE owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT cs.* FROM character_sheets cs JOIN vault_entities e ON e.id=cs.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    // F-022: LINK cross-World — só existe quando entidade e World são do mesmo dono (ver
+    // POST /vault/:id/links), então escopar por qualquer um dos dois dá o mesmo resultado.
+    c.env.DB.prepare('SELECT wel.* FROM world_entity_links wel JOIN vault_entities e ON e.id=wel.entity_id WHERE e.owner_user_id=?').bind(user.id),
+    // F-025 (Adventures estruturadas).
+    c.env.DB.prepare('SELECT s.* FROM adventure_scenes s JOIN vault_entities e ON e.id=s.adventure_entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT enc.* FROM adventure_encounters enc JOIN adventure_scenes s ON s.id=enc.scene_id JOIN vault_entities e ON e.id=s.adventure_entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT ase.* FROM adventure_scene_entities ase JOIN adventure_scenes s ON s.id=ase.scene_id JOIN vault_entities e ON e.id=s.adventure_entity_id WHERE e.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT h.* FROM adventure_handouts h JOIN vault_entities e ON e.id=h.adventure_entity_id WHERE e.owner_user_id=?').bind(user.id),
+    // F-028: só metadata (content_type/filename/byte_length) — os bytes vivem no ASSETS_KV,
+    // fora do escopo de um backup JSON, mesmo princípio já aplicado a coverUrl/mídia externa.
+    c.env.DB.prepare('SELECT * FROM file_assets WHERE owner_user_id=?').bind(user.id),
+    // F-029/F-030/F-032 (VTT — ferramenta de mesa efêmera, mas exportada por completude).
+    c.env.DB.prepare('SELECT vs.* FROM vtt_scenes vs JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT vt.* FROM vtt_tokens vt JOIN vtt_scenes vs ON vs.id=vt.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT vf.* FROM vtt_fog_cells vf JOIN vtt_scenes vs ON vs.id=vf.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT vc.* FROM vtt_combatants vc JOIN vtt_scenes vs ON vs.id=vc.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),schemaVersion:8,user:{email:user.email,displayName:user.displayName},data:{
+  return c.json({exportedAt:nowIso(),schemaVersion:9,user:{email:user.email,displayName:user.displayName},data:{
     rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,
     worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results,publicationExternalIds:publicationExternalIds.results,
     publicationAliases:publicationAliases.results,loreDetails:loreDetails.results,characterDetails:characterDetails.results,npcDetails:npcDetails.results,creatureDetails:creatureDetails.results,creatureStatBlocks:creatureStatBlocks.results,creatureStatTemplates:creatureStatTemplates.results,factionDetails:factionDetails.results,itemDetails:itemDetails.results,eventTemporalDetails:eventTemporalDetails.results,
     journalFolders:journalFolders.results,journalPages:journalPages.results,wikiFolders:wikiFolders.results,wikiEntityMetadata:wikiEntityMetadata.results,wikiEntityTags:wikiEntityTags.results,wikiEntityAliases:wikiEntityAliases.results,worldTags:worldTags.results,entityRelations:entityRelations.results,worldMaps:worldMaps.results,mapPins:mapPins.results,externalResources:externalResources.results,worldEras:worldEras.results,worldCalendars:worldCalendars.results,entityRevisions:entityRevisions.results,
+    friendRequests:friendRequests.results,friendships:friendships.results,userBlocks:userBlocks.results,socialInvites:socialInvites.results,notifications:notifications.results,sheetTemplates:sheetTemplates.results,characterSheets:characterSheets.results,worldEntityLinks:worldEntityLinks.results,
+    adventureScenes:adventureScenes.results,adventureEncounters:adventureEncounters.results,adventureSceneEntities:adventureSceneEntities.results,adventureHandouts:adventureHandouts.results,fileAssets:fileAssets.results,
+    vttScenes:vttScenes.results,vttTokens:vttTokens.results,vttFogCells:vttFogCells.results,vttCombatants:vttCombatants.results,
   }});
 });

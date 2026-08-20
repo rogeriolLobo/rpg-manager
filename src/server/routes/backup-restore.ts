@@ -62,9 +62,15 @@ interface TemplatePlanItem { oldId: string; oldWorldId: string; input: CreatureS
 interface EntityPlanItem { oldId: string; oldWorldId: string | null; oldParentEntityId: string | null; oldTemplateId: string | null; input: VaultEntityInput }
 interface JournalFolderPlanItem { oldId: string; oldWorldId: string; oldParentFolderId: string | null; input: { name: string; parentFolderId: string | null } }
 interface JournalPagePlanItem { oldId: string; oldWorldId: string; oldFolderId: string | null; input: JournalPageInput }
+// F-022 (BATCH19): world_entity_links — extensão mais simples possível do escopo de restore
+// v1: liga dois IDs já restaurados na MESMA operação (World + entidade), sem INSERT próprio de
+// domínio nem parsing adicional. Adventures/Sheets/VTT/Social continuam export-only nesta v1
+// (mesma fronteira já documentada para Groups/Campaigns desde o BATCH6 original — ver
+// src/domain/backup/types.ts).
+interface WorldEntityLinkPlanItem { oldWorldId: string; oldEntityId: string }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
-  journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; warnings: BackupRestoreWarning[];
+  journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[]; warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
   worlds: z.array(z.strictObject({ oldId: z.string(), input: worldInputSchema })),
@@ -72,6 +78,7 @@ const restorePlanSchema = z.strictObject({
   entities: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string().nullable(), oldParentEntityId: z.string().nullable(), oldTemplateId: z.string().nullable(), input: vaultEntityInputSchema })),
   journalFolders: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldParentFolderId: z.string().nullable(), input: journalFolderInputSchema })),
   journalPages: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldFolderId: z.string().nullable(), input: journalPageInputSchema })),
+  worldEntityLinks: z.array(z.strictObject({ oldWorldId: z.string(), oldEntityId: z.string() })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string() })),
 });
 
@@ -199,7 +206,18 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     journalPages.push({ oldId, oldWorldId, oldFolderId: oldFolderId && folderOldIds.has(oldFolderId) ? oldFolderId : null, input: parsed.data });
   }
 
-  return { worlds, creatureStatTemplates, entities, journalFolders, journalPages, warnings };
+  // ---- world_entity_links (F-022) — só restaura o vínculo se AMBOS World e entidade também
+  // estiverem sendo restaurados nesta mesma operação (mesma invariante de origem: o LINK só
+  // existe quando entidade e World têm o mesmo dono — ver POST /vault/:id/links). ----
+  const rawWorldEntityLinks = rowsOf(data, 'worldEntityLinks');
+  const worldEntityLinks: WorldEntityLinkPlanItem[] = [];
+  for (const row of rawWorldEntityLinks) {
+    const oldWorldId = str(row, 'world_id'); const oldEntityId = str(row, 'entity_id');
+    if (!worldOldIds.has(oldWorldId) || !entityOldIds.has(oldEntityId)) { warnings.push({ domain: 'worldEntityLinks', oldId: `${oldWorldId}:${oldEntityId}`, message: 'World ou entidade original não pôde ser restaurado — vínculo entre Worlds não será restaurado.' }); continue; }
+    worldEntityLinks.push({ oldWorldId, oldEntityId });
+  }
+
+  return { worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks, warnings };
 }
 
 backupRestoreRoutes.post('/import/backup/preview', async (c) => {
@@ -212,7 +230,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   }
   const user = c.get('user');
   const plan = await buildRestorePlan(c.env, user.id, rootRow);
-  const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length;
+  const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.worldEntityLinks.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -223,7 +241,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   }
   return c.json({
     jobId,
-    summary: { worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length },
+    summary: { worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length, worldEntityLinks: plan.worldEntityLinks.length },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
   });
@@ -299,6 +317,15 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     if (newParentId) statements.push(c.env.DB.prepare('UPDATE vault_entities SET parent_entity_id=? WHERE id=? AND owner_user_id=?').bind(newParentId, pending.newId, user.id));
   }
 
+  // ---- world_entity_links (F-022) — depende de worldIdMap E entityIdMap já preenchidos acima. ----
+  let worldEntityLinksCreated = 0;
+  for (const item of plan.worldEntityLinks) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); const newEntityId = entityIdMap.get(item.oldEntityId);
+    if (!newWorldId || !newEntityId) continue;
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO world_entity_links (world_id,entity_id,created_at) VALUES (?,?,?)').bind(newWorldId, newEntityId, now));
+    worldEntityLinksCreated += 1;
+  }
+
   // ---- Journal folders (2ª passagem para parent_folder_id, mesmo padrão) ----
   const folderIdMap = new Map<string, string>();
   const folderParentPending: Array<{ newId: string; oldParentFolderId: string }> = [];
@@ -328,6 +355,6 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
   statements.push(c.env.DB.prepare('UPDATE backup_restore_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now, jobId, user.id));
   await c.env.DB.batch(statements);
   return c.json({
-    restored: { worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated },
+    restored: { worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated, worldEntityLinks: worldEntityLinksCreated },
   });
 });

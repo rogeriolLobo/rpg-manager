@@ -1688,6 +1688,98 @@ precisar sair do VTT durante a mesa.
   final + F-015 revalidado cobrindo todos os domínios novos (Social,
   Sheets, Vault avançado, Adventures, Files, VTT).
 
+## BATCH19 — Hardening final + F-015 revalidado — `DONE`
+
+Último item do roadmap planejado. Duas frentes: (1) hardening real de
+CI, (2) fechar a lacuna real encontrada na auditoria: o EXPORT completo
+(F-015) não acompanhou nenhum dos domínios criados desde o BATCH6
+original — Social, Sheets, `world_entity_links`, Adventures
+estruturadas, Files/Handouts, VTT ficaram de fora do backup por 13
+batches seguidos, um risco real de perda de dado silenciosa (não
+teórico — confirmado lendo `transfer.ts` linha a linha antes de
+escrever qualquer código).
+
+**Hardening de CI:**
+- `actions/upload-artifact` no job `e2e`, só em `failure()`, retenção
+  de 7 dias — `playwright.config.ts` já capturava trace
+  (`retain-on-failure`) e screenshot (`only-on-failure`), mas nada
+  sobrevivia ao runner efêmero; toda investigação de flake até agora
+  dependeu só de log de texto. Sem impacto em produção (mudança só de
+  CI).
+- **Achado real durante o próprio BATCH19:** o push do F-034 (antes
+  deste commit) expôs `tests/e2e/vault-worlds-flow.spec.ts` falhando
+  de forma consistente 2x seguidas (`gh run rerun --failed` resolveu
+  as duas), sempre no mesmo ponto (`getByLabel('Nome')` nunca resolve
+  por até 270s, mesmo depois do wait explícito por
+  `World.locator('option')` já ter passado) — sintoma diferente do
+  "element detached" original (aqui o locator nunca encontra nada, não
+  encontra-e-perde). Investigado até o limite do que dava para
+  concluir só com log de texto (sem screenshot real do momento da
+  falha, porque o CI ainda não subia artifact — corrigido agora para a
+  PRÓXIMA ocorrência). Hipótese mais provável, não confirmada: o
+  webServer de E2E roda `vite dev` (StrictMode + compilação sob
+  demanda), não um build de produção — trocar para build+preview
+  eliminaria as duas causas possíveis de uma vez, mas é uma mudança de
+  infraestrutura grande demais para fazer às cegas sob pressão de
+  tempo. Documentado como achado residual não bloqueante (nunca
+  impediu um release nesta sessão, sempre resolvido por rerun) — ver
+  `docs/product/FULL_ROADMAP.md`.
+
+**F-015 revalidado — export v9:**
+- `schemaVersion` 8→9. Todas as tabelas dos domínios criados desde o
+  BATCH6 original entraram no `GET /export`: `friend_requests`/
+  `friendships`/`user_blocks`/`social_invites`/`notifications`
+  (F-016/018/019 — escopadas pelos DOIS lados da relação, já que
+  representam estado da CONTA, não só do que ela iniciou),
+  `sheet_templates`/`character_sheets` (F-020/021), `world_entity_links`
+  (F-022 — só existe quando entidade e World são do mesmo dono, ver
+  `POST /vault/:id/links`, então escopar por qualquer um dos dois lados
+  dá o mesmo resultado), `adventure_scenes`/`adventure_encounters`/
+  `adventure_scene_entities`/`adventure_handouts` (F-025),
+  `file_assets` (F-028 — só metadata; bytes vivem no `ASSETS_KV`, fora
+  do escopo de um backup JSON, mesmo princípio já aplicado a
+  coverUrl/mídia externa), `vtt_scenes`/`vtt_tokens`/`vtt_fog_cells`/
+  `vtt_combatants` (F-029/030/032).
+- **Restore v1 estendido com `world_entity_links`** — a extensão mais
+  simples possível dentro da fronteira já estabelecida: liga dois IDs
+  já restaurados na MESMA operação (World + entidade), sem domínio
+  próprio nem parsing adicional. Vínculo cujo World ou entidade
+  original não pôde ser restaurado vira aviso, nunca trava o restante
+  do restore (mesmo padrão de toda referência cruzada já existente).
+- **Decisão explícita de escopo (não omissão):** Social, Sheets,
+  Adventures estruturadas, Files/Handouts e VTT continuam export-only
+  nesta v1 — mesma fronteira documentada desde o BATCH6 original para
+  Groups/Campaigns/Library/Wiki/Relations/Cartografia/External
+  Resources/Revision History. Restaurar Social exigiria decidir o que
+  fazer com relações apontando para OUTRA conta real (risco semântico
+  real: reintroduzir uma amizade que a outra pessoa já desfez/bloqueou
+  nesse meio-tempo); restaurar VTT/Adventures completos exigiria
+  Campaigns/Adventures no mesmo escopo de restore primeiro (VTT depende
+  de `campaign_id`, que nunca foi restaurável). Nenhuma dessas é uma
+  lacuna escondida — todas seguem 100% cobertas pelo EXPORT, só sem
+  automação de restore ainda.
+- **Testes:** `tests/integration/backup-restore.test.ts` (+2 casos:
+  export v9 cria uma linha em CADA tabela nova — Social/Sheets/LINK/
+  Adventures completas/Files/VTT completo incluindo fog+combate — e
+  confirma que todas aparecem no backup; round-trip de
+  `world_entity_links` restaura o vínculo com os IDs NOVOS de World e
+  entidade, e um vínculo injetado sem os dois lados no backup vira
+  aviso sem travar o restore) + 3 asserções de `schemaVersion` 8→9
+  atualizadas em `auth-and-isolation.test.ts`/`library-domain.test.ts`.
+  Client (`settings-pages.tsx`) ganhou o label "Vínculos entre Worlds"
+  no resumo do preview/restore (`summaryLabels`, já genérico — só a
+  entrada nova).
+- **Docs:** `docs/library/LIBRARY_IMPORT_EXPORT.md` e
+  `docs/product/FULL_ROADMAP.md` atualizados com a cobertura v9 e a
+  fronteira de escopo do restore.
+- typecheck/lint/build limpos; 195 unit + 224 integration (30
+  arquivos) sem flake (fora do achado de CI documentado acima).
+
+**`RPG MANAGER — PLANNED_ROADMAP_COMPLETE` alcançado** — todo item de
+F-022 a F-034 `DONE`, F-015 revalidado, CI verde, deploy real
+confirmado. Ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md` para o
+relatório final da meta original.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
