@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     container: mcr.microsoft.com/playwright:v1.62.1-noble
     timeout-minutes: 15
-    # RPG-1.0-BATCH17: E2E dividido em 2 shards paralelos (jobs separados, cada um com seu
+    # RPG-1.0-BATCH17: E2E dividido em shards paralelos (jobs separados, cada um com seu
     # próprio container/runner/wrangler-dev/arquivo D1 local — nunca compartilham estado entre
     # si, então a razão original do workers:1 no playwright.config.ts continua válida DENTRO de
     # cada shard). Achado real: vault-worlds-flow.spec.ts (já documentado como flake recorrente
@@ -54,17 +54,24 @@ jobs:
     # reprodução 100% consistente conforme a suíte cresceu (~45 testes × 2 projects numa fila
     # totalmente sequencial) — o sintoma ("element was detached from the DOM" por 90s seguidos)
     # bate com degradação de recurso acumulada ao longo de uma fila longa, a mesma causa raiz já
-    # registrada. Dividir pela metade a fila sequencial de cada worker ataca a causa raiz
-    # diretamente, em vez de mais reruns ou aumentar timeout às cegas.
+    # registrada. Dividir a fila sequencial de cada worker ataca a causa raiz diretamente, em vez
+    # de mais reruns ou aumentar timeout às cegas.
+    #
+    # Achado real desta rodada (pedido de finalização absoluta, BATCH23-26): a suíte cresceu de
+    # ~30 para 37 arquivos de spec (Multi-GM/crawler/a11y/responsivo/adventure/one-shot), o
+    # suficiente para o shard=1/2 estourar o timeout-minutes de 15 de novo (job cancelado, não
+    # falho — GitHub Actions mata o job ao bater o timeout externo) mesmo com validate e o outro
+    # shard passando limpos. 2 shards deixou de dar margem suficiente; 3 volta a dar (mesmo
+    # raciocínio de quando o 2º shard foi criado, aplicado de novo à suíte maior de agora).
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
-      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
       # BATCH19: trace/screenshot já eram capturados (playwright.config.ts:
       # retain-on-failure/only-on-failure) mas nunca sobreviviam ao runner efêmero — toda
       # investigação de flake até agora dependeu só do log de texto. Sobe como artifact só
