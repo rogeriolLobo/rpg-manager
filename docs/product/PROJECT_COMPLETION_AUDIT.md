@@ -103,11 +103,14 @@ sockets, cleanup) — fechadas nesta rodada:**
   um Co-GM sem recarregar a página manualmente, e vice-versa). Agora usa
   o mesmo `useCampaignRealtime`: qualquer `STATE` recarrega a lista de
   cenas e o detalhe da cena expandida.
-- Cleanup do socket (unmount/reconnect sem acumular listeners) é
-  garantido pelo próprio `useEffect` de retorno do hook (mesmo padrão já
-  provado em `VttLivePage`); teste de integração DEDICADO provando
-  ausência de acúmulo de listeners ainda não foi escrito (pendência
-  genuína, Seção 9).
+- Cleanup do socket (unmount/reconnect sem acumular listeners) —
+  `tests/e2e/vtt-realtime-cleanup.spec.ts` prova isso com um WebSocket
+  REAL do navegador (Playwright `page.on('websocket')`), navegação
+  client-side (React Router, sem reload de documento — a única forma de
+  testar genuinamente o cleanup do `useEffect`, já que um reload de
+  documento inteiro já mata a conexão por garantia do próprio navegador,
+  sem provar nada sobre o nosso código): sair da Mesa Virtual fecha o
+  socket sozinho, voltar abre exatamente UM socket novo, nunca acumula.
 
 ---
 
