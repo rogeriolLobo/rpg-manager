@@ -68,11 +68,13 @@ convites) → BATCH9 F-020 (Sheet Engine base, `DONE`) → BATCH10 F-023
 `DONE`) → BATCH12 F-022 (Vault avançado, `DONE`) → BATCH13 F-024+F-025
 (One-Shots + Adventures, `DONE`) → BATCH14 F-026+F-027 (conteúdo
 oficial + Compendium, `DONE`) → BATCH15 F-028 (Files/Handouts, `DONE`) →
-BATCH16 F-029+F-030 (VTT fundação + fog, `DONE`) → daqui em diante,
-planejado: BATCH17 F-031+F-032 (realtime + combate) → BATCH18 F-033+F-034
-(Player/GM view integrada) → BATCH19 hardening final + F-015 revalidado
-cobrindo todos os domínios novos (Social, Sheets, Vault avançado,
-Adventures, Files, VTT).
+BATCH16 F-029+F-030 (VTT fundação + fog, `DONE`) → BATCH17 F-031+F-032
+(realtime resolvido como polling Zero Cost + combate, `DONE` — inclui
+hardening real de CI: E2E dividido em 2 jobs paralelos, achado real de
+flake escalado corrigido na raiz, não mascarado) → daqui em diante,
+planejado: BATCH18 F-033+F-034 (Player/GM view integrada) → BATCH19
+hardening final + F-015 revalidado cobrindo todos os domínios novos
+(Social, Sheets, Vault avançado, Adventures, Files, VTT).
 
 ## Critério de conclusão
 

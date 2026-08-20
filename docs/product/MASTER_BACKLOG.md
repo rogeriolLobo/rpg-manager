@@ -1501,6 +1501,15 @@ para o raciocínio completo.
   execução do roadmap: BATCH18 — F-033 (Player View integrada) +
   F-034 (GM View integrada), ambos desbloqueados.
 
+**Prova de release do BATCH17** (migration 0039 + hardening de CI):
+`git rev-parse HEAD` = `origin/main` = `d1c577b`; `wrangler d1
+migrations list --remote` → "No migrations to apply" (0039 aplicada,
+`PRAGMA foreign_key_check` limpo, 30 rpgs intactos); Worker Version ID
+`1b6a53c0-bfc9-4718-854c-cba1a09f65ec`; `GET /api/v1/version` em
+produção confirma `commit: "d1c577b"` — cadeia HEAD = origin/main =
+build = produção fechada. CI verde (job `validate` +
+`e2e` em 2 shards paralelos).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
