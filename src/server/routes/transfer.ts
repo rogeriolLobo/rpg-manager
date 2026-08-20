@@ -289,7 +289,7 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     journalFolders,journalPages,wikiFolders,wikiEntityMetadata,wikiEntityTags,wikiEntityAliases,worldTags,entityRelations,worldMaps,mapPins,externalResources,worldEras,worldCalendars,entityRevisions,
     friendRequests,friendships,userBlocks,socialInvites,notifications,sheetTemplates,characterSheets,worldEntityLinks,
     adventureScenes,adventureEncounters,adventureSceneEntities,adventureHandouts,fileAssets,
-    vttScenes,vttTokens,vttFogCells,vttCombatants,
+    vttScenes,vttTokens,vttFogCells,vttCombatants,rpgSocialInterests,
   ]=await c.env.DB.batch([
     c.env.DB.prepare('SELECT * FROM rpgs WHERE user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT * FROM campaigns WHERE user_id=?').bind(user.id),
@@ -366,6 +366,12 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     c.env.DB.prepare('SELECT vt.* FROM vtt_tokens vt JOIN vtt_scenes vs ON vs.id=vt.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT vf.* FROM vtt_fog_cells vf JOIN vtt_scenes vs ON vs.id=vf.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT vc.* FROM vtt_combatants vc JOIN vtt_scenes vs ON vs.id=vc.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
+    // F-017 (BATCH20): rpg_social_interest nunca esteve no export — lacuna real corrigida
+    // aqui (achado desta rodada, ver comentário em backup-restore.ts). Aditivo dentro do
+    // mesmo schemaVersion 9 (chave nova em `data`; restores antigos que não a leem continuam
+    // funcionando, e um backup v9 antigo sem esta chave continua restaurável — rowsOf() do
+    // restore trata a ausência como lista vazia).
+    c.env.DB.prepare('SELECT si.* FROM rpg_social_interest si JOIN rpgs r ON r.id=si.rpg_id WHERE r.user_id=?').bind(user.id),
   ]);
   return c.json({exportedAt:nowIso(),schemaVersion:9,user:{email:user.email,displayName:user.displayName},data:{
     rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,
@@ -375,5 +381,6 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     friendRequests:friendRequests.results,friendships:friendships.results,userBlocks:userBlocks.results,socialInvites:socialInvites.results,notifications:notifications.results,sheetTemplates:sheetTemplates.results,characterSheets:characterSheets.results,worldEntityLinks:worldEntityLinks.results,
     adventureScenes:adventureScenes.results,adventureEncounters:adventureEncounters.results,adventureSceneEntities:adventureSceneEntities.results,adventureHandouts:adventureHandouts.results,fileAssets:fileAssets.results,
     vttScenes:vttScenes.results,vttTokens:vttTokens.results,vttFogCells:vttFogCells.results,vttCombatants:vttCombatants.results,
+    rpgSocialInterests:rpgSocialInterests.results,
   }});
 });

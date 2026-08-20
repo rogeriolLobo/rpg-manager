@@ -650,4 +650,61 @@ describe('F-015: Backup/Restore completo', () => {
     expect(sceneBody.combatants).toHaveLength(1);
     expect(sceneBody.combatants[0]).toMatchObject({ name: 'Guarda 1', initiative: 12 });
   });
+
+  // BATCH20g (Seção 5 do pedido de finalização): Social — regra própria e mais restrita.
+  it('Social: restaurado na própria conta preserva amizade/bloqueio/convite/interesse; restaurado numa conta ALHEIA nunca forja o grafo social de outra pessoa', async () => {
+    const owner = await register('backup-social-owner');
+    const friendAccount = await register('backup-social-friend');
+    const blockedAccount = await register('backup-social-blocked');
+    const attacker = await register('backup-social-attacker');
+
+    const sentRequest = await request('/social/requests', 'POST', { targetUserId: friendAccount.userId }, owner);
+    const requestId = ((await sentRequest.json()) as { item: { id: string } }).item.id;
+    await request(`/social/requests/${requestId}/accept`, 'POST', undefined, friendAccount);
+    await request('/social/blocks', 'POST', { targetUserId: blockedAccount.userId }, owner);
+    const groupResponse = await request('/groups', 'POST', { name: 'Grupo Social', notes: '' }, owner);
+    const groupId = ((await groupResponse.json()) as { item: { id: string } }).item.id;
+    await request('/social/invites', 'POST', { inviteeUserId: friendAccount.userId, targetType: 'GROUP', targetId: groupId, role: 'PLAYER' }, owner);
+    const rpgResponse = await request('/rpgs', 'POST', { title: 'RPG Social', categoryId: null, subgenreId: null, readingStatus: 'READING', hasPlayed: false, wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', playGroupId: null, plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '', notes: '', coverUrl: null }, owner);
+    const rpgId = ((await rpgResponse.json()) as { item: { id: string } }).item.id;
+    await request(`/social/interest/${rpgId}`, 'POST', undefined, owner);
+
+    const backup = await exportBackup(owner);
+
+    // A) Restaurado na PRÓPRIA conta (owner é literalmente um dos dois lados de cada relação).
+    const previewOwn = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewOwnBody = await previewOwn.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewOwnBody.summary).toMatchObject({ friendRequests: 0, friendships: 1, userBlocks: 1, socialInvites: 1, rpgSocialInterests: 1 });
+    const confirmOwn = await request('/import/backup/confirm', 'POST', { jobId: previewOwnBody.jobId }, owner);
+    const confirmOwnBody = await confirmOwn.json() as { restored: Record<string, number> };
+    expect(confirmOwnBody.restored).toMatchObject({ friendships: 1, userBlocks: 1, socialInvites: 1, rpgSocialInterests: 1 });
+
+    const friends = await request('/social/friends', 'GET', undefined, owner);
+    expect(((await friends.json()) as { items: Array<{ userId: string }> }).items.filter((item) => item.userId === friendAccount.userId)).toHaveLength(1); // OR IGNORE: continua exatamente 1, nunca duplica
+    const blocks = await request('/social/blocks', 'GET', undefined, owner);
+    expect(((await blocks.json()) as { items: Array<{ userId: string }> }).items.some((item) => item.userId === blockedAccount.userId)).toBe(true);
+    const invitesSent = await request('/social/invites', 'GET', undefined, owner);
+    const sentInvites = ((await invitesSent.json()) as { sent: Array<{ targetId: string; inviteeUserId: string }> }).sent;
+    expect(sentInvites.some((item) => item.inviteeUserId === friendAccount.userId)).toBe(true);
+    const restoredRpgDetail = await request(`/rpgs/${rpgId}`, 'GET', undefined, owner);
+    expect(((await restoredRpgDetail.json()) as { item: { socialInterest: boolean } }).item.socialInterest).toBe(true);
+
+    // B) Restaurado numa conta ALHEIA (attacker não é nenhum dos dois lados de NENHUMA
+    // relação do backup de owner) — NADA social pode ser criado, nunca forja um grafo social.
+    const previewAttacker = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, attacker);
+    const previewAttackerBody = await previewAttacker.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewAttackerBody.summary).toMatchObject({ friendRequests: 0, friendships: 0, userBlocks: 0, socialInvites: 0 });
+    const confirmAttacker = await request('/import/backup/confirm', 'POST', { jobId: previewAttackerBody.jobId }, attacker);
+    const confirmAttackerBody = await confirmAttacker.json() as { restored: Record<string, number> };
+    expect(confirmAttackerBody.restored).toMatchObject({ friendships: 0, userBlocks: 0, socialInvites: 0 });
+
+    const attackerFriends = await request('/social/friends', 'GET', undefined, attacker);
+    expect(((await attackerFriends.json()) as { items: unknown[] }).items).toHaveLength(0);
+    const attackerBlocks = await request('/social/blocks', 'GET', undefined, attacker);
+    expect(((await attackerBlocks.json()) as { items: unknown[] }).items).toHaveLength(0);
+    // A vítima (owner) continua com exatamente a mesma amizade/bloqueio de antes — nada foi
+    // alterado na conta original só porque o JSON dela foi usado por outra conta.
+    const ownerFriendsAfter = await request('/social/friends', 'GET', undefined, owner);
+    expect(((await ownerFriendsAfter.json()) as { items: unknown[] }).items).toHaveLength(1);
+  });
 });

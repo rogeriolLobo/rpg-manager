@@ -137,6 +137,21 @@ interface VttScenePlanItem { oldId: string; oldCampaignId: string; oldMapId: str
 interface VttTokenPlanItem { oldId: string; oldSceneId: string; oldEntityId: string | null; input: VttTokenInput }
 interface VttFogCellPlanItem { oldSceneId: string; input: VttFogCellInput }
 interface VttCombatantPlanItem { oldId: string; oldSceneId: string; oldTokenId: string | null; input: VttCombatantInput }
+// Social (F-016/F-017/F-018/F-019) — regra própria, mais restrita que o resto do arquivo:
+// estas linhas envolvem SEMPRE uma conta real (nunca criada pelo restore). "Nunca recriar
+// outra pessoa" aqui significa algo além de "só preservar se a conta ainda existir": o usuário
+// restaurando PRECISA ser um dos dois lados da relação original — sem isso, restaurar o JSON
+// de outra conta na sua própria forjaria uma amizade/bloqueio/convite que você nunca teve (o
+// mesmo vetor de "fabricar grafo social" que a Seção 5 do pedido de finalização pede para
+// nunca existir). Nunca gera um novo par de contas nem reatribui a um terceiro.
+interface FriendRequestPlanItem { requesterUserId: string; addresseeUserId: string }
+interface FriendshipPlanItem { userIdA: string; userIdB: string }
+interface UserBlockPlanItem { blockerUserId: string; blockedUserId: string }
+// target_id aponta para um Group/Campaign PRÓPRIO do inviter — só faz sentido restaurar quando
+// o usuário restaurando É o inviter (o convite de outra pessoa para um Group/Campaign que não é
+// seu não tem alvo válido nesta conta) — resolvido via groupIdMap/campaignIdMap no confirm.
+interface SocialInvitePlanItem { inviterUserId: string; inviteeUserId: string; targetType: 'GROUP' | 'CAMPAIGN'; oldTargetId: string; role: 'PLAYER' | 'GM' }
+interface RpgSocialInterestPlanItem { oldRpgId: string }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
@@ -150,6 +165,8 @@ interface RestorePlan {
   adventureScenes: AdventureScenePlanItem[]; adventureEncounters: AdventureEncounterPlanItem[];
   adventureSceneEntities: AdventureSceneEntityPlanItem[]; adventureHandouts: AdventureHandoutPlanItem[];
   vttScenes: VttScenePlanItem[]; vttTokens: VttTokenPlanItem[]; vttFogCells: VttFogCellPlanItem[]; vttCombatants: VttCombatantPlanItem[];
+  friendRequests: FriendRequestPlanItem[]; friendships: FriendshipPlanItem[]; userBlocks: UserBlockPlanItem[];
+  socialInvites: SocialInvitePlanItem[]; rpgSocialInterests: RpgSocialInterestPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -190,6 +207,11 @@ const restorePlanSchema = z.strictObject({
   vttTokens: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), oldEntityId: z.string().nullable(), input: vttTokenInputSchema })),
   vttFogCells: z.array(z.strictObject({ oldSceneId: z.string(), input: vttFogCellInputSchema })),
   vttCombatants: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), oldTokenId: z.string().nullable(), input: vttCombatantInputSchema })),
+  friendRequests: z.array(z.strictObject({ requesterUserId: z.string(), addresseeUserId: z.string() })),
+  friendships: z.array(z.strictObject({ userIdA: z.string(), userIdB: z.string() })),
+  userBlocks: z.array(z.strictObject({ blockerUserId: z.string(), blockedUserId: z.string() })),
+  socialInvites: z.array(z.strictObject({ inviterUserId: z.string(), inviteeUserId: z.string(), targetType: z.enum(['GROUP', 'CAMPAIGN']), oldTargetId: z.string(), role: z.enum(['PLAYER', 'GM']) })),
+  rpgSocialInterests: z.array(z.strictObject({ oldRpgId: z.string() })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -782,6 +804,72 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     vttCombatants.push({ oldId, oldSceneId, oldTokenId: oldTokenId && vttTokenOldIds.has(oldTokenId) ? oldTokenId : null, input: parsed.data });
   }
 
+  // ---- Social (F-016/017/018/019) — ver comentário na interface acima: só restaura quando o
+  // usuário restaurando é LITERALMENTE um dos dois lados da relação original (nunca um vetor
+  // de forjar grafo social alheio); a conta do OUTRO lado precisa continuar existindo. ----
+  const rawFriendRequests = rowsOf(data, 'friendRequests');
+  const rawFriendships = rowsOf(data, 'friendships');
+  const rawUserBlocks = rowsOf(data, 'userBlocks');
+  const rawSocialInvites = rowsOf(data, 'socialInvites');
+  const otherSideIds = new Set<string>();
+  for (const row of rawFriendRequests) { const r = str(row, 'requester_user_id'), a = str(row, 'addressee_user_id'); if (r === userId) otherSideIds.add(a); else if (a === userId) otherSideIds.add(r); }
+  for (const row of rawFriendships) { const a = str(row, 'user_id_a'), b = str(row, 'user_id_b'); if (a === userId) otherSideIds.add(b); else if (b === userId) otherSideIds.add(a); }
+  for (const row of rawUserBlocks) { const blocker = str(row, 'blocker_user_id'), blocked = str(row, 'blocked_user_id'); if (blocker === userId) otherSideIds.add(blocked); else if (blocked === userId) otherSideIds.add(blocker); }
+  for (const row of rawSocialInvites) { const inviter = str(row, 'inviter_user_id'), invitee = str(row, 'invitee_user_id'); if (inviter === userId) otherSideIds.add(invitee); else if (invitee === userId) otherSideIds.add(inviter); }
+  let validOtherSideIds = new Set<string>();
+  if (otherSideIds.size) {
+    const ids = [...otherSideIds];
+    const rows = await env.DB.prepare(`SELECT id FROM users WHERE id IN (${ids.map(() => '?').join(',')}) AND disabled_at IS NULL AND deleted_at IS NULL`).bind(...ids).all<{ id: string }>();
+    validOtherSideIds = new Set(rows.results.map((row) => row.id));
+  }
+
+  const friendRequests: FriendRequestPlanItem[] = [];
+  for (const row of rawFriendRequests) {
+    const requesterUserId = str(row, 'requester_user_id'); const addresseeUserId = str(row, 'addressee_user_id');
+    const otherSide = requesterUserId === userId ? addresseeUserId : addresseeUserId === userId ? requesterUserId : null;
+    if (!otherSide) continue; // usuário restaurando não é nenhum dos dois lados — nunca forja o pedido de outra conta
+    if (!validOtherSideIds.has(otherSide)) { warnings.push({ domain: 'friendRequests', oldId: otherSide, message: 'Conta do outro lado do pedido de amizade não existe mais.', category: 'EXTERNAL_DEPENDENCY' }); continue; }
+    friendRequests.push({ requesterUserId, addresseeUserId });
+  }
+  const friendships: FriendshipPlanItem[] = [];
+  for (const row of rawFriendships) {
+    const userIdA = str(row, 'user_id_a'); const userIdB = str(row, 'user_id_b');
+    const otherSide = userIdA === userId ? userIdB : userIdB === userId ? userIdA : null;
+    if (!otherSide) continue;
+    if (!validOtherSideIds.has(otherSide)) { warnings.push({ domain: 'friendships', oldId: otherSide, message: 'Conta do outro lado da amizade não existe mais.', category: 'EXTERNAL_DEPENDENCY' }); continue; }
+    friendships.push({ userIdA, userIdB });
+  }
+  const userBlocks: UserBlockPlanItem[] = [];
+  for (const row of rawUserBlocks) {
+    const blockerUserId = str(row, 'blocker_user_id'); const blockedUserId = str(row, 'blocked_user_id');
+    const otherSide = blockerUserId === userId ? blockedUserId : blockedUserId === userId ? blockerUserId : null;
+    if (!otherSide) continue;
+    if (!validOtherSideIds.has(otherSide)) { warnings.push({ domain: 'userBlocks', oldId: otherSide, message: 'Conta do outro lado do bloqueio não existe mais.', category: 'EXTERNAL_DEPENDENCY' }); continue; }
+    userBlocks.push({ blockerUserId, blockedUserId });
+  }
+  const socialInvites: SocialInvitePlanItem[] = [];
+  for (const row of rawSocialInvites) {
+    const inviterUserId = str(row, 'inviter_user_id'); const inviteeUserId = str(row, 'invitee_user_id');
+    // Convite só é restaurável quando o usuário restaurando é o INVITER — o alvo (Group/Campaign)
+    // é sempre de quem convidou; o convite de outra pessoa aponta para um recurso que não existe
+    // nesta conta (nunca reconstruível aqui).
+    if (inviterUserId !== userId) continue;
+    if (!validOtherSideIds.has(inviteeUserId)) { warnings.push({ domain: 'socialInvites', oldId: inviteeUserId, message: 'Conta convidada não existe mais.', category: 'EXTERNAL_DEPENDENCY' }); continue; }
+    const targetType = str(row, 'target_type');
+    if (targetType !== 'GROUP' && targetType !== 'CAMPAIGN') continue;
+    socialInvites.push({ inviterUserId, inviteeUserId, targetType, oldTargetId: str(row, 'target_id'), role: str(row, 'role') === 'GM' ? 'GM' : 'PLAYER' });
+  }
+
+  // ---- Social Library Interest (F-017) — achado real desta rodada: nunca esteve no export
+  // (lacuna, não decisão — corrigida aqui: entra em export+restore juntos, nunca um sem o
+  // outro, mesmo princípio da Seção 21 do pedido de finalização). ----
+  const rpgSocialInterests: RpgSocialInterestPlanItem[] = [];
+  for (const row of rowsOf(data, 'rpgSocialInterests')) {
+    const oldRpgId = str(row, 'rpg_id');
+    if (!libraryOldIds.has(oldRpgId)) continue;
+    rpgSocialInterests.push({ oldRpgId });
+  }
+
   return {
     worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
@@ -790,6 +878,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     worldMaps, mapPins, externalResources, worldEras, worldCalendars, eventTemporalDetails,
     adventureScenes, adventureEncounters, adventureSceneEntities, adventureHandouts,
     vttScenes, vttTokens, vttFogCells, vttCombatants,
+    friendRequests, friendships, userBlocks, socialInvites, rpgSocialInterests,
     warnings,
   };
 }
@@ -810,7 +899,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
     + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
     + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length
     + plan.adventureScenes.length + plan.adventureEncounters.length + plan.adventureSceneEntities.length + plan.adventureHandouts.length
-    + plan.vttScenes.length + plan.vttTokens.length + plan.vttFogCells.length + plan.vttCombatants.length;
+    + plan.vttScenes.length + plan.vttTokens.length + plan.vttFogCells.length + plan.vttCombatants.length
+    + plan.friendRequests.length + plan.friendships.length + plan.userBlocks.length + plan.socialInvites.length + plan.rpgSocialInterests.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -829,6 +919,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
       adventureScenes: plan.adventureScenes.length, adventureEncounters: plan.adventureEncounters.length, adventureSceneEntities: plan.adventureSceneEntities.length, adventureHandouts: plan.adventureHandouts.length,
       vttScenes: plan.vttScenes.length, vttTokens: plan.vttTokens.length, vttFogCells: plan.vttFogCells.length, vttCombatants: plan.vttCombatants.length,
+      friendRequests: plan.friendRequests.length, friendships: plan.friendships.length, userBlocks: plan.userBlocks.length, socialInvites: plan.socialInvites.length, rpgSocialInterests: plan.rpgSocialInterests.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -1280,6 +1371,39 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     vttCombatantsCreated += 1;
   }
 
+  // ---- Social — nunca cria conta nova, nunca reatribui a outra pessoa (ver comentário no
+  // plano). INSERT OR IGNORE porque a relação usa IDs de conta REAIS (nunca remapeados) — restaurar
+  // o mesmo backup 2x, ou quando a relação já existe, é um no-op seguro, nunca um erro fatal. ----
+  let friendRequestsCreated = 0;
+  for (const item of plan.friendRequests) {
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO friend_requests (id,requester_user_id,addressee_user_id,created_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(), item.requesterUserId, item.addresseeUserId, now));
+    friendRequestsCreated += 1;
+  }
+  let friendshipsCreated = 0;
+  for (const item of plan.friendships) {
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO friendships (id,user_id_a,user_id_b,created_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(), item.userIdA, item.userIdB, now));
+    friendshipsCreated += 1;
+  }
+  let userBlocksCreated = 0;
+  for (const item of plan.userBlocks) {
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO user_blocks (id,blocker_user_id,blocked_user_id,created_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(), item.blockerUserId, item.blockedUserId, now));
+    userBlocksCreated += 1;
+  }
+  let socialInvitesCreated = 0;
+  for (const item of plan.socialInvites) {
+    const resolvedTargetId = item.targetType === 'GROUP' ? groupIdMap.get(item.oldTargetId) : campaignIdMap.get(item.oldTargetId);
+    if (!resolvedTargetId) continue; // alvo (Group/Campaign) não foi restaurado nesta mesma operação
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO social_invites (id,inviter_user_id,invitee_user_id,target_type,target_id,role,created_at) VALUES (?,?,?,?,?,?,?)')
+      .bind(crypto.randomUUID(), item.inviterUserId, item.inviteeUserId, item.targetType, resolvedTargetId, item.role, now));
+    socialInvitesCreated += 1;
+  }
+  let rpgSocialInterestsCreated = 0;
+  for (const item of plan.rpgSocialInterests) {
+    const newRpgId = rpgIdMap.get(item.oldRpgId); if (!newRpgId) continue;
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO rpg_social_interest (rpg_id,created_at) VALUES (?,?)').bind(newRpgId, now));
+    rpgSocialInterestsCreated += 1;
+  }
+
   statements.push(c.env.DB.prepare('UPDATE backup_restore_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now, jobId, user.id));
   await c.env.DB.batch(statements);
   return c.json({
@@ -1291,6 +1415,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourceIdMap.size, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
       adventureScenes: adventureSceneIdMap.size, adventureEncounters: adventureEncountersCreated, adventureSceneEntities: adventureSceneEntitiesCreated, adventureHandouts: adventureHandoutsCreated,
       vttScenes: vttSceneIdMap.size, vttTokens: vttTokenIdMap.size, vttFogCells: vttFogCellsCreated, vttCombatants: vttCombatantsCreated,
+      friendRequests: friendRequestsCreated, friendships: friendshipsCreated, userBlocks: userBlocksCreated, socialInvites: socialInvitesCreated, rpgSocialInterests: rpgSocialInterestsCreated,
     },
     warnings: confirmWarnings,
   });

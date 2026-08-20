@@ -62,4 +62,9 @@ export interface BackupRestorePreviewSummary {
   vttTokens: number;
   vttFogCells: number;
   vttCombatants: number;
+  friendRequests: number;
+  friendships: number;
+  userBlocks: number;
+  socialInvites: number;
+  rpgSocialInterests: number;
 }
