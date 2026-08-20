@@ -1580,6 +1580,68 @@ produção confirma `commit: "d1c577b"` — cadeia HEAD = origin/main =
 build = produção fechada. CI verde (job `validate` +
 `e2e` em 2 shards paralelos).
 
+## F-033 — Player View integrada — `DONE` (BATCH18, 2026-08-20)
+
+"Minhas Mesas": o jogador descobre e entra em campanhas de que
+participa sem depender de link enviado pelo GM (seção 15 da correção
+de roadmap). Reaproveita ao máximo domínios já existentes em vez de
+duplicar — a única peça de dado nova é o vínculo membro→personagem.
+
+- **Migration `0040_campaign_member_character.sql`** (aditiva):
+  `campaign_members.character_entity_id` (nullable, `ON DELETE SET
+  NULL`) — liga um membro a um Vault Entity `CHARACTER` do GM. GM
+  atribui via o mesmo formulário inline de membros já existente
+  (`CampaignMemberEditor`), validado por `validateCharacterEntity`
+  (mesmo padrão de `validateAdventure` — owner+entity_type, nunca
+  cross-account) e auto-vinculado à campanha via `campaign_entities`
+  (mesmo mecanismo de `adventureEntityId`) — sem esse vínculo, a
+  barreira de `visibility` PLAYERS/CAMPAIGN de `authorizedEntity()`
+  nunca deixaria o jogador ler a própria ficha.
+- **`GET /campaigns/mine`**: campanhas onde `campaign_members.user_id`
+  do usuário autenticado está `active=1` — nome, RPG, mestre, próxima
+  sessão, personagem. Nunca expõe `legacyMembersText`/`notes` (privados
+  do GM).
+- **`GET /campaigns/:id/player-home`**: agregado de UMA campanha —
+  authorization idêntica a `GET /vtt/:campaignId/live` (dono OU membro
+  ativo, 404 anti-enumeração para quem não é nenhum dos dois);
+  devolve resumo + `characterEntityId` (se atribuído) + handouts JÁ
+  REVELADOS da Adventure ligada (`adventure_handouts.revealed_at IS
+  NOT NULL`, nunca um não revelado) + `hasActiveScene` (para link para
+  a Mesa Virtual).
+- **"Meu Personagem" reaproveita `GET /vault/:id` e `GET
+  /sheets/entities/:id` sem nenhuma rota de leitura nova** — as duas já
+  usavam `authorizedEntity()`, que já cobre a visibility PLAYERS/
+  CAMPAIGN via `campaign_entities`; a única coisa que faltava era o
+  jogador saber QUAL entidade é a dele, resolvido pelo vínculo acima.
+  Ficha de personagem reaproveita `EntitySheetPanel` (já existente,
+  usado em `VaultDetailPage`), com `canEdit={false}` — jogador só lê e
+  baixa o PDF preenchido, nunca edita (o GM continua sendo quem
+  gerencia a ficha nesta v1).
+- **Mesa Virtual reaproveita `VttLivePage` (F-031) direto** — link
+  condicional a `hasActiveScene`, nenhuma segunda implementação de VTT
+  (seção 18 da correção).
+- **Nav global**: link "Minhas Mesas" adicionado à navegação geral
+  (`app-shell.tsx`), sempre visível junto com Biblioteca/Vault/Grupos/
+  Campanhas/Mundos — nunca escondido (`CLAUDE.md` §3).
+- **Fora de escopo desta passada (registrado, não escondido):**
+  notificações contextualizadas na mesa (seção 19 da correção) — não
+  implementadas ainda, ficam como débito para BATCH19. Edição da
+  própria ficha pelo jogador também não incluída (GM continua sendo
+  quem gerencia).
+- **Testes:** `tests/integration/player-view.test.ts` (5 testes:
+  `/campaigns/mine` só lista membro ativo, nunca de outro usuário nem
+  membro desativado; IDOR/anti-enumeração em `/player-home`; vínculo de
+  personagem exige owner+CHARACTER, e leitura via `/vault/:id` só
+  funciona se a `visibility` permitir — PRIVATE nunca vaza mesmo com o
+  vínculo salvo; handouts só os revelados, nunca os ocultos; VTT
+  reflete `hasActiveScene` corretamente). `tests/e2e/player-view.spec.ts`
+  (novo, chromium + mobile-chromium): jogador navega pelo link global
+  até a campanha sem receber nenhuma URL do GM, vê o personagem
+  atribuído e o handout revelado, confirma ausência de cena ativa;
+  outsider recebe "Não encontrado".
+- Vertical F-033 concluída. Próximo item da ordem de execução do
+  roadmap: F-034 (GM View integrada).
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

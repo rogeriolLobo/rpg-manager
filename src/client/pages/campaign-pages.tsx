@@ -52,6 +52,7 @@ interface Member {
   id: string;
   playerName: string;
   characterName: string;
+  characterEntityId: string | null;
   notes: string;
   active: number;
   linkedUserId?: string | null;
@@ -402,6 +403,9 @@ export function CampaignDetailPage() {
     sessions: GameSession[];
     entities: CampaignEntity[];
   }>(id ? `/campaigns/${id}` : null);
+  // F-033: opções de "Meu Personagem" (Vault CHARACTER do próprio GM) para o seletor do
+  // membro — buscado uma vez aqui, não por linha, para não repetir a chamada por jogador.
+  const characterOptions = useResource<{ items: Array<{ id: string; name: string }> }>('/vault?type=CHARACTER&pageSize=100&archive=active');
   const load = async () => { resource.reload(); };
   if (resource.status !== "success") return <ResourceFallback state={resource} onRetry={resource.reload}/>;
   const data = resource.data;
@@ -502,7 +506,7 @@ export function CampaignDetailPage() {
           {data.members.length ? (
             <div className="group-members">
               {data.members.map((member) => (
-                <CampaignMemberEditor key={member.id} campaignId={id!} member={member} onUpdated={load}/>
+                <CampaignMemberEditor key={member.id} campaignId={id!} member={member} onUpdated={load} characterOptions={characterOptions.status==='success'?characterOptions.data.items:[]}/>
               ))}
             </div>
           ) : (
@@ -580,10 +584,13 @@ export function CampaignDetailPage() {
   );
 }
 
-function CampaignMemberEditor({campaignId,member,onUpdated}:{campaignId:string;member:Member;onUpdated:()=>Promise<void>}) {
-  const [form,setForm]=useState({playerName:member.playerName,characterName:member.characterName,notes:member.notes,active:Boolean(member.active)}); const [error,setError]=useState('');
-  const save=async()=>{setError('');try{await patchJson(`/campaigns/${campaignId}/members/${member.id}`,form);await onUpdated();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
-  return <div className="campaign-member-editor"><label>{member.isGameMaster?'Narrador':'Jogador'}{member.linkedUserId&&<small>Conta cadastrada</small>}<input aria-label={`Jogador ${member.playerName}`} value={form.playerName} disabled={Boolean(member.linkedUserId)} onChange={(event)=>setForm({...form,playerName:event.target.value})}/></label><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/><input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button type="button" className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button type="button" className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
+function CampaignMemberEditor({campaignId,member,onUpdated,characterOptions}:{campaignId:string;member:Member;onUpdated:()=>Promise<void>;characterOptions:Array<{id:string;name:string}>}) {
+  const [form,setForm]=useState({playerName:member.playerName,characterName:member.characterName,characterEntityId:member.characterEntityId??'',notes:member.notes,active:Boolean(member.active)}); const [error,setError]=useState('');
+  const save=async()=>{setError('');try{await patchJson(`/campaigns/${campaignId}/members/${member.id}`,{...form,characterEntityId:form.characterEntityId||null});await onUpdated();}catch(reason){setError(reason instanceof Error?reason.message:'Falha inesperada.');}};
+  return <div className="campaign-member-editor"><label>{member.isGameMaster?'Narrador':'Jogador'}{member.linkedUserId&&<small>Conta cadastrada</small>}<input aria-label={`Jogador ${member.playerName}`} value={form.playerName} disabled={Boolean(member.linkedUserId)} onChange={(event)=>setForm({...form,playerName:event.target.value})}/></label><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/>
+    {/* F-033: liga um Vault CHARACTER (ficha/dados estruturados) ao membro — vira "Meu Personagem" na visão do jogador; texto livre acima continua existindo à parte (compatibilidade). */}
+    <select aria-label={`Personagem do Vault vinculado a ${member.playerName}`} value={form.characterEntityId} onChange={(event)=>setForm({...form,characterEntityId:event.target.value})}><option value="">Sem ficha vinculada</option>{characterOptions.map((option)=><option key={option.id} value={option.id}>{option.name}</option>)}</select>
+    <input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button type="button" className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button type="button" className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
 }
 
 export function SessionFormPage() {

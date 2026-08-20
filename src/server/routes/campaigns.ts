@@ -73,9 +73,47 @@ campaignRoutes.post('/', async (c) => {
       cleanNullable(input.nextSessionDate),input.sessionGoal ?? null,cleanNullable(input.playGroupId),cleanNullable(input.adventureEntityId),input.legacyMembersText,input.legacyCharactersText,input.notes,now,now,input.status==='COMPLETED'?now:null),...adventureStatement,...memberStatements]);
   return c.json({ item: present(await ownedCampaign(c,id)) },201);
 });
+// F-033 (Player View integrada): campanhas onde o usuário é membro ativo — a lista "Minhas
+// Mesas" que o jogador precisa para descobrir suas campanhas sem depender de um link enviado
+// pelo GM (seção 15 do pedido). Nunca expõe legacyMembersText/notes (privados do GM).
+interface PlayerCampaignRow { id: string; name: string; status: CampaignStatus; rpg_title: string; game_master: string; next_session_date: string | null; character_name: string; character_entity_id: string | null }
+campaignRoutes.get('/mine', async (c) => {
+  const rows = await c.env.DB.prepare(`SELECT c.id,c.name,c.status,r.title rpg_title,c.game_master,c.next_session_date,cm.character_name,cm.character_entity_id
+    FROM campaign_members cm JOIN campaigns c ON c.id=cm.campaign_id JOIN rpgs r ON r.id=c.rpg_id
+    WHERE cm.user_id=? AND cm.active=1 ORDER BY (c.next_session_date IS NULL),c.next_session_date,c.name`).bind(c.get('user').id).all<PlayerCampaignRow>();
+  return c.json({ items: rows.results.map((row) => ({ id: row.id, name: row.name, status: row.status, rpgTitle: row.rpg_title, gameMaster: row.game_master, nextSessionDate: row.next_session_date, characterName: row.character_name, characterEntityId: row.character_entity_id })) });
+});
+
+// F-033: agregado da visão do jogador para UMA campanha — resumo + "meu personagem" (id, o
+// client busca os dados via GET /vault/:id já existente, que já aplica a MESMA barreira de
+// visibility PLAYERS/CAMPAIGN via campaign_entities, nenhuma autorização nova aqui) + handouts
+// já revelados da Adventure ligada (nunca um não revelado) + se há cena ativa no VTT (link para
+// GET /vtt/:campaignId/live, F-031, reaproveitado — nunca uma segunda implementação de VTT).
+interface HandoutSummaryRow { id: string; title: string; content: string; external_resource_title: string | null }
+campaignRoutes.get('/:id/player-home', async (c) => {
+  const campaignId = c.req.param('id'); const userId = c.get('user').id;
+  const access = await c.env.DB.prepare(`SELECT c.id,c.name,c.status,r.title rpg_title,c.game_master,c.next_session_date,c.adventure_entity_id,
+    (c.user_id=? OR EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.user_id=? AND cm.active=1)) authorized
+    FROM campaigns c JOIN rpgs r ON r.id=c.rpg_id WHERE c.id=?`).bind(userId, userId, campaignId)
+    .first<{ id: string; name: string; status: CampaignStatus; rpg_title: string; game_master: string; next_session_date: string | null; adventure_entity_id: string | null; authorized: number }>();
+  if (!access || !access.authorized) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+  const membership = await c.env.DB.prepare('SELECT character_name,character_entity_id FROM campaign_members WHERE campaign_id=? AND user_id=? AND active=1')
+    .bind(campaignId, userId).first<{ character_name: string; character_entity_id: string | null }>();
+  const handouts = access.adventure_entity_id
+    ? (await c.env.DB.prepare(`SELECT h.id,h.title,h.content,er.title external_resource_title FROM adventure_handouts h LEFT JOIN external_resources er ON er.id=h.external_resource_id
+        WHERE h.adventure_entity_id=? AND h.revealed_at IS NOT NULL ORDER BY h.sort_order,h.created_at`).bind(access.adventure_entity_id).all<HandoutSummaryRow>()).results
+    : [];
+  const hasActiveScene = Boolean(await c.env.DB.prepare('SELECT 1 FROM vtt_scenes WHERE campaign_id=? AND is_active=1').bind(campaignId).first());
+  return c.json({
+    item: { id: access.id, name: access.name, status: access.status, rpgTitle: access.rpg_title, gameMaster: access.game_master, nextSessionDate: access.next_session_date,
+      characterName: membership?.character_name ?? '', characterEntityId: membership?.character_entity_id ?? null, hasActiveScene },
+    handouts: handouts.map((h) => ({ id: h.id, title: h.title, content: h.content, externalResourceTitle: h.external_resource_title })),
+  });
+});
+
 campaignRoutes.get('/:id', async (c) => {
   const row=await ownedCampaign(c,c.req.param('id')); const [members,sessions,entities]=await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id,group_member_id groupMemberId,user_id linkedUserId,player_name playerName,character_name characterName,notes,active,is_game_master isGameMaster,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY is_game_master DESC,active DESC,player_name').bind(row.id),
+    c.env.DB.prepare('SELECT id,group_member_id groupMemberId,user_id linkedUserId,player_name playerName,character_name characterName,character_entity_id characterEntityId,notes,active,is_game_master isGameMaster,created_at createdAt,updated_at updatedAt FROM campaign_members WHERE campaign_id=? ORDER BY is_game_master DESC,active DESC,player_name').bind(row.id),
     c.env.DB.prepare('SELECT id,session_number sessionNumber,title,played_at playedAt,summary,gm_notes gmNotes,next_hooks nextHooks,created_at createdAt,updated_at updatedAt FROM campaign_sessions WHERE campaign_id=? ORDER BY session_number DESC').bind(row.id),
     c.env.DB.prepare(`SELECT e.id,e.entity_type entityType,e.name,e.summary,e.visibility,ce.usage_type usageType FROM campaign_entities ce JOIN vault_entities e ON e.id=ce.entity_id WHERE ce.campaign_id=? ORDER BY ce.usage_type DESC,e.name`).bind(row.id),
   ]); return c.json({item:present(row),members:members.results,sessions:sessions.results,entities:entities.results});
@@ -116,9 +154,17 @@ campaignRoutes.delete('/:id/entities/:entityId', async (c) => {
   return c.body(null, 204);
 });
 
-campaignRoutes.post('/:id/members',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);const id=crypto.randomUUID(),now=nowIso();
-  await c.env.DB.prepare('INSERT INTO campaign_members (id,campaign_id,player_name,character_name,notes,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id,campaign.id,input.playerName,input.characterName,input.notes,Number(input.active),now,now).run();return c.json({id},201);});
-campaignRoutes.patch('/:id/members/:memberId',async(c)=>{await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);const member=await c.env.DB.prepare(`SELECT cm.user_id userId,COALESCE(u.display_name,cm.player_name) playerName FROM campaign_members cm LEFT JOIN users u ON u.id=cm.user_id WHERE cm.id=? AND cm.campaign_id=?`).bind(c.req.param('memberId'),c.req.param('id')).first<{userId:string|null;playerName:string}>();if(!member)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');const playerName=member.userId?member.playerName:input.playerName;await c.env.DB.prepare(`UPDATE campaign_members SET player_name=?,character_name=?,notes=?,active=?,updated_at=? WHERE id=? AND campaign_id=?`).bind(playerName,input.characterName,input.notes,Number(input.active),nowIso(),c.req.param('memberId'),c.req.param('id')).run();return c.json({success:true});});
+// F-033: liga o membro a um Vault Entity CHARACTER do próprio GM — vira "Meu Personagem" na
+// visão do jogador. Mesmo padrão de validateAdventure (owner-only, nunca cross-account).
+async function validateCharacterEntity(c:Context<{Bindings:Env;Variables:AppVariables}>,entityId:string|null|undefined):Promise<void>{if(!entityId)return;const row=await c.env.DB.prepare("SELECT id FROM vault_entities WHERE id=? AND owner_user_id=? AND entity_type='CHARACTER' AND archived_at IS NULL").bind(entityId,c.get('user').id).first();if(!row)throw new ApiError(422,'INVALID_CHARACTER','Personagem inválido.');}
+// Vincula a entidade à campanha via campaign_entities (mesmo mecanismo de adventureEntityId) —
+// sem isso, a barreira de visibility PLAYERS/CAMPAIGN de authorizedEntity() nunca deixaria o
+// jogador ler a própria ficha (GET /vault/:id, reaproveitado sem rota nova).
+function characterLinkStatement(c:Context<{Bindings:Env;Variables:AppVariables}>,campaignId:string,entityId:string|null|undefined,now:string):D1PreparedStatement[]{if(!entityId)return[];return[c.env.DB.prepare('INSERT OR IGNORE INTO campaign_entities (campaign_id,entity_id,usage_type,created_at) VALUES (?,?,?,?)').bind(campaignId,entityId,'REFERENCE',now)];}
+
+campaignRoutes.post('/:id/members',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);await validateCharacterEntity(c,input.characterEntityId);const id=crypto.randomUUID(),now=nowIso();
+  await c.env.DB.batch([c.env.DB.prepare('INSERT INTO campaign_members (id,campaign_id,player_name,character_name,notes,active,character_entity_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,campaign.id,input.playerName,input.characterName,input.notes,Number(input.active),input.characterEntityId,now,now),...characterLinkStatement(c,campaign.id,input.characterEntityId,now)]);return c.json({id},201);});
+campaignRoutes.patch('/:id/members/:memberId',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,memberInputSchema);await validateCharacterEntity(c,input.characterEntityId);const member=await c.env.DB.prepare(`SELECT cm.user_id userId,COALESCE(u.display_name,cm.player_name) playerName FROM campaign_members cm LEFT JOIN users u ON u.id=cm.user_id WHERE cm.id=? AND cm.campaign_id=?`).bind(c.req.param('memberId'),c.req.param('id')).first<{userId:string|null;playerName:string}>();if(!member)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');const playerName=member.userId?member.playerName:input.playerName;const now=nowIso();await c.env.DB.batch([c.env.DB.prepare(`UPDATE campaign_members SET player_name=?,character_name=?,notes=?,active=?,character_entity_id=?,updated_at=? WHERE id=? AND campaign_id=?`).bind(playerName,input.characterName,input.notes,Number(input.active),input.characterEntityId,now,c.req.param('memberId'),c.req.param('id')),...characterLinkStatement(c,campaign.id,input.characterEntityId,now)]);return c.json({success:true});});
 campaignRoutes.delete('/:id/members/:memberId',async(c)=>{await ownedCampaign(c,c.req.param('id'));const result=await c.env.DB.prepare('DELETE FROM campaign_members WHERE id=? AND campaign_id=?').bind(c.req.param('memberId'),c.req.param('id')).run();if(!result.meta.changes)throw new ApiError(404,'NOT_FOUND','Membro não encontrado.');return c.body(null,204);});
 
 campaignRoutes.post('/:id/sessions',async(c)=>{const campaign=await ownedCampaign(c,c.req.param('id'));const input=await readJson(c,sessionInputSchema);const now=nowIso();

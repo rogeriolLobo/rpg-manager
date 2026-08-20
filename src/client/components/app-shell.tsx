@@ -1,4 +1,4 @@
-import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, UsersRound, UserRound, Users, X } from 'lucide-react';
+import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, Swords, UsersRound, UserRound, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
@@ -15,6 +15,9 @@ export function AppShell() {
     ['/app/groups', UsersRound, 'Grupos'],
     ['/app/friends', Users, 'Amigos'],
     ['/app/campaigns', Castle, 'Campanhas'],
+    // F-033 (Player View integrada): descoberta de campanhas onde o usuário é jogador, sem
+    // depender de link enviado pelo GM — link global sempre visível (CLAUDE.md §3).
+    ['/app/my-tables', Swords, 'Minhas Mesas'],
     ['/app/worlds', Globe2, 'Mundos'],
   ] as const;
   const worldLinks = activeWorld ? [

@@ -146,6 +146,9 @@ export const memberInputSchema = z.strictObject({
   characterName: trimmed(100).default(''),
   notes: trimmed(2000).default(''),
   active: z.boolean().default(true),
+  // F-033: liga o membro a um Vault Entity CHARACTER (dono pelo GM) — vira "Meu Personagem"
+  // na visão do jogador. Nunca informado pelo jogador, só o GM escolhe.
+  characterEntityId: z.string().trim().max(80).nullable().default(null),
 });
 
 export const playGroupInputSchema = z.strictObject({
