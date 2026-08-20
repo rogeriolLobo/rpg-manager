@@ -21,6 +21,8 @@ function csrfToken(cookies: Array<{ name: string; value: string }>): string {
   return decodeURIComponent(cookies.find((cookie) => cookie.name === "rpg_csrf")?.value ?? "");
 }
 const apiHeaders = (csrf: string) => ({ "X-CSRF-Token": csrf, Origin: "http://127.0.0.1:5173" });
+const isMobileViewport = (page: Page) => (page.viewportSize()?.width ?? 1000) <= 850;
+const openNav = async (page: Page) => { if (isMobileViewport(page)) await page.getByRole("button", { name: "Abrir menu" }).click(); };
 
 test("Minhas Mesas (F-033): jogador descobre a campanha sem link do GM, vê seu personagem e os handouts revelados", async ({ page, browser }) => {
   test.setTimeout(120_000);
@@ -73,6 +75,7 @@ test("Minhas Mesas (F-033): jogador descobre a campanha sem link do GM, vê seu 
 
   // O jogador nunca recebeu um link — descobre a mesa sozinho pela navegação global.
   await playerPage.goto("/app");
+  await openNav(playerPage);
   await playerPage.getByRole("link", { name: "Minhas Mesas" }).click();
   await expect(playerPage).toHaveURL(/\/app\/my-tables$/u);
   await expect(playerPage.getByRole("heading", { name: "Mesa de Valdren" })).toBeVisible({ timeout: 30_000 });
