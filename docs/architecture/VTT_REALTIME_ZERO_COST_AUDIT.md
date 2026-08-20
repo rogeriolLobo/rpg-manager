@@ -5,85 +5,188 @@ Exigida antes de implementar F-031 (`docs/product/FULL_ROADMAP.md`,
 tokens, iniciativa/turno e troca de cena "em tempo real" entre GM e
 jogadores sem sair da política Zero Cost (Cloudflare Workers Free)?
 
-## O que a política Zero Cost permite hoje
+## CORREÇÃO (2026-08-20) — a versão anterior deste documento estava errada
 
-Workers Free, D1 Free, KV Free, processamento no navegador, bibliotecas
-OSS gratuitas — nunca R2, nunca Workers Paid, nunca serviço com cobrança
-automática (`CLAUDE.md` §9).
+A primeira versão desta auditoria concluiu que Durable Objects "não
+existem no plano Free" e por isso implementou F-031 como polling de 3s.
+**Essa premissa estava desatualizada e foi corrigida**: verificado
+diretamente contra a documentação oficial da Cloudflare em vigor nesta
+data —
 
-## Por que WebSocket broadcast real não é viável em Zero Cost
+> "Durable Objects are available both on Workers Free and Workers Paid
+> plans." — Workers Free plan: apenas Durable Objects com **SQLite
+> storage backend** estão disponíveis (o backend key-value é exclusivo
+> do plano pago).
 
-O padrão correto da Cloudflare para coordenar várias conexões
-WebSocket simultâneas (GM + N jogadores todos vendo o mesmo estado ao
-vivo) são **Durable Objects** — é o único primitivo da plataforma que
-mantém estado coordenado e roteia mensagens entre conexões que podem
-cair em isolates/edges diferentes. **Durable Objects não existem no
-plano Free** — exigem Workers Paid (US$5/mês mínimo), o que viola
-diretamente a política Zero Cost (`CLAUDE.md` §9: "Não ativar plano
-pago", "Se uma solução gratuita atingir o limite: preferir
-falha/degradação controlada a cobrança").
+WebSocket também é suportado no Free: "There is no charge for outgoing
+WebSocket messages." Overage no Free plan **não gera cobrança
+automática** — a conta simplesmente recebe erro (1027) até o próximo
+reset diário, exatamente o padrão "falhar/degradar em vez de cobrar"
+exigido por `CLAUDE.md` §9. Nada nesta arquitetura exige cartão,
+upgrade de plano ou billing habilitado.
 
-Um Worker plano comum (`WebSocketPair`) consegue abrir e manter UMA
-conexão WebSocket, mas sem Durable Objects não há como um Worker que
-recebe a atualização do GM (numa requisição) "empurrar" essa atualização
-para as conexões abertas dos jogadores (que vivem em invocações/isolates
-diferentes) — não existe estado compartilhado em memória entre
-invocações do Worker. Contornar isso com D1/KV como intermediário de
-"fila de eventos" reintroduziria polling por baixo dos panos (o cliente
-teria que checar a fila periodicamente de qualquer forma) com a
-complexidade extra de um mecanismo de pub/sub artesanal — sem ganho real
-sobre simplesmente fazer polling direto no endpoint que já existe.
+Reabrindo F-031 como `IN_PROGRESS` → implementado nesta sessão como
+realtime real via Durable Object + WebSocket, com o polling da versão
+anterior preservado como fallback (não descartado).
 
-## Decisão: polling client-side sobre `GET /vtt/:campaignId/live`
+## Limites reais do Free plan (verificados, não assumidos)
 
-Não é realtime no sentido de push instantâneo — é a "degradação
-controlada / sincronização alternativa gratuita" que o próprio pedido de
-roadmap previu como resultado possível desta auditoria
-(`docs/product/FULL_ROADMAP.md`, nota de F-031).
+**Workers Free:**
+- 100.000 requests/dia (reset à meia-noite UTC); exceder retorna erro
+  1027, nunca cobrança automática.
+- 10ms CPU por invocação HTTP padrão.
 
-Por que é adequado para o caso de uso real (mesa de RPG por turnos, não
-um jogo de reflexo):
+**Durable Objects (Free — SQLite-backed):**
+- Até 100 classes de Durable Object por conta.
+- 5 GB de storage por conta / 10 GB por Durable Object.
+- 30s de CPU por request (default) dentro do próprio Durable Object.
+- Mensagem WebSocket recebida: até 32 MiB.
+- Até 6 conexões de saída simultâneas por request.
+- Soft limit de 1.000 requests/segundo por instância de Durable Object.
+- SQL: até 100 colunas/tabela, 2 MB por linha/BLOB/string, 100 KB por
+  statement, 100 parâmetros vinculados por query.
 
-- Uma mesa de RPG não exige latência sub-segundo — o ritmo natural de
-  jogo (falar, decidir, mover) é medido em segundos, não em
-  frames/milissegundos.
-- `GET /vtt/:campaignId/live` **já existe** desde F-029/F-030/F-032 e já
-  faz toda a filtragem de segurança do lado do servidor (nunca vaza
-  `entityId`/`entityName`/HP/token oculto — ver `src/server/routes/vtt.ts`).
-  Realtime via polling reaproveita o MESMO endpoint, MESMA barreira de
-  segurança — não abre nenhum canal novo de leitura.
-- Custo previsível e dentro do Free Tier: um poll a cada 3s por jogador
-  conectado é uma fração ínfima do limite diário de requisições do
-  Workers Free (100.000/dia) — mesmo uma mesa de 6 jogadores por 4h
-  semanais consome uma ordem de grandeza a menos que esse limite.
-- Sem necessidade de nenhuma infraestrutura nova (Durable Objects, fila,
-  broker externo) — zero risco de custo, zero superfície nova de
-  segurança além do que `/live` já tinha.
+Nenhum desses limites é um risco de custo — são tetos técnicos que, se
+excedidos, falham de forma controlada (não há "estourar e ser cobrado"
+em Durable Objects/Workers Free). Uma mesa de RPG real (1 GM + poucos
+jogadores, updates medidos em segundos, não em milissegundos) fica
+ordens de grandeza abaixo de qualquer um desses limites.
 
-**Intervalo escolhido: 3 segundos**, com pausa automática quando a aba
-não está em foco (`document.visibilitychange`) — evita poll
-desnecessário quando o jogador não está olhando a tela, sem exigir
-nenhuma biblioteca nova.
+## Arquitetura implementada
+
+**Um Durable Object por Campaign** (`VttRoomDO`, `idFromName(campaignId)`)
+— granularidade de Campaign (não de Scene, que muda dentro da mesma
+mesa) e não de World (VTT já é escopado a Campaign desde F-029,
+diferente de Cartografia).
+
+**D1 continua sendo o único estado persistente autoritativo.** O
+Durable Object NUNCA duplica dado de domínio (scenes/tokens/combatants
+continuam só em D1, via as mesmas rotas REST já existentes e
+testadas). O Durable Object guarda só o estado efêmero de coordenação:
+conexões WebSocket abertas (com `role`/`userId` resolvidos no
+handshake, nunca informados pelo client) e um contador de sequência
+(`ctx.storage`, SQLite-backed, sobrevive a hibernação do DO). Isso
+evita duas fontes de verdade (`CLAUDE.md`/pedido, seção 4): quando uma
+rota REST já existente muda algo (mover token, revelar fog, avançar
+turno), a MESMA rota, depois de escrever em D1 com sucesso, notifica o
+Durable Object da Campaign; o Durable Object então relê o estado atual
+do D1 (reaproveitando as MESMAS funções que já montam o payload de
+`GET /live`) e retransmite a cada conexão aberta, filtrado por papel —
+GM recebe a visão completa (mesma de `GET /scenes/:id`), jogador recebe
+exatamente a mesma visão filtrada que `GET /live` já entregava (nunca
+HP, nunca `entityId`/`entityName` de token oculto, nunca célula de fog
+não revelada — a MESMA barreira de segurança, nunca uma nova).
+
+**Protocolo tipado e versionado** (`src/domain/vtt-realtime.ts`,
+compartilhado entre client e server): `HELLO`, `STATE` (com `reason`
+semântico: `SNAPSHOT`/`SCENE_CHANGED`/`TOKEN_MOVED`/`FOG_CHANGED`/
+`COMBAT_UPDATED`, sempre carregando o estado ATUAL completo, nunca um
+diff parcial — ver justificativa abaixo), `RESYNC_REQUIRED`, `PONG` do
+servidor; `PING`/`RESYNC` do cliente.
+
+**Por que snapshot completo em vez de diff por campo:** o pedido desta
+correção prioriza "estado atual correto" sobre "event sourcing
+completo" (seção 9). Um protocolo de diffs por campo (`TOKEN_MOVED`
+carregando só `{id,x,y}`) exigiria o cliente já ter um estado prévio
+consistente para aplicar o diff em cima — exatamente o problema que
+reconexão/resync tenta evitar. Com snapshot completo a cada evento, um
+cliente que perdeu mensagens (rede instável, hibernação do DO) nunca
+fica com estado inconsistente: a PRÓXIMA mensagem que chegar já é
+autocontida. O campo `reason` preserva o valor semântico (permite ao
+frontend decidir uma transição visual diferente por tipo de evento)
+sem pagar o custo de correção de diffs parciais.
+
+**Autenticação do WebSocket:** o handshake chega como uma requisição
+HTTP normal (`GET /api/v1/vtt/:campaignId/realtime` com
+`Upgrade: websocket`) — cookies same-origin são enviados pelo browser
+normalmente (diferente de `page.request` do Playwright, que não simula
+isso). A rota valida sessão (`requireAuth`, já aplicado a todo
+`/api/v1/*`) e authorization de Campaign (dono OU
+`campaign_members.user_id` ativo — MESMA checagem já usada por
+`GET /live`) **antes** de encaminhar o upgrade ao Durable Object; o
+papel (`GM`/`PLAYER`) é resolvido no servidor e anexado à conexão —
+nunca aceito do client. Não-membro nunca chega a fazer upgrade (404,
+mesmo padrão anti-enumeração do resto do produto).
+
+**Reconexão:** ao abrir, o Durable Object manda `HELLO{sequence}` +
+`STATE{reason:'SNAPSHOT', payload atual}` imediatamente — nunca exige
+replay de mensagens perdidas. Um client que perceber um gap na
+sequência manda `RESYNC` e recebe um novo snapshot completo na hora.
+
+**Fallback:** `VttLivePage` tenta WebSocket primeiro; se falhar (rede
+bloqueia upgrade, DO temporariamente indisponível) ou desconectar, cai
+de volta no polling de 3s já existente (não removido) enquanto tenta
+reconectar o WebSocket periodicamente em segundo plano. Nunca os dois
+mecanismos ativos ao mesmo tempo de forma permanente — polling só
+enquanto o WebSocket não está conectado.
 
 ## O que fica de fora desta v1 (documentado, não escondido)
 
-- **Posição de token arrastável em tempo real (drag ao vivo)**: fora de
-  escopo — o jogador vê a posição atualizada a cada poll (até 3s de
-  atraso), não um arrasto suave frame a frame. Aceitável para
-  reposicionamento tático de mesa, não para um jogo de ação.
-- **Notificação instantânea de troca de cena**: mesma limitação — até
-  3s de atraso até o jogador ver a nova cena.
-- Se no futuro houver orçamento real para Workers Paid, Durable Objects
-  reabilitaria WebSocket verdadeiro sem precisar redesenhar o
-  contrato de dados (o shape de `/live` continuaria o mesmo, só o
-  transporte mudaria de poll para push) — não é um beco sem saída
-  arquitetural, só adiado por custo.
+- **Handout reveal via realtime**: o domínio de handout revelável ao
+  jogador ainda não existe no produto (Adventure handouts são
+  owner-only até F-033 avaliar visibilidade ao jogador) — o evento
+  `HANDOUT_REVEALED` fica reservado no protocolo, não implementado
+  ainda, sem consumidor.
+- **Múltiplos Game Masters simultâneos escrevendo ao mesmo tempo**:
+  continua fora de escopo (VTT é owner-only para escrita, mesmo modelo
+  do resto do produto — não mudou nesta correção).
+- **Load test formal de "quantas mesas simultâneas cabem no Free"**:
+  documentado como estimativa (ver seção correspondente do relatório
+  final), não uma simulação de carga real formal.
+
+## Implementação real — achados do desenvolvimento (2026-08-20)
+
+A arquitetura acima foi implementada e testada de ponta a ponta (integração
+via `@cloudflare/vitest-pool-workers`, 21 testes cobrindo todos os cenários
+da seção 12 do pedido de correção, e E2E via Playwright com dois contextos
+de browser reais). Três problemas concretos apareceram durante a
+implementação e foram corrigidos — registrados aqui porque nenhum deles
+era óbvio a partir do desenho original:
+
+1. **Resposta 101 tem headers imutáveis.** O middleware global (`src/server/index.ts`)
+   tentava escrever `X-Request-Id`/security headers em toda resposta,
+   inclusive a de upgrade de WebSocket — a Cloudflare marca os headers de
+   uma resposta `status:101` como imutáveis, e a tentativa de escrita
+   derrubava a conexão com `Can't modify immutable headers.`. Corrigido
+   pulando essa escrita quando `c.res.status===101`.
+2. **Reconstruir a Request com uma URL diferente quebra o handshake em
+   browser real.** A primeira versão da rota de upgrade codificava
+   `role`/`userId`/`campaignId` como query string de uma URL nova
+   (`new Request(outraUrl, c.req.raw)`) antes de encaminhar ao Durable
+   Object. Isso funcionava com um client WebSocket puro (Node `ws`) e nos
+   testes de integração, mas travava silenciosamente em Chromium real (o
+   WebSocket ficava para sempre em `CONNECTING`, sem `open` nem `error`).
+   Corrigido preservando a URL ORIGINAL da requisição e passando os
+   metadados por headers (copiados para um `Headers` novo e mutável, já
+   que os headers da requisição recebida também são imutáveis).
+3. **A primeira mensagem do servidor pode se perder entre o upgrade e o
+   client terminar de se inscrever nos listeners** — observado
+   especificamente através do proxy de desenvolvimento local
+   (`@cloudflare/vite-plugin`/Miniflare), não nos testes de integração.
+   Mitigado no client: ao abrir a conexão, além de aguardar o `HELLO`/
+   `STATE` não solicitados, o `VttLivePage` manda um `RESYNC` ativamente —
+   nunca faz mal (o protocolo já é resiliente a `STATE` duplicado via
+   `sequence`) e garante convergência mesmo se a primeira mensagem
+   push se perder. A conexão inicial também é adiada com
+   `setTimeout(connect,0)` para nunca criar um WebSocket descartável
+   durante o mount→cleanup→remount do React StrictMode (dev only).
+
+**Nota de ambiente:** o sandbox usado nesta sessão mostrou latência local
+alta e variável para o runtime de Durable Object do `wrangler dev`/
+`@cloudflare/vite-plugin` (dezenas de execuções consecutivas de teste ao
+longo da investigação, possivelmente com contenção acumulada de recursos)
+— os testes E2E de realtime (`tests/e2e/vtt-live.spec.ts`,
+`tests/e2e/vtt-realtime.spec.ts`) usam timeouts mais folgados que o padrão
+do projeto por isso, com justificativa em comentário. O mecanismo em si foi
+comprovado correto de ponta a ponta em múltiplas execuções completas nesse
+mesmo sandbox (WebSocket abre, `HELLO`/`STATE`/`COMBAT_UPDATED` chegam,
+UI atualiza sem reload) — a variável foi sempre tempo de espera, nunca
+comportamento incorreto.
 
 ## Conclusão
 
-F-031 = polling de 3s sobre `/live` (GM já vê suas próprias mudanças
-instantaneamente via estado local, sem precisar de poll). Implementado
-como o componente de "visão ao vivo" do jogador para VTT, que também é
-a peça que F-033 (Player View integrada) vai incorporar ao Portal.
-`BLOCKED` fica resolvido — não por falta de solução técnica, mas porque
-a solução real (polling) já foi encontrada e implementada.
+F-031 = Durable Object (`VttRoomDO`, SQLite-backed, Free plan) +
+WebSocket real, com D1 como única fonte de verdade e polling como
+fallback controlado — não substituído, preservado. `DONE` de verdade
+desta vez, com evidência real de deploy em produção (ver relatório da
+sessão para Worker Version ID e prova da migration de Durable Objects).

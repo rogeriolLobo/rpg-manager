@@ -29,6 +29,10 @@ import { adventureRoutes } from './routes/adventures';
 import { fileRoutes } from './routes/files';
 import { vttRoutes } from './routes/vtt';
 import type { AppVariables, Env } from './types';
+// F-031 (correção 2026-08-20): a classe do Durable Object precisa ser um export nomeado do
+// entry point (`main` em wrangler.jsonc) para o binding `VTT_ROOMS` conseguir resolvê-la — ver
+// docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md.
+export { VttRoomDO } from './vtt-room-do';
 import { profileSchema } from '../shared/validation/schemas';
 import { readJson } from './http';
 import { BUILD_COMMIT, BUILD_TIME } from './build-info';
@@ -38,8 +42,15 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 app.use('*', async (c, next) => {
   const requestId = c.req.header('CF-Ray') ?? crypto.randomUUID(); c.set('requestId', requestId); const started = Date.now();
   try { await next(); } finally {
-    applySecurityHeaders(c.res.headers, c.env.ENVIRONMENT === 'production' || new URL(c.req.url).protocol === 'https:');
-    c.res.headers.set('X-Request-Id', requestId);
+    // F-031 (correção 2026-08-20): resposta 101 (upgrade de WebSocket, ver GET
+    // /vtt/:campaignId/realtime) tem headers imutáveis no runtime da Cloudflare — tentar
+    // escrever nela derruba a conexão com "Can't modify immutable headers.". Nunca é uma
+    // resposta que precise dos headers de segurança/observability de qualquer forma (não é
+    // HTML/JSON servido a um navegador comum).
+    if (c.res.status !== 101) {
+      applySecurityHeaders(c.res.headers, c.env.ENVIRONMENT === 'production' || new URL(c.req.url).protocol === 'https:');
+      c.res.headers.set('X-Request-Id', requestId);
+    }
     console.info(JSON.stringify({ level: 'info', requestId, method: c.req.method, route: new URL(c.req.url).pathname, status: c.res.status, durationMs: Date.now() - started }));
   }
 });

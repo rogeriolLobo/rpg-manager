@@ -1,10 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// F-031 (BATCH17): "realtime" em Zero Cost via polling sobre GET /vtt/:campaignId/live — ver
+// F-031 (BATCH17, correção 2026-08-20): visão "ao vivo" do jogador — WebSocket real (Durable
+// Object) preferido, polling sobre GET /vtt/:campaignId/live como fallback — ver
 // docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md. Setup de amizade/grupo/campanha via API
 // (page.request, mesma sessão do browser) para o teste focar no comportamento real sob teste
-// (a visão ao vivo do jogador e o poll) em vez de repetir os fluxos de UI já cobertos em
-// social-friends.spec.ts/social-library-invites.spec.ts.
+// (a visão ao vivo do jogador) em vez de repetir os fluxos de UI já cobertos em
+// social-friends.spec.ts/social-library-invites.spec.ts. Timeouts mais folgados que o default
+// do projeto (10s) porque este teste depende do runtime local de Durable Object do
+// `wrangler dev`/vite-plugin, que soma latência real de D1 + Durable Object + WebSocket —
+// mais lento que uma rota HTTP comum, não um `waitForTimeout` cego (ver tests/e2e/vtt-realtime.spec.ts,
+// que valida a velocidade real de entrega via WebSocket separadamente).
 async function register(page: Page, email: string, name: string) {
   await page.goto("/register");
   await page.getByLabel("Como quer ser chamado?").fill(name);
@@ -25,8 +30,8 @@ function csrfToken(cookies: Array<{ name: string; value: string }>): string {
 // documentado em vault-worlds-flow.spec.ts, que usa o mesmo padrão).
 const apiHeaders = (csrf: string) => ({ "X-CSRF-Token": csrf, Origin: "http://127.0.0.1:5173" });
 
-test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o combate aparece após o mestre iniciar (poll)", async ({ page, browser }) => {
-  test.setTimeout(60_000);
+test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o combate aparece após o mestre iniciar", async ({ page, browser }) => {
+  test.setTimeout(180_000);
   const suffix = Date.now();
   const ownerEmail = `e2e-vtt-live-owner-${suffix}@example.com`;
   const playerEmail = `e2e-vtt-live-player-${suffix}@example.com`;
@@ -60,16 +65,20 @@ test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o c
   await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/activate`, { headers: apiHeaders(ownerCsrf), data: {} });
 
   await playerPage.goto(`/app/campaigns/${campaignId}/vtt/live`);
-  await expect(playerPage.getByRole("heading", { name: "Cena Ao Vivo" })).toBeVisible();
+  // Timeout folgado: primeira conexão de WebSocket/Durable Object desta Campaign soma latência
+  // real de D1 + Durable Object + coordenação do runtime local — bem acima do timeout padrão
+  // de asserção do projeto (10s), sem ser um `waitForTimeout` cego.
+  await expect(playerPage.getByRole("heading", { name: "Cena Ao Vivo" })).toBeVisible({ timeout: 30_000 });
   await expect(playerPage.locator(".vtt-token").filter({ hasText: "HE" })).toBeVisible();
 
-  // Mestre inicia combate DEPOIS do jogador já estar na tela — o combate só aparece quando o
-  // próximo poll (até 3s) buscar de novo, provando que a visão realmente atualiza sozinha.
+  // Mestre inicia combate DEPOIS do jogador já estar na tela — chega via WebSocket (ou, se a
+  // conexão cair, pelo poll de fallback em até 3s), provando que a visão realmente atualiza
+  // sozinha sem reload manual.
   await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/combat/start`, {
     headers: apiHeaders(ownerCsrf),
     data: { combatants: [{ tokenId: null, name: "Herói", initiative: 15, hpCurrent: 20, hpMax: 20, notes: "", visibleToPlayers: true }] },
   });
-  await expect(playerPage.getByText("Round 1")).toBeVisible({ timeout: 10_000 });
+  await expect(playerPage.getByText("Round 1")).toBeVisible({ timeout: 15_000 });
   await expect(playerPage.getByText("Turno atual")).toBeVisible();
 
   // Não-membro nunca acessa (anti-enumeração, mesmo estado amigável de "não encontrado").
@@ -77,5 +86,5 @@ test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o c
   const outsiderPage = await outsiderContext.newPage();
   await register(outsiderPage, `e2e-vtt-live-outsider-${suffix}@example.com`, `Fora Live ${suffix}`);
   await outsiderPage.goto(`/app/campaigns/${campaignId}/vtt/live`);
-  await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible();
+  await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible({ timeout: 30_000 });
 });

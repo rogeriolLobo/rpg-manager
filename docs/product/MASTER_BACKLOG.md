@@ -1501,6 +1501,76 @@ para o raciocínio completo.
   execução do roadmap: BATCH18 — F-033 (Player View integrada) +
   F-034 (GM View integrada), ambos desbloqueados.
 
+## F-031 — correção: realtime real via Durable Object + WebSocket — `DONE` (2026-08-20)
+
+A premissa da entrada acima estava **errada**: verificado diretamente
+contra a documentação oficial da Cloudflare em vigor nesta data —
+Durable Objects (SQLite-backed) **estão disponíveis no Workers Free**,
+com suporte a WebSocket sem cobrança por mensagem, e overage no Free
+falha (erro 1027) em vez de gerar cobrança automática — exatamente o
+padrão "falhar/degradar em vez de cobrar" exigido por `CLAUDE.md` §9.
+F-031 reaberto (`DONE`→`IN_PROGRESS`→`DONE` de novo) e reimplementado
+com realtime real, sem descartar o polling — ver
+`docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md` para a arquitetura
+completa e a correção registrada.
+
+- **`VttRoomDO`** (`src/server/vtt-room-do.ts`): um Durable Object por
+  Campaign (`env.VTT_ROOMS.idFromName(campaignId)`). Nunca duplica
+  estado de domínio — D1 continua a única fonte de verdade (scenes/
+  tokens/fog/combatants continuam só nas rotas REST já existentes de
+  `vtt.ts`). O Durable Object só coordena: conexões WebSocket
+  (Hibernatable WebSockets API, role/userId anexados via tags
+  resolvidas no handshake, nunca informados pelo client) e um contador
+  de sequência (`ctx.storage`).
+- **Protocolo tipado** (`src/domain/vtt-realtime.ts`, compartilhado
+  client/server): `HELLO`, `STATE` (sempre o snapshot COMPLETO atual,
+  nunca um diff parcial — decisão deliberada, ver justificativa no
+  audit doc), `RESYNC_REQUIRED`, `PONG` do servidor; `PING`/`RESYNC` do
+  cliente.
+- **`GET /api/v1/vtt/:campaignId/realtime`** (`src/server/routes/vtt.ts`):
+  mesma authorization de `GET /live` (dono OU membro ativo, 404 para
+  não-membro, anti-enumeração) feita ANTES de encaminhar o upgrade ao
+  Durable Object; papel (GM/PLAYER) resolvido no servidor. Toda rota
+  mutante de VTT (scene/token/fog/combat) chama `notifyRoom(...)` depois
+  de escrever em D1 com sucesso, disparando um broadcast filtrado por
+  papel de cada conexão — mesma barreira de segurança de `/live`, nunca
+  uma nova (nunca HP, nunca entityId/entityName de token oculto, nunca
+  fog não revelado).
+- **`VttLivePage`**: WebSocket preferido; ao abrir, pede o snapshot
+  ativamente via `RESYNC` (além do `HELLO`/`STATE` que o servidor já
+  envia sem ser solicitado — resiliente a perda da primeira mensagem);
+  cai no polling de 3s (preservado, não removido) sempre que o
+  WebSocket não está conectado, tentando reconectar em segundo plano.
+  Nunca os dois mecanismos ativos permanentemente ao mesmo tempo. Badge
+  "● Tempo real"/"○ Polling de fallback" no cabeçalho.
+- **`wrangler.jsonc`**: `durable_objects.bindings` (`VTT_ROOMS` →
+  `VttRoomDO`) + `migrations` (`new_sqlite_classes`) — confirmado via
+  `wrangler deploy --dry-run` que o binding resolve corretamente antes
+  do deploy real.
+- **Achados reais de implementação** (não óbvios do desenho original,
+  ver audit doc para o detalhe completo): resposta 101 tem headers
+  imutáveis (corrigido pulando a escrita de security headers nela);
+  reconstruir a Request de upgrade com uma URL diferente travava o
+  handshake em Chromium real, mesmo funcionando com um client WebSocket
+  puro e nos testes de integração (corrigido preservando a URL
+  original, metadados via headers); a conexão inicial é adiada
+  (`setTimeout(connect,0)`) para nunca criar um WebSocket descartável
+  durante o mount→cleanup→remount do React StrictMode.
+- **Testes:** `tests/integration/vtt-realtime.test.ts` — 21 testes
+  cobrindo GM/Player/Outsider conectando (outsider nunca faz upgrade,
+  404); GM move token visível → Player recebe; GM move token oculto →
+  Player nunca recebe; GM revela fog → Player recebe; GM avança turno →
+  Player recebe sem HP; disconnect/reconnect → snapshot correto sem
+  replay; sequência de broadcast cresce monotonicamente; RESYNC sempre
+  devolve snapshot completo; dois jogadores simultâneos recebem o mesmo
+  broadcast filtrado. `tests/e2e/vtt-realtime.spec.ts` (novo) prova, com
+  dois contextos de browser reais, atualização automática sem reload e
+  sem esperar o poll. `tests/e2e/vtt-live.spec.ts` (existente) continua
+  cobrindo o fallback de polling e a authorization.
+- Vertical F-031 concluída de verdade. Próximo item da ordem de
+  execução do roadmap: BATCH18 — F-033 (Player View integrada) +
+  F-034 (GM View integrada), ambos desbloqueados.
+
 **Prova de release do BATCH17** (migration 0039 + hardening de CI):
 `git rev-parse HEAD` = `origin/main` = `d1c577b`; `wrangler d1
 migrations list --remote` → "No migrations to apply" (0039 aplicada,

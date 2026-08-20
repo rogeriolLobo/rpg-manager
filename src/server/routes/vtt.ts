@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { vttCombatantInputSchema, vttCombatStartSchema, vttFogCellInputSchema, vttSceneInputSchema, vttTokenInputSchema } from '../../shared/validation/schemas';
+import type { VttGmScenePayload, VttPlayerScenePayload, VttRealtimeStateReason } from '../../domain/vtt-realtime';
 import { ownedEntity } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
@@ -62,10 +63,64 @@ async function validMap(c: AppContext, mapId: string | null | undefined): Promis
 // Resolve a imagem de fundo real (mapa da Cartografia OU image_url própria) — usado tanto na
 // visão do GM quanto na visão "ao vivo" do jogador, para nenhuma das duas exigir uma segunda
 // chamada a /cartography (cujo World pode não ser um World ao qual o jogador tenha acesso).
-async function resolveImageUrl(c: AppContext, scene: SceneRow): Promise<string> {
+// Recebe `db` puro (não o Context) porque é reaproveitada pelo Durable Object (F-031), que não
+// tem um Hono Context — só o binding DB do seu próprio env.
+async function resolveImageUrlDb(db: D1Database, scene: SceneRow): Promise<string> {
   if (!scene.map_id) return scene.image_url;
-  const map = await c.env.DB.prepare('SELECT image_url FROM world_maps WHERE id=?').bind(scene.map_id).first<{ image_url: string }>();
+  const map = await db.prepare('SELECT image_url FROM world_maps WHERE id=?').bind(scene.map_id).first<{ image_url: string }>();
   return map?.image_url ?? scene.image_url;
+}
+async function resolveImageUrl(c: AppContext, scene: SceneRow): Promise<string> { return resolveImageUrlDb(c.env.DB, scene); }
+
+// ── F-031 (correção 2026-08-20): builders puros reaproveitados por GET /live E pelo broadcast
+// do Durable Object (VttRoomDO) — a MESMA função monta o payload nos dois casos, para nunca
+// existir uma segunda implementação do filtro de segurança (nunca HP/entityId/entityName de
+// token oculto, nunca fog não revelado — ver comentário no topo do arquivo). Nenhuma checagem
+// de autorização aqui: quem chama (rota HTTP ou o próprio Durable Object, que só aceitou a
+// conexão depois de validar sessão+membership no handshake) já garantiu isso antes.
+export async function buildPlayerLiveScenePayload(db: D1Database, campaignId: string): Promise<VttPlayerScenePayload | null> {
+  const scene = await db.prepare('SELECT * FROM vtt_scenes WHERE campaign_id=? AND is_active=1').bind(campaignId).first<SceneRow>();
+  if (!scene) return null;
+  const resolvedImageUrl = await resolveImageUrlDb(db, scene);
+  const tokens = await db.prepare('SELECT * FROM vtt_tokens WHERE scene_id=? AND visible_to_players=1 ORDER BY created_at').bind(scene.id).all<TokenRow>();
+  let visibleTokens = tokens.results;
+  let fogCells: FogCellRow[] = [];
+  if (scene.fog_enabled) {
+    const fog = await db.prepare('SELECT col,row FROM vtt_fog_cells WHERE scene_id=?').bind(scene.id).all<FogCellRow>();
+    fogCells = fog.results;
+    const revealed = new Set(fogCells.map((cell) => `${cell.col}:${cell.row}`));
+    visibleTokens = visibleTokens.filter((token) => { const cell = tokenFogCell(scene, token); return revealed.has(`${cell.col}:${cell.row}`); });
+  }
+  const combatants = scene.combat_active
+    ? (await db.prepare('SELECT * FROM vtt_combatants WHERE scene_id=? AND visible_to_players=1 ORDER BY initiative DESC, created_at').bind(scene.id).all<CombatantRow>()).results
+    : [];
+  return { id: scene.id, title: scene.title, imageUrl: resolvedImageUrl, fogEnabled: Boolean(scene.fog_enabled), gridCols: scene.grid_cols, gridRows: scene.grid_rows, fogCells, tokens: visibleTokens.map(presentPlayerToken), combatActive: Boolean(scene.combat_active), combatRound: scene.combat_round, combatants: combatants.map(presentPlayerCombatant) };
+}
+
+export async function buildGmLiveScenePayload(db: D1Database, campaignId: string): Promise<VttGmScenePayload | null> {
+  const scene = await db.prepare('SELECT * FROM vtt_scenes WHERE campaign_id=? AND is_active=1').bind(campaignId).first<SceneRow>();
+  if (!scene) return null;
+  const tokens = await db.prepare('SELECT t.*,ve.name entity_name,ve.entity_type entity_type FROM vtt_tokens t LEFT JOIN vault_entities ve ON ve.id=t.entity_id WHERE t.scene_id=? ORDER BY t.created_at').bind(scene.id).all<TokenRow>();
+  const resolvedImageUrl = await resolveImageUrlDb(db, scene);
+  const fog = await db.prepare('SELECT col,row FROM vtt_fog_cells WHERE scene_id=?').bind(scene.id).all<FogCellRow>();
+  const combatants = await db.prepare('SELECT * FROM vtt_combatants WHERE scene_id=? ORDER BY initiative DESC, created_at').bind(scene.id).all<CombatantRow>();
+  return { item: { ...presentScene(scene), resolvedImageUrl }, tokens: tokens.results.map(presentToken), fog: fog.results, combatants: combatants.results.map(presentCombatant) };
+}
+
+// Notifica o Durable Object da Campaign depois de uma escrita de sucesso em D1 — best-effort:
+// nunca deve derrubar a resposta HTTP nem desfazer a escrita já commitada (qualquer erro é
+// engolido). Toda rota mutante dá `await` nisto antes de responder — mais simples e mais
+// correto do que `executionCtx.waitUntil` (que só garante "tentar rodar depois da resposta",
+// sem qualquer garantia de quando/se completa): o pequeno custo de latência extra (um round
+// trip a mais até o Durable Object) é aceitável para o uso real (mesa de RPG, poucos
+// jogadores, updates medidos em segundos) e evita o cliente nunca saber se o broadcast
+// realmente foi disparado. Se o Durable Object estiver indisponível, o polling de fallback
+// (VttLivePage) eventualmente converge sozinho.
+async function notifyRoom(env: Env, campaignId: string, reason: VttRealtimeStateReason): Promise<void> {
+  try {
+    const stub = env.VTT_ROOMS.get(env.VTT_ROOMS.idFromName(campaignId));
+    await stub.fetch('https://vtt-room.internal/broadcast', { method: 'POST', body: JSON.stringify({ reason }) });
+  } catch { /* best-effort — ver comentário acima */ }
 }
 
 vttRoutes.get('/:campaignId/scenes', async (c) => {
@@ -103,6 +158,7 @@ vttRoutes.patch('/:campaignId/scenes/:sceneId', async (c) => {
   await validMap(c, input.mapId);
   await c.env.DB.prepare('UPDATE vtt_scenes SET map_id=?,title=?,image_url=?,notes=?,fog_enabled=?,grid_cols=?,grid_rows=?,updated_at=? WHERE id=?')
     .bind(input.mapId ?? null, input.title, input.imageUrl, input.notes, Number(input.fogEnabled), input.gridCols, input.gridRows, nowIso(), sceneId).run();
+  await notifyRoom(c.env, campaignId, 'SCENE_CHANGED');
   return c.json({ success: true });
 });
 
@@ -110,6 +166,7 @@ vttRoutes.delete('/:campaignId/scenes/:sceneId', async (c) => {
   const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
   await ownedScene(c, campaignId, sceneId);
   await c.env.DB.prepare('DELETE FROM vtt_scenes WHERE id=?').bind(sceneId).run();
+  await notifyRoom(c.env, campaignId, 'SCENE_CHANGED');
   return c.body(null, 204);
 });
 
@@ -121,6 +178,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/activate', async (c) => {
     c.env.DB.prepare('UPDATE vtt_scenes SET is_active=0,updated_at=? WHERE campaign_id=? AND is_active=1 AND id!=?').bind(now, campaignId, sceneId),
     c.env.DB.prepare('UPDATE vtt_scenes SET is_active=1,updated_at=? WHERE id=?').bind(now, sceneId),
   ]);
+  await notifyRoom(c.env, campaignId, 'SCENE_CHANGED');
   return c.json({ success: true });
 });
 
@@ -128,6 +186,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/deactivate', async (c) => {
   const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
   await ownedScene(c, campaignId, sceneId);
   await c.env.DB.prepare('UPDATE vtt_scenes SET is_active=0,updated_at=? WHERE id=?').bind(nowIso(), sceneId).run();
+  await notifyRoom(c.env, campaignId, 'SCENE_CHANGED');
   return c.json({ success: true });
 });
 
@@ -141,6 +200,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/tokens', async (c) => {
   const id = crypto.randomUUID(), now = nowIso();
   await c.env.DB.prepare('INSERT INTO vtt_tokens (id,scene_id,entity_id,label,x,y,visible_to_players,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
     .bind(id, sceneId, input.entityId ?? null, input.label, input.x, input.y, Number(input.visibleToPlayers), now, now).run();
+  await notifyRoom(c.env, campaignId, 'TOKEN_MOVED');
   return c.json({ id }, 201);
 });
 
@@ -152,6 +212,7 @@ vttRoutes.patch('/:campaignId/scenes/:sceneId/tokens/:tokenId', async (c) => {
   const result = await c.env.DB.prepare('UPDATE vtt_tokens SET entity_id=?,label=?,x=?,y=?,visible_to_players=?,updated_at=? WHERE id=? AND scene_id=?')
     .bind(input.entityId ?? null, input.label, input.x, input.y, Number(input.visibleToPlayers), nowIso(), c.req.param('tokenId'), sceneId).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Token não encontrado.');
+  await notifyRoom(c.env, campaignId, 'TOKEN_MOVED');
   return c.json({ success: true });
 });
 
@@ -160,6 +221,7 @@ vttRoutes.delete('/:campaignId/scenes/:sceneId/tokens/:tokenId', async (c) => {
   await ownedScene(c, campaignId, sceneId);
   const result = await c.env.DB.prepare('DELETE FROM vtt_tokens WHERE id=? AND scene_id=?').bind(c.req.param('tokenId'), sceneId).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Token não encontrado.');
+  await notifyRoom(c.env, campaignId, 'TOKEN_MOVED');
   return c.body(null, 204);
 });
 
@@ -173,6 +235,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/fog/reveal', async (c) => {
   const input = await readJson(c, vttFogCellInputSchema);
   await cellInRange(scene, input.col, input.row);
   await c.env.DB.prepare('INSERT OR IGNORE INTO vtt_fog_cells (scene_id,col,row,revealed_at) VALUES (?,?,?,?)').bind(sceneId, input.col, input.row, nowIso()).run();
+  await notifyRoom(c.env, campaignId, 'FOG_CHANGED');
   return c.json({ success: true }, 201);
 });
 
@@ -182,6 +245,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/fog/hide', async (c) => {
   const input = await readJson(c, vttFogCellInputSchema);
   await cellInRange(scene, input.col, input.row);
   await c.env.DB.prepare('DELETE FROM vtt_fog_cells WHERE scene_id=? AND col=? AND row=?').bind(sceneId, input.col, input.row).run();
+  await notifyRoom(c.env, campaignId, 'FOG_CHANGED');
   return c.json({ success: true });
 });
 
@@ -189,6 +253,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/fog/reset', async (c) => {
   const campaignId = c.req.param('campaignId'), sceneId = c.req.param('sceneId');
   await ownedScene(c, campaignId, sceneId);
   await c.env.DB.prepare('DELETE FROM vtt_fog_cells WHERE scene_id=?').bind(sceneId).run();
+  await notifyRoom(c.env, campaignId, 'FOG_CHANGED');
   return c.json({ success: true });
 });
 
@@ -220,6 +285,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/combat/start', async (c) => {
   // numa segunda chamada simples (evita depender da ordem de execução do batch acima).
   const order = await turnOrder(c, sceneId);
   if (order.length) await c.env.DB.prepare('UPDATE vtt_combatants SET is_current_turn=1 WHERE id=?').bind(order[0].id).run();
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.json({ success: true }, 201);
 });
 
@@ -238,6 +304,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/combat/next', async (c) => {
   statements.push(c.env.DB.prepare('UPDATE vtt_combatants SET is_current_turn=1,updated_at=? WHERE id=?').bind(now, order[nextIndex].id));
   if (wrapped) statements.push(c.env.DB.prepare('UPDATE vtt_scenes SET combat_round=combat_round+1,updated_at=? WHERE id=?').bind(now, sceneId));
   await c.env.DB.batch(statements);
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.json({ success: true });
 });
 
@@ -250,6 +317,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/combat/end', async (c) => {
     c.env.DB.prepare('DELETE FROM vtt_combatants WHERE scene_id=?').bind(sceneId),
     c.env.DB.prepare('UPDATE vtt_scenes SET combat_active=0,combat_round=0,updated_at=? WHERE id=?').bind(nowIso(), sceneId),
   ]);
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.json({ success: true });
 });
 
@@ -265,6 +333,7 @@ vttRoutes.post('/:campaignId/scenes/:sceneId/combat/combatants', async (c) => {
   const id = crypto.randomUUID(), now = nowIso();
   await c.env.DB.prepare('INSERT INTO vtt_combatants (id,scene_id,token_id,name,initiative,hp_current,hp_max,notes,visible_to_players,is_current_turn,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,0,?,?)')
     .bind(id, sceneId, input.tokenId ?? null, input.name, input.initiative, input.hpCurrent ?? null, input.hpMax ?? null, input.notes, Number(input.visibleToPlayers), now, now).run();
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.json({ id }, 201);
 });
 
@@ -279,6 +348,7 @@ vttRoutes.patch('/:campaignId/scenes/:sceneId/combat/combatants/:combatantId', a
   const result = await c.env.DB.prepare('UPDATE vtt_combatants SET token_id=?,name=?,initiative=?,hp_current=?,hp_max=?,notes=?,visible_to_players=?,updated_at=? WHERE id=? AND scene_id=?')
     .bind(input.tokenId ?? null, input.name, input.initiative, input.hpCurrent ?? null, input.hpMax ?? null, input.notes, Number(input.visibleToPlayers), nowIso(), c.req.param('combatantId'), sceneId).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Combatente não encontrado.');
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.json({ success: true });
 });
 
@@ -296,33 +366,49 @@ vttRoutes.delete('/:campaignId/scenes/:sceneId/combat/combatants/:combatantId', 
     if (remaining.length) statements.push(c.env.DB.prepare('UPDATE vtt_combatants SET is_current_turn=1,updated_at=? WHERE id=?').bind(nowIso(), remaining[0].id));
   }
   await c.env.DB.batch(statements);
+  await notifyRoom(c.env, campaignId, 'COMBAT_UPDATED');
   return c.body(null, 204);
 });
 
-vttRoutes.get('/:campaignId/live', async (c) => {
-  const campaignId = c.req.param('campaignId'); const userId = c.get('user').id;
-  const access = await c.env.DB.prepare(`SELECT c.id,
+// Checagem de authorization compartilhada entre GET /live e a rota de upgrade de WebSocket
+// (F-031) — dono OU membro ativo da Campaign. Não-membro sempre recebe 404 (nunca 403 — mesmo
+// padrão anti-enumeração do resto do produto), e o papel (GM/PLAYER) é resolvido aqui, no
+// servidor, nunca aceito de um valor informado pelo client.
+async function authorizeLiveAccess(c: AppContext, campaignId: string): Promise<'GM' | 'PLAYER'> {
+  const userId = c.get('user').id;
+  const access = await c.env.DB.prepare(`SELECT c.id, c.user_id owner_id,
     (c.user_id=? OR EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.user_id=? AND cm.active=1)) authorized
-    FROM campaigns c WHERE c.id=?`).bind(userId, userId, campaignId).first<{ id: string; authorized: number }>();
+    FROM campaigns c WHERE c.id=?`).bind(userId, userId, campaignId).first<{ id: string; owner_id: string; authorized: number }>();
   if (!access || !access.authorized) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
-  const scene = await c.env.DB.prepare('SELECT * FROM vtt_scenes WHERE campaign_id=? AND is_active=1').bind(campaignId).first<SceneRow>();
-  if (!scene) return c.json({ item: null });
-  const resolvedImageUrl = await resolveImageUrl(c, scene);
-  const tokens = await c.env.DB.prepare('SELECT * FROM vtt_tokens WHERE scene_id=? AND visible_to_players=1 ORDER BY created_at').bind(scene.id).all<TokenRow>();
-  let visibleTokens = tokens.results;
-  let fogCells: FogCellRow[] = [];
-  if (scene.fog_enabled) {
-    const fog = await c.env.DB.prepare('SELECT col,row FROM vtt_fog_cells WHERE scene_id=?').bind(scene.id).all<FogCellRow>();
-    fogCells = fog.results;
-    const revealed = new Set(fogCells.map((cell) => `${cell.col}:${cell.row}`));
-    // Igual GM_ONLY: um token só chega ao jogador se estiver numa célula revelada — a barreira
-    // é aplicada aqui, no servidor, nunca uma máscara visual por cima da imagem no cliente.
-    visibleTokens = visibleTokens.filter((token) => { const cell = tokenFogCell(scene, token); return revealed.has(`${cell.col}:${cell.row}`); });
-  }
-  // F-032: combate na visão do jogador — só nome + de quem é o turno + round, nunca HP (ver
-  // presentPlayerCombatant) e só combatentes marcados visible_to_players=1.
-  const combatants = scene.combat_active
-    ? (await c.env.DB.prepare('SELECT * FROM vtt_combatants WHERE scene_id=? AND visible_to_players=1 ORDER BY initiative DESC, created_at').bind(scene.id).all<CombatantRow>()).results
-    : [];
-  return c.json({ item: { id: scene.id, title: scene.title, imageUrl: resolvedImageUrl, fogEnabled: Boolean(scene.fog_enabled), gridCols: scene.grid_cols, gridRows: scene.grid_rows, fogCells, tokens: visibleTokens.map(presentPlayerToken), combatActive: Boolean(scene.combat_active), combatRound: scene.combat_round, combatants: combatants.map(presentPlayerCombatant) } });
+  return access.owner_id === userId ? 'GM' : 'PLAYER';
+}
+
+vttRoutes.get('/:campaignId/live', async (c) => {
+  const campaignId = c.req.param('campaignId');
+  await authorizeLiveAccess(c, campaignId);
+  return c.json({ item: await buildPlayerLiveScenePayload(c.env.DB, campaignId) });
+});
+
+// F-031 (correção 2026-08-20): upgrade de WebSocket para o realtime real da mesa — mesma
+// authorization de GET /live, feita ANTES de encaminhar ao Durable Object (nunca confiar em
+// nada validado só dentro do DO). O papel resolvido no servidor vai como query param só porque
+// a Durable Object Namespace API não repassa Variables do Hono; não é um dado sensível (é o
+// MESMO papel que a authorization acima já calculou, não uma entrada do client).
+vttRoutes.get('/:campaignId/realtime', async (c) => {
+  const campaignId = c.req.param('campaignId');
+  const role = await authorizeLiveAccess(c, campaignId);
+  if (c.req.header('Upgrade') !== 'websocket') throw new ApiError(400, 'UPGRADE_REQUIRED', 'Esta rota exige upgrade de WebSocket.');
+  const stub = c.env.VTT_ROOMS.get(c.env.VTT_ROOMS.idFromName(campaignId));
+  // Encaminha a requisição de upgrade preservando a MESMA URL (`new Request(outraUrl, req)`
+  // travava o handshake num navegador real — DevTools nunca reportava erro, o WebSocket
+  // simplesmente ficava para sempre em CONNECTING; um cliente WebSocket puro via Node não
+  // reproduzia isso, então nunca apareceu nos testes de integração). Os headers do request
+  // original são imutáveis (`c.req.raw.headers.set` falha com "Can't modify immutable
+  // headers."), então precisam ser copiados para um novo Headers mutável antes de acrescentar
+  // os metadados — nada disso é informado pelo client, já foi resolvido acima a partir da
+  // sessão real.
+  const headers = new Headers(c.req.raw.headers);
+  headers.set('X-Vtt-Role', role);
+  headers.set('X-Vtt-User-Id', c.get('user').id);
+  return stub.fetch(new Request(c.req.raw.url, { method: c.req.raw.method, headers }));
 });

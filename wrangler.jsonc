@@ -28,6 +28,18 @@
       "id": "49b800c188ac4098a0c5c31cd5df157d"
     }
   ],
+  // F-031 (correção 2026-08-20): realtime de VTT via Durable Object SQLite-backed — disponível
+  // no Workers Free (ver docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md). Uma instância por
+  // Campaign (idFromName(campaignId)); D1 continua sendo o único estado persistente
+  // autoritativo, o Durable Object só coordena WebSockets + sequência efêmera.
+  "durable_objects": {
+    "bindings": [
+      { "name": "VTT_ROOMS", "class_name": "VttRoomDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["VttRoomDO"] }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_LOGIN_RATE_LIMITER",
