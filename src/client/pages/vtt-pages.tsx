@@ -173,7 +173,7 @@ export function VttPage(){
         como fallback de polling (3s) e como forma de compartilhar fora do produto (ex.
         Discord) — o jogador também pode chegar sozinho via "Minhas Mesas" (F-033). */}
     <section className="panel">
-      <p className="section-note">Link ao vivo para os jogadores: <input readOnly value={liveUrl} onFocus={(event)=>event.target.select()}/></p>
+      <p className="section-note">Link ao vivo para os jogadores: <input readOnly aria-label="Link ao vivo para os jogadores" value={liveUrl} onFocus={(event)=>event.target.select()}/></p>
     </section>
 
     {adventure!==undefined&&<section className="panel">
