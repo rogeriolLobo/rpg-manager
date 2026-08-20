@@ -1,4 +1,9 @@
-.sidebar > div:first-child { min-height: 0; overflow-y: auto; }
+/* BATCH19 (2ª correção): overflow-y:auto vive SÓ na área de navegação (que realmente pode
+   crescer e precisar rolar) — nunca na área fixa do topo (brand/contexto/busca), porque um
+   dropdown position:absolute ali dentro (notifications-dropdown) seria recortado pela regra do
+   CSS que redefine overflow-x para auto sempre que só overflow-y é setado. */
+.sidebar-fixed-top { flex-shrink: 0; }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .world-selector { display: grid; gap: .35rem; margin: 1rem 0 .7rem; color: var(--sidebar-text-muted); font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .world-selector select { width: 100%; border-color: var(--sidebar-border); background: var(--sidebar-hover); color: var(--sidebar-text); }
 .secondary-nav, .nav-section { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--sidebar-border); }
@@ -27,7 +32,10 @@
 .notifications-widget { position: relative; display: flex; margin-left: auto; }
 .notifications-widget > .icon-button { color: var(--sidebar-text-muted); border: 1px solid var(--sidebar-border); border-radius: .6rem; width: 2.7rem; }
 .notification-badge { position: absolute; top: -.25rem; right: -.25rem; min-width: 1.1rem; height: 1.1rem; padding: 0 .3rem; border-radius: 999px; background: var(--danger); color: var(--text-on-brand); font-size: .65rem; font-weight: 700; display: grid; place-items: center; }
-.notifications-dropdown { position: absolute; top: calc(100% + .5rem); right: 0; z-index: 1000; width: min(18rem, calc(100vw - 2.5rem)); max-height: 22rem; overflow-y: auto; }
+/* left:0 (não right:0) — o sino vive perto da borda ESQUERDA da tela (dentro da sidebar fixa
+   à esquerda); ancorar pela direita jogava o dropdown para fora da viewport à esquerda,
+   cortado pelo próprio limite da tela (achado real via screenshot do usuário). */
+.notifications-dropdown { position: absolute; top: calc(100% + .5rem); left: 0; z-index: 1000; width: min(18rem, calc(100vw - 2.5rem)); max-height: 22rem; overflow-y: auto; }
 .notifications-dropdown ul li { display: flex; align-items: center; gap: .6rem; padding: .5rem 0; color: var(--text-muted); }
 .notifications-dropdown ul li.unread { color: var(--text-primary); font-weight: 700; }
 .command-results button small, .command-empty { color: var(--text-muted); }

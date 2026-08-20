@@ -39,14 +39,27 @@ export function AppShell() {
   };
   const nav = (links: readonly (readonly [string, typeof Gauge, string])[]) => links.map(([to, Icon, label]) => <NavLink key={`${to}-${label}`} to={to} end={label === 'Visão do World' || to === '/app'} onClick={() => setOpen(false)}><Icon size={19}/>{label}</NavLink>);
   return <div className="app-shell"><header className="mobile-header"><button className="icon-button" onClick={() => setOpen(!open)} aria-label={open ? 'Fechar menu' : 'Abrir menu'}>{open ? <X/> : <Menu/>}</button><span className="brand-mark">RPG Manager</span></header>
-    <aside className={`sidebar ${open ? 'open' : ''}`}><div><div className="brand"><span className="brand-rune" aria-hidden="true">R</span><div><strong>RPG Manager</strong><small>Huginn &amp; Muninn</small></div><NotificationsButton/></div>
-      <label className="world-selector"><span>Contexto ativo</span><select aria-label="Selecionar contexto ativo" disabled={loading} value={activeWorld?.id ?? ''} onChange={(event) => void changeWorld(event.target.value)}><option value="">Nenhum World</option>{worlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
-      <div className="sidebar-toolbar"><CommandPalette onNavigate={() => setOpen(false)}/></div>
-      <nav aria-label="Navegação principal"><NavLink to="/app" end onClick={() => setOpen(false)}><Gauge size={19}/>Visão geral</NavLink></nav>
-      <nav className="nav-section" aria-label="Navegação geral"><span className="nav-section-label">Geral</span>{nav(globalLinks)}</nav>
-      {worldLinks.length > 0 && <nav className="nav-section" aria-label={`Seção de ${activeWorld!.name}`}><span className="nav-section-label">{activeWorld!.name}</span>{nav(worldLinks)}</nav>}
-      <nav className="nav-section" aria-label="Conta"><span className="nav-section-label">Sistema</span>{nav(accountLinks)}</nav></div>
-      <div className="sidebar-footer"><span>{user?.displayName}</span><small>{user?.email}</small><button className="ghost-button" onClick={() => void logout()}><LogOut size={17}/>Sair</button></div></aside>
+    <aside className={`sidebar ${open ? 'open' : ''}`}>
+      {/* BATCH19 (2ª correção): o dropdown de notificações vazava para fora da sidebar (18rem
+          de largura, sidebar tem só ~220px úteis) e era cortado — a regra do CSS que redefine
+          overflow-x para auto quando só overflow-y é setado (achado real via screenshot do
+          usuário) fazia .sidebar > div:first-child recortar qualquer coisa que ultrapassasse a
+          largura, mesmo um descendente position:absolute. Fix real: separar a área fixa do
+          topo (nunca teve motivo pra ter scroll) da área de navegação (essa sim cresce e
+          precisa rolar) em dois containers distintos — só a segunda leva overflow-y:auto. */}
+      <div className="sidebar-fixed-top">
+        <div className="brand"><span className="brand-rune" aria-hidden="true">R</span><div><strong>RPG Manager</strong><small>Huginn &amp; Muninn</small></div><NotificationsButton/></div>
+        <label className="world-selector"><span>Contexto ativo</span><select aria-label="Selecionar contexto ativo" disabled={loading} value={activeWorld?.id ?? ''} onChange={(event) => void changeWorld(event.target.value)}><option value="">Nenhum World</option>{worlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
+        <div className="sidebar-toolbar"><CommandPalette onNavigate={() => setOpen(false)}/></div>
+      </div>
+      <div className="sidebar-scroll">
+        <nav aria-label="Navegação principal"><NavLink to="/app" end onClick={() => setOpen(false)}><Gauge size={19}/>Visão geral</NavLink></nav>
+        <nav className="nav-section" aria-label="Navegação geral"><span className="nav-section-label">Geral</span>{nav(globalLinks)}</nav>
+        {worldLinks.length > 0 && <nav className="nav-section" aria-label={`Seção de ${activeWorld!.name}`}><span className="nav-section-label">{activeWorld!.name}</span>{nav(worldLinks)}</nav>}
+        <nav className="nav-section" aria-label="Conta"><span className="nav-section-label">Sistema</span>{nav(accountLinks)}</nav>
+      </div>
+      <div className="sidebar-footer"><span>{user?.displayName}</span><small>{user?.email}</small><button className="ghost-button" onClick={() => void logout()}><LogOut size={17}/>Sair</button></div>
+    </aside>
     <main className="main-content"><Outlet/></main></div>;
 }
 

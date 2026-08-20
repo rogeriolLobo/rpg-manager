@@ -1,6 +1,9 @@
-.sidebar {
-  overflow-y: auto;
-}
+/* BATCH19 (2ª correção): overflow-y:auto direto em .sidebar causava o mesmo problema do
+   overflow-x:auto redefinido pela regra do CSS (qualquer descendente position:absolute mais
+   largo que a sidebar, como o dropdown de notificações, era cortado no limite dos 252px) —
+   removido daqui porque .sidebar-scroll (world-knowledge.css) já assume essa
+   responsabilidade, só na área que realmente precisa rolar (a navegação), nunca na sidebar
+   inteira. */
 
 .sidebar-footer {
   flex-shrink: 0;
