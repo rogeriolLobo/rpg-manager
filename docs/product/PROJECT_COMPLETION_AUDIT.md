@@ -76,6 +76,13 @@ com o asset original DELETADO antes do restore (prova de
 autocontenção genuína) e bytes verificados byte a byte. UI em
 Configurações → "Arquivos anexados".
 
+**Revalidação (Seção 25 do pedido de finalização):** `npx vitest run
+--config vitest.integration.config.ts tests/integration/asset-backup.test.ts`
+re-executado nesta rodada, 3/3 passando — o cenário exato pedido
+(upload → backup do bundle → asset original apagado → restore → bytes
+idênticos, `expect([...restoredBytes]).toEqual([...JPEG_BYTES])`) já
+existia e continua verde, sem regressão.
+
 ### F-035 — Handout reveal via realtime — `DONE`
 
 `PATCH/POST/DELETE /adventures/:adventureId/handouts` notifica a(s)
