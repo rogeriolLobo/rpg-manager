@@ -1641,6 +1641,52 @@ duplicar — a única peça de dado nova é o vínculo membro→personagem.
   outsider recebe "Não encontrado".
 - Vertical F-033 concluída. Próximo item da ordem de execução do
   roadmap: F-034 (GM View integrada).
+- **Nota de release:** `caa40f3` corrige um CI real encontrado no
+  primeiro push do F-033 — `tests/e2e/player-view.spec.ts` clicava em
+  "Minhas Mesas" sem abrir o menu mobile primeiro (link fora do
+  viewport em `mobile-chromium`), corrigido com o mesmo padrão
+  `openNav`/`isMobileViewport` já usado no resto da suíte. Migration
+  0040 aplicada e deploy confirmado em produção
+  (`GET /api/v1/version` → `commit: "caa40f3"`).
+
+## F-034 — GM View integrada — `DONE` (BATCH18)
+
+Fecha o BATCH18. `VttPage` já unia scene/mapa/tokens/fog/combate
+(F-029/F-030/F-032); faltava ligar a preparação da Adventure (F-025) e
+os anexos/handouts de arquivo (F-028) na MESMA tela, para o mestre não
+precisar sair do VTT durante a mesa.
+
+- **View pura, nenhuma rota nova** — a seção "Preparação da Adventure"
+  reaproveita `GET /campaigns/:id` (para achar `adventureEntityId`) e
+  `GET /adventures/:id` (F-025, já existente) só para montar um resumo
+  (contagem de cenas/concluídas, handouts revelados/total). Sem
+  Adventure vinculada, mostra um aviso com link para vincular uma em
+  "Editar campanha" — nunca quebra.
+- **`EntityFilesPanel` (F-028) embutido diretamente** na tela do VTT,
+  apontando para a Adventure vinculada — o mestre anexa mapas/handouts
+  digitalizados sem sair da tela onde está preparando a cena. Mesmo
+  componente já usado no detalhe da Vault Entity, nenhuma duplicação.
+- **"Abrir preparação completa"** continua linkando para
+  `AdventurePrepPage` (`/app/vault/:id/adventure`) — o resumo nunca
+  tenta reimplementar o editor completo de cenas/encontros/handouts,
+  só reduz a navegação para o caso comum (conferir o que já foi
+  preparado, anexar um arquivo).
+- Corrigido de passagem: um comentário desatualizado em `vtt-pages.tsx`
+  ainda dizia que "não existe hoje uma tela minhas campanhas" — F-033
+  já resolveu isso nesta mesma sessão; comentário atualizado para
+  refletir o estado real (WebSocket real preferido, link ao vivo como
+  fallback/compartilhamento).
+- **Testes:** `tests/e2e/vtt-gm-view.spec.ts` (novo, desktop+mobile) —
+  cria Adventure com cena+handout revelado, campanha com essa Adventure
+  como principal, confirma o resumo exato na tela do VTT, anexa um
+  arquivo inline (prova que F-028 funciona embutido, sem navegação) e
+  confirma que "Abrir preparação completa" leva ao editor real. Sem
+  integration test novo — nenhuma rota de backend nova para testar
+  (mesmo raciocínio já usado em F-027 Compendium).
+- Vertical F-034 concluída — **BATCH18 (F-033+F-034) fechado**.
+  Próximo item da ordem de execução do roadmap: BATCH19 — hardening
+  final + F-015 revalidado cobrindo todos os domínios novos (Social,
+  Sheets, Vault avançado, Adventures, Files, VTT).
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)

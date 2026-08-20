@@ -1,10 +1,11 @@
-import { ChevronDown, ChevronUp, Map, Plus, Swords, Trash2 } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronUp, Map, Plus, Swords, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { VttPlayerScenePayload, VttRealtimeClientMessage, VttRealtimeServerMessage } from '../../domain/vtt-realtime';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
+import { EntityFilesPanel } from './file-asset-pages';
 import { PageHeader } from './dashboard-page';
 
 // F-029/F-030/F-032 (BATCH16/17): VTT — fundação (Scene/Map/tokens) + fog of war + iniciativa/
@@ -21,6 +22,9 @@ interface Combatant { id:string; tokenId:string|null; name:string; initiative:nu
 interface WorldOption { id:string; name:string; isOwner:boolean }
 interface MapOption { id:string; title:string }
 interface EntityOption { id:string; name:string; entityType:string }
+// F-034: resumo da Adventure vinculada à Campaign (F-025), reaproveitando GET /adventures/:id —
+// nenhuma rota nova, só uma leitura auxiliar/não-bloqueante nesta tela.
+interface AdventureSummary { scenes:Array<{id:string;completed:boolean}>; handouts:Array<{id:string;revealed:boolean}> }
 
 const emptyScene = { title:'', worldId:'', mapId:'', imageUrl:'', notes:'', fogEnabled:false, gridCols:'20', gridRows:'20' };
 const emptyToken = { label:'', entityId:'', x:'50', y:'50', visibleToPlayers:false };
@@ -38,9 +42,24 @@ export function VttPage(){
   const [tokenForms,setTokenForms]=useState<Record<string,typeof emptyToken>>({});
   const [combatantForms,setCombatantForms]=useState<Record<string,typeof emptyCombatant>>({});
   const [error,setError]=useState('');
+  // F-034 (GM View integrada): liga a preparação da Adventure (F-025) e os anexos/handouts
+  // (F-028) na mesma tela do VTT, reduzindo a navegação entre telas durante a mesa — nenhuma
+  // rota nova, só reaproveita GET /campaigns/:id e GET /adventures/:id já existentes.
+  const [adventure,setAdventure]=useState<{id:string;name:string}|null|undefined>(undefined);
+  const [adventureSummary,setAdventureSummary]=useState<AdventureSummary|null>(null);
 
   useEffect(()=>{void api<{items:WorldOption[]}>('/worlds?pageSize=50').then((result)=>setWorldOptions(result.items.filter((world)=>world.isOwner))).catch(()=>{});},[]);
   useEffect(()=>{void api<{items:EntityOption[]}>('/vault?pageSize=100&sort=name').then((result)=>setEntityOptions(result.items)).catch(()=>{});},[]);
+  useEffect(()=>{
+    if(!campaignId)return;
+    void api<{item:{adventureEntityId:string|null;adventureName:string|null}}>(`/campaigns/${campaignId}`)
+      .then((result)=>setAdventure(result.item.adventureEntityId?{id:result.item.adventureEntityId,name:result.item.adventureName??'Adventure'}:null))
+      .catch(()=>setAdventure(null));
+  },[campaignId]);
+  useEffect(()=>{
+    if(!adventure)return;
+    void api<AdventureSummary>(`/adventures/${adventure.id}`).then(setAdventureSummary).catch(()=>{});
+  },[adventure]);
   useEffect(()=>{
     // mapOptions só é exibido quando sceneForm.worldId está preenchido (ver JSX abaixo) — sem
     // World selecionado, o select de mapa some da tela, então não há necessidade de limpar o
@@ -137,13 +156,26 @@ export function VttPage(){
     <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
     {error&&<p className="form-error">{error}</p>}
 
-    {/* F-031: "realtime" em Zero Cost é polling (3s) sobre GET /live, não WebSocket — ver
-        docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md. O GM compartilha este link com os
-        jogadores (fora do produto, ex. Discord) — não existe hoje uma tela "minhas campanhas"
-        para jogador navegar sozinho até aqui (isso é escopo do F-033, Player View integrada). */}
+    {/* F-031: WebSocket real via Durable Object é preferido; este link continua funcionando
+        como fallback de polling (3s) e como forma de compartilhar fora do produto (ex.
+        Discord) — o jogador também pode chegar sozinho via "Minhas Mesas" (F-033). */}
     <section className="panel">
-      <p className="section-note">Link ao vivo para os jogadores (atualiza a cada poucos segundos): <input readOnly value={liveUrl} onFocus={(event)=>event.target.select()}/></p>
+      <p className="section-note">Link ao vivo para os jogadores: <input readOnly value={liveUrl} onFocus={(event)=>event.target.select()}/></p>
     </section>
+
+    {adventure!==undefined&&<section className="panel">
+      <h2><BookOpen size={20}/>Preparação da Adventure</h2>
+      {adventure===null
+        ?<p className="section-note">Nenhuma Adventure vinculada a esta campanha ainda — vincule uma em <Link to={`/app/campaigns/${campaignId}/edit`}>Editar campanha</Link>.</p>
+        :<>
+          <p className="section-note">
+            {adventure.name}
+            {adventureSummary&&<> · {adventureSummary.scenes.length} {adventureSummary.scenes.length===1?'cena':'cenas'} ({adventureSummary.scenes.filter((scene)=>scene.completed).length} concluídas) · {adventureSummary.handouts.filter((handout)=>handout.revealed).length}/{adventureSummary.handouts.length} handouts revelados</>}
+          </p>
+          <Link className="secondary-button link-button" to={`/app/vault/${adventure.id}/adventure`}>Abrir preparação completa</Link>
+          <EntityFilesPanel entityId={adventure.id} canEdit={true}/>
+        </>}
+    </section>}
 
     <section className="panel">
       <h2><Map size={20}/>Cenas</h2>
