@@ -2,6 +2,13 @@ import { expect, test } from '@playwright/test';
 
 test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async ({page})=>{
   test.setTimeout(90_000);
+  // RPG-1.0-BATCH17: test.slow() (mecanismo oficial do Playwright para um teste específico que
+  // precisa de mais tempo, não um timeout global às cegas) — este teste tem histórico real e
+  // documentado (docs/product/MASTER_BACKLOG.md) de "element was detached from the DOM" sob
+  // carga do CI (StrictMode duplica o fetch de /vault/metadata em dev — ver comentário em
+  // VaultFormPage — e sob CI compartilhado isso ocasionalmente intersecta a digitação). Triplica
+  // o orçamento de tempo (~270s) só para ESTE teste, não para a suíte inteira.
+  test.slow();
   const openNavigation=async()=>{if((page.viewportSize()?.width??1000)<=850){await page.getByRole('button',{name:'Abrir menu'}).click();await expect(page.locator('.sidebar')).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');}};
   const navigateFromMenu=async(name:string)=>{await openNavigation();await page.getByRole('link',{name,exact:true}).click();};
   const email=`vault-e2e-${Date.now()}-${test.info().project.name}@example.com`;
@@ -48,6 +55,10 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await page.getByRole('link',{name:'Nova entidade'}).click();
   await expect(page).toHaveURL(/\/app\/vault\/new/u);
   await page.getByLabel('Tipo').selectOption('LOCATION');
+  // Espera GET /vault/metadata assentar (o select "World" só ganha opções reais depois dele —
+  // ver VaultFormPage) ANTES de preencher Nome. Não é um sleep às cegas: é uma condição real
+  // ligada à dependência assíncrona que motiva o achado documentado acima.
+  await expect(page.getByLabel('World').locator('option')).toHaveCount(2,{timeout:15_000});
   await page.getByLabel('Nome').fill('Taverna do Corvo');
   await page.getByLabel('World').selectOption({label:'Aldea'});
   await page.getByRole('button',{name:'Salvar entidade'}).click();
