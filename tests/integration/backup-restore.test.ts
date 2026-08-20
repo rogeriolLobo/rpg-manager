@@ -509,4 +509,55 @@ describe('F-015: Backup/Restore completo', () => {
     expect(relationItems[0]).toMatchObject({ label: 'rivalidade antiga', relationType: 'ENEMY', strength: 4 });
     expect(relationItems[0].sourceEntityId).not.toBe(npcId); // IDs novos, nunca os originais
   });
+
+  it('round-trip: Cartografia (mapa+pin) + External Resource + Timeline (era+calendário+evento)', async () => {
+    const owner = await register('backup-carto-timeline-roundtrip');
+    const worldId = await createWorld(owner, 'Mundo da Cartografia');
+    const mapResponse = await request(`/cartography/${worldId}`, 'POST', { title: 'Mapa Regional', imageUrl: 'https://example.com/mapa.png', notes: '' }, owner);
+    const mapId = ((await mapResponse.json()) as { item: { id: string } }).item.id;
+    const locationId = await createEntity(owner, { entityType: 'LOCATION', name: 'Vila', worldId });
+    await request(`/cartography/${worldId}/${mapId}/pins`, 'POST', { label: 'Vila no mapa', notes: '', x: 40, y: 60, entityId: locationId }, owner);
+    await request(`/external-resources/${worldId}`, 'POST', { title: 'Artigo de referência', url: 'https://example.com/artigo', description: '', resourceType: 'ARTICLE' }, owner);
+
+    const eraResponse = await request(`/timeline/worlds/${worldId}/eras`, 'POST', { name: 'Era Dourada', description: '', sortOrder: 0 }, owner);
+    const eraId = ((await eraResponse.json()) as { item: { id: string } }).item.id;
+    await request(`/timeline/worlds/${worldId}/calendar`, 'PUT', { name: 'Calendário Padrão', months: [{ name: 'Primeiro Mês', days: 30 }], weekdays: ['Um', 'Dois'], cycles: [], holidays: [] }, owner);
+    const eventId = await createEntity(owner, { entityType: 'EVENT', name: 'Fundação da Vila', worldId });
+    await request(`/timeline/events/${eventId}`, 'PATCH', { historicalDate: 'Ano 1', sortKey: 1, eraId, precision: 'YEAR', calendarDate: { year: 1, monthIndex: 0, day: 1 }, displayText: 'Ano 1' }, owner);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ worldMaps: 1, mapPins: 1, externalResources: 1, worldEras: 1, worldCalendars: 1, eventTemporalDetails: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ worldMaps: 1, mapPins: 1, externalResources: 1, worldEras: 1, worldCalendars: 1, eventTemporalDetails: 1 });
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredWorldId = worldItems.find((item) => item.name === 'Mundo da Cartografia' && item.id !== worldId)!.id;
+
+    const maps = await request(`/cartography/${restoredWorldId}`, 'GET', undefined, owner);
+    const mapItems = ((await maps.json()) as { items: Array<{ id: string; title: string }> }).items;
+    expect(mapItems).toHaveLength(1);
+    const mapDetail = await request(`/cartography/${restoredWorldId}/${mapItems[0].id}`, 'GET', undefined, owner);
+    const mapDetailBody = await mapDetail.json() as { pins: Array<{ label: string; entityId: string | null }> };
+    expect(mapDetailBody.pins).toHaveLength(1);
+    expect(mapDetailBody.pins[0].label).toBe('Vila no mapa');
+    expect(mapDetailBody.pins[0].entityId).not.toBe(locationId); // ID novo
+
+    const externalResources = await request(`/external-resources/${restoredWorldId}`, 'GET', undefined, owner);
+    expect(((await externalResources.json()) as { items: unknown[] }).items).toHaveLength(1);
+
+    const timeline = await request(`/timeline/worlds/${restoredWorldId}`, 'GET', undefined, owner);
+    const timelineBody = await timeline.json() as { eras: Array<{ name: string }>; calendar: { name: string } | null; events: Array<{ name: string; temporal: { calendarDate: { year: number; monthIndex: number; day: number } | null; eraId: string | null } }> };
+    expect(timelineBody.eras).toHaveLength(1);
+    expect(timelineBody.eras[0].name).toBe('Era Dourada');
+    expect(timelineBody.calendar).toMatchObject({ name: 'Calendário Padrão' });
+    const restoredEvent = timelineBody.events.find((event) => event.name === 'Fundação da Vila')!;
+    expect(restoredEvent).toBeTruthy();
+    expect(restoredEvent.temporal.calendarDate).toMatchObject({ year: 1, monthIndex: 0, day: 1 });
+    expect(restoredEvent.temporal.eraId).not.toBe(eraId); // ID novo, nunca o original
+  });
 });

@@ -48,4 +48,10 @@ export interface BackupRestorePreviewSummary {
   wikiEntityTags: number;
   wikiEntityAliases: number;
   entityRelations: number;
+  worldMaps: number;
+  mapPins: number;
+  externalResources: number;
+  worldEras: number;
+  worldCalendars: number;
+  eventTemporalDetails: number;
 }

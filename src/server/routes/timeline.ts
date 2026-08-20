@@ -28,7 +28,9 @@ interface EventRow {
   display_text: string | null;
 }
 
-function normalizeName(name: string): string {
+// Exportada para o restore de backup (backup-restore.ts) reconstruir name_normalized com a
+// MESMA função usada aqui — nunca uma reimplementação paralela que possa divergir.
+export function normalizeName(name: string): string {
   return name.trim().normalize('NFKC').toLocaleLowerCase('pt-BR');
 }
 

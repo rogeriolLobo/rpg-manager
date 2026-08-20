@@ -35,10 +35,10 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, journalFolderInputSchema, journalPageInputSchema,
-  memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldTagInputSchema,
+  campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, eventTemporalInputSchema, externalResourceInputSchema, journalFolderInputSchema, journalPageInputSchema,
+  mapPinInputSchema, memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldCalendarInputSchema, worldEraInputSchema, worldMapInputSchema, worldTagInputSchema,
   vaultEntityInputSchema, worldInputSchema,
-  type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldInput,
+  type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type EventTemporalInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldCalendarInput, type WorldEraInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
 import { normalizeEditorialLabel } from '../../domain/content/wiki';
@@ -50,9 +50,16 @@ import { recordRevisionStatement } from '../content/revisions';
 import { specializedStatements } from './vault';
 import { buildCreateLibraryEntryStatements } from './library-writes';
 import { normalizeLabel } from './relations';
+import { normalizeName } from './timeline';
 import type { AppVariables, Env } from '../types';
 
 export const backupRestoreRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+// Sem export type próprio em schemas.ts para estes três (Cartografia/External Resources) —
+// inferidos aqui localmente a partir do mesmo schema Zod, nunca duplicados à mão.
+type ExternalResourceInput = z.infer<typeof externalResourceInputSchema>;
+type WorldMapInput = z.infer<typeof worldMapInputSchema>;
+type MapPinInput = z.infer<typeof mapPinInputSchema>;
 
 const previewSchema = z.strictObject({ backup: z.string().min(1).max(3_000_000) });
 const confirmSchema = z.strictObject({ jobId: z.string().uuid() });
@@ -105,6 +112,13 @@ interface WorldTagPlanItem { oldId: string; oldWorldId: string; name: string }
 interface WikiEntityTagPlanItem { oldEntityId: string; oldTagId: string }
 interface WikiEntityAliasPlanItem { oldEntityId: string; alias: string }
 interface EntityRelationPlanItem { oldId: string; oldWorldId: string; oldSourceEntityId: string; oldTargetEntityId: string; input: EntityRelationInput }
+// Cartografia (F-002) / External Resources (F-003) / Timeline-Calendar (F-... world_eras etc.).
+interface WorldMapPlanItem { oldId: string; oldWorldId: string; input: WorldMapInput }
+interface MapPinPlanItem { oldId: string; oldMapId: string; oldEntityId: string | null; input: MapPinInput }
+interface ExternalResourcePlanItem { oldId: string; oldWorldId: string; input: ExternalResourceInput }
+interface WorldEraPlanItem { oldId: string; oldWorldId: string; input: WorldEraInput }
+interface WorldCalendarPlanItem { oldWorldId: string; input: WorldCalendarInput }
+interface EventTemporalPlanItem { oldEntityId: string; oldEraId: string | null; hasCalendarDate: boolean; input: EventTemporalInput }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
@@ -113,6 +127,8 @@ interface RestorePlan {
   sheetTemplates: SheetTemplatePlanItem[]; characterSheets: CharacterSheetPlanItem[];
   wikiFolders: WikiFolderPlanItem[]; wikiEntityMetadata: WikiEntityMetadataPlanItem[]; worldTags: WorldTagPlanItem[];
   wikiEntityTags: WikiEntityTagPlanItem[]; wikiEntityAliases: WikiEntityAliasPlanItem[]; entityRelations: EntityRelationPlanItem[];
+  worldMaps: WorldMapPlanItem[]; mapPins: MapPinPlanItem[]; externalResources: ExternalResourcePlanItem[];
+  worldEras: WorldEraPlanItem[]; worldCalendars: WorldCalendarPlanItem[]; eventTemporalDetails: EventTemporalPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -139,6 +155,12 @@ const restorePlanSchema = z.strictObject({
   wikiEntityTags: z.array(z.strictObject({ oldEntityId: z.string(), oldTagId: z.string() })),
   wikiEntityAliases: z.array(z.strictObject({ oldEntityId: z.string(), alias: wikiEntityOrganizationSchema.shape.aliases.element })),
   entityRelations: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldSourceEntityId: z.string(), oldTargetEntityId: z.string(), input: entityRelationInputSchema })),
+  worldMaps: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: worldMapInputSchema })),
+  mapPins: z.array(z.strictObject({ oldId: z.string(), oldMapId: z.string(), oldEntityId: z.string().nullable(), input: mapPinInputSchema })),
+  externalResources: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: externalResourceInputSchema })),
+  worldEras: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: worldEraInputSchema })),
+  worldCalendars: z.array(z.strictObject({ oldWorldId: z.string(), input: worldCalendarInputSchema })),
+  eventTemporalDetails: z.array(z.strictObject({ oldEntityId: z.string(), oldEraId: z.string().nullable(), hasCalendarDate: z.boolean(), input: eventTemporalInputSchema })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -381,6 +403,91 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     entityRelations.push({ oldId, oldWorldId, oldSourceEntityId, oldTargetEntityId, input: parsed.data });
   }
 
+  // ---- Cartografia (F-002): mapas (imagem sempre URL externa, mesma política de coverUrl) +
+  // pins (entityId opcional). ----
+  const rawWorldMaps = rowsOf(data, 'worldMaps');
+  const worldMaps: WorldMapPlanItem[] = [];
+  for (const row of rawWorldMaps) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'worldMaps', oldId, message: 'World original não pôde ser restaurado — mapa não será restaurado.', category: 'SKIP' }); continue; }
+    const parsed = worldMapInputSchema.safeParse({ title: str(row, 'title'), imageUrl: str(row, 'image_url'), notes: str(row, 'notes') });
+    if (!parsed.success) { warnings.push({ domain: 'worldMaps', oldId, message: 'Mapa com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    worldMaps.push({ oldId, oldWorldId, input: parsed.data });
+  }
+  const worldMapOldIds = new Set(worldMaps.map((item) => item.oldId));
+
+  const rawMapPins = rowsOf(data, 'mapPins');
+  const mapPins: MapPinPlanItem[] = [];
+  for (const row of rawMapPins) {
+    const oldId = str(row, 'id'); const oldMapId = str(row, 'map_id');
+    if (!worldMapOldIds.has(oldMapId)) { warnings.push({ domain: 'mapPins', oldId, message: 'Mapa original não pôde ser restaurado — pin não será restaurado.', category: 'SKIP' }); continue; }
+    const oldEntityId = strOrNull(row, 'entity_id');
+    if (oldEntityId && !entityOldIds.has(oldEntityId)) warnings.push({ domain: 'mapPins', oldId, message: 'Entidade original não está neste backup — pin será restaurado sem entidade vinculada.', category: 'SKIP' });
+    const parsed = mapPinInputSchema.safeParse({ label: str(row, 'label'), notes: str(row, 'notes'), x: num(row, 'x'), y: num(row, 'y'), entityId: null });
+    if (!parsed.success) { warnings.push({ domain: 'mapPins', oldId, message: 'Pin com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    mapPins.push({ oldId, oldMapId, oldEntityId: oldEntityId && entityOldIds.has(oldEntityId) ? oldEntityId : null, input: parsed.data });
+  }
+
+  // ---- External Resources (F-003) ----
+  const rawExternalResources = rowsOf(data, 'externalResources');
+  const externalResources: ExternalResourcePlanItem[] = [];
+  for (const row of rawExternalResources) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'externalResources', oldId, message: 'World original não pôde ser restaurado — recurso externo não será restaurado.', category: 'SKIP' }); continue; }
+    const parsed = externalResourceInputSchema.safeParse({ title: str(row, 'title'), url: str(row, 'url'), description: str(row, 'description'), resourceType: str(row, 'resource_type') });
+    if (!parsed.success) { warnings.push({ domain: 'externalResources', oldId, message: 'Recurso externo com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    externalResources.push({ oldId, oldWorldId, input: parsed.data });
+  }
+
+  // ---- Timeline/Calendar: Eras -> Calendar (1 por World) -> Event temporal details (Events). ----
+  const rawEras = rowsOf(data, 'worldEras');
+  const worldEras: WorldEraPlanItem[] = [];
+  for (const row of rawEras) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'worldEras', oldId, message: 'World original não pôde ser restaurado — era não será restaurada.', category: 'SKIP' }); continue; }
+    if (strOrNull(row, 'archived_at')) continue; // arquivadas não fazem parte do escopo v1 do restore (mesma linha de raciocínio de rpgs.archived_at — export preserva, restore v1 só o ativo)
+    const parsed = worldEraInputSchema.safeParse({ name: str(row, 'name'), description: str(row, 'description'), sortOrder: num(row, 'sort_order') ?? 0 });
+    if (!parsed.success) { warnings.push({ domain: 'worldEras', oldId, message: 'Era com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    worldEras.push({ oldId, oldWorldId, input: parsed.data });
+  }
+  const worldEraOldIds = new Set(worldEras.map((item) => item.oldId));
+
+  const rawCalendars = rowsOf(data, 'worldCalendars');
+  const worldCalendars: WorldCalendarPlanItem[] = [];
+  for (const row of rawCalendars) {
+    const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) continue;
+    let months: unknown; let weekdays: unknown; let cycles: unknown; let holidays: unknown;
+    try { months = JSON.parse(str(row, 'months_json') || '[]'); weekdays = JSON.parse(str(row, 'weekdays_json') || '[]'); cycles = JSON.parse(str(row, 'cycles_json') || '[]'); holidays = JSON.parse(str(row, 'holidays_json') || '[]'); }
+    catch { warnings.push({ domain: 'worldCalendars', oldId: oldWorldId, message: 'Calendário corrompido — não será restaurado.', category: 'SKIP' }); continue; }
+    const parsed = worldCalendarInputSchema.safeParse({ name: str(row, 'name'), months, weekdays, cycles, holidays });
+    if (!parsed.success) { warnings.push({ domain: 'worldCalendars', oldId: oldWorldId, message: 'Calendário com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    worldCalendars.push({ oldWorldId, input: parsed.data });
+  }
+  const worldCalendarOldWorldIds = new Set(worldCalendars.map((item) => item.oldWorldId));
+
+  const eventTemporalDetails: EventTemporalPlanItem[] = [];
+  for (const row of rowsOf(data, 'eventTemporalDetails')) {
+    const oldEntityId = str(row, 'entity_id');
+    if (!entityOldIds.has(oldEntityId)) continue;
+    const oldEraId = strOrNull(row, 'era_id');
+    if (oldEraId && !worldEraOldIds.has(oldEraId)) warnings.push({ domain: 'eventTemporalDetails', oldId: oldEntityId, message: 'Era original não está neste backup — evento será restaurado sem era.', category: 'SKIP' });
+    const oldCalendarId = strOrNull(row, 'calendar_id');
+    let hasCalendarDate = Boolean(oldCalendarId) && num(row, 'calendar_year') !== null && num(row, 'calendar_month_index') !== null && num(row, 'calendar_day') !== null;
+    if (hasCalendarDate) {
+      const oldWorldId = entities.find((entity) => entity.oldId === oldEntityId)?.oldWorldId;
+      if (!oldWorldId || !worldCalendarOldWorldIds.has(oldWorldId)) { warnings.push({ domain: 'eventTemporalDetails', oldId: oldEntityId, message: 'Calendário original não pôde ser restaurado — evento será restaurado sem data de calendário.', category: 'SKIP' }); hasCalendarDate = false; }
+    }
+    const candidate = {
+      historicalDate: str(row, 'historical_date'), sortKey: num(row, 'sort_key'), eraId: null, precision: str(row, 'precision') || 'UNKNOWN',
+      calendarDate: hasCalendarDate ? { year: num(row, 'calendar_year')!, monthIndex: num(row, 'calendar_month_index')!, day: num(row, 'calendar_day')! } : null,
+      displayText: str(row, 'display_text'),
+    };
+    const parsed = eventTemporalInputSchema.safeParse(candidate);
+    if (!parsed.success) { warnings.push({ domain: 'eventTemporalDetails', oldId: oldEntityId, message: 'Evento com data histórica inválida após validação — data não será restaurada.', category: 'SKIP' }); continue; }
+    eventTemporalDetails.push({ oldEntityId, oldEraId: oldEraId && worldEraOldIds.has(oldEraId) ? oldEraId : null, hasCalendarDate, input: parsed.data });
+  }
+
   // ---- Groups (precisa vir antes de Library/Campaigns: ambos podem referenciar um Group) ----
   const rawGroups = rowsOf(data, 'groups');
   if (rawGroups.length > 200) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais Grupos do que a v1 do restore suporta (200 por operação).');
@@ -557,6 +664,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
     sheetTemplates, characterSheets,
     wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
+    worldMaps, mapPins, externalResources, worldEras, worldCalendars, eventTemporalDetails,
     warnings,
   };
 }
@@ -574,7 +682,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.worldEntityLinks.length
     + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
     + plan.sheetTemplates.length + plan.characterSheets.length
-    + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length;
+    + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
+    + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -590,6 +699,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       library: plan.library.length, groups: plan.groups.length, groupMembers: plan.groupMembers.length, campaigns: plan.campaigns.length, campaignMembers: plan.campaignMembers.length, campaignSessions: plan.campaignSessions.length,
       sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
       wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
+      worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -842,6 +952,61 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     entityRelationsCreated += 1;
   }
 
+  // ---- Cartografia (F-002) ----
+  const worldMapIdMap = new Map<string, string>();
+  for (const item of plan.worldMaps) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO world_maps (id,world_id,title,image_url,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(newId, newWorldId, item.input.title, item.input.imageUrl, item.input.notes, now, now));
+    worldMapIdMap.set(item.oldId, newId);
+  }
+  let mapPinsCreated = 0;
+  for (const item of plan.mapPins) {
+    const newMapId = worldMapIdMap.get(item.oldMapId); if (!newMapId) continue;
+    const resolvedEntityId = item.oldEntityId ? entityIdMap.get(item.oldEntityId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO map_pins (id,map_id,entity_id,label,notes,x,y,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(), newMapId, resolvedEntityId, item.input.label, item.input.notes, item.input.x, item.input.y, now, now));
+    mapPinsCreated += 1;
+  }
+
+  // ---- External Resources (F-003) ----
+  let externalResourcesCreated = 0;
+  for (const item of plan.externalResources) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO external_resources (id,world_id,title,url,description,resource_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(), newWorldId, item.input.title, item.input.url, item.input.description, item.input.resourceType, now, now));
+    externalResourcesCreated += 1;
+  }
+
+  // ---- Timeline/Calendar: Eras -> Calendar (1 por World, mesma UNIQUE INDEX que garante isso
+  // hoje) -> Event temporal details (Events), nessa ordem de dependência. ----
+  const worldEraIdMap = new Map<string, string>();
+  for (const item of plan.worldEras) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO world_eras (id,world_id,name,name_normalized,description,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(newId, newWorldId, item.input.name, normalizeName(item.input.name), item.input.description, item.input.sortOrder, now, now));
+    worldEraIdMap.set(item.oldId, newId);
+  }
+  const worldCalendarIdMap = new Map<string, string>(); // oldWorldId -> newCalendarId
+  for (const item of plan.worldCalendars) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO world_calendars (id,world_id,name,months_json,weekdays_json,cycles_json,holidays_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(newId, newWorldId, item.input.name, JSON.stringify(item.input.months), JSON.stringify(item.input.weekdays), JSON.stringify(item.input.cycles), JSON.stringify(item.input.holidays), now, now));
+    worldCalendarIdMap.set(item.oldWorldId, newId);
+  }
+  const entityOldWorldId = new Map(plan.entities.map((item) => [item.oldId, item.oldWorldId]));
+  let eventTemporalDetailsCreated = 0;
+  for (const item of plan.eventTemporalDetails) {
+    const newEntityId = entityIdMap.get(item.oldEntityId); if (!newEntityId) continue;
+    const resolvedEraId = item.oldEraId ? worldEraIdMap.get(item.oldEraId) ?? null : null;
+    const oldWorldId = entityOldWorldId.get(item.oldEntityId);
+    const newCalendarId = item.hasCalendarDate && oldWorldId ? worldCalendarIdMap.get(oldWorldId) ?? null : null;
+    const calendarDate = newCalendarId ? item.input.calendarDate : null;
+    statements.push(c.env.DB.prepare(`INSERT INTO event_temporal_details (entity_id,era_id,historical_date,sort_key,precision,calendar_id,calendar_year,calendar_month_index,calendar_day,display_text,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(newEntityId, resolvedEraId, item.input.historicalDate, item.input.sortKey, item.input.precision, newCalendarId, calendarDate?.year ?? null, calendarDate?.monthIndex ?? null, calendarDate?.day ?? null, item.input.displayText, now));
+    eventTemporalDetailsCreated += 1;
+  }
+
   // ---- Journal folders (2ª passagem para parent_folder_id, mesmo padrão) ----
   const folderIdMap = new Map<string, string>();
   const folderParentPending: Array<{ newId: string; oldParentFolderId: string }> = [];
@@ -923,6 +1088,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
       sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
       wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,
+      worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourcesCreated, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
     },
     warnings: confirmWarnings,
   });
