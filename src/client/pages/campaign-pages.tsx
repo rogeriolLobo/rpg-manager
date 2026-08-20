@@ -493,6 +493,8 @@ export function CampaignDetailPage() {
             <span>{label}</span>
             <strong>{label === "Grupo" && data.item.playGroupId
               ? <Link to={`/app/groups/${data.item.playGroupId}`}>{value}</Link>
+              : label === "Adventure" && data.item.adventureEntityId
+              ? <Link to={`/app/vault/${data.item.adventureEntityId}/adventure`}>{value}</Link>
               : value}</strong>
           </article>
         ))}

@@ -82,6 +82,18 @@ test("Adventure full flow (Seção 13): World → Adventure → Handout → Camp
     // ---- GM Console: prepara a cena de VTT de verdade, via UI real (não API) — esta é a parte
     // "prep VTT Scene" pedida pela Seção 13, distinta da cena de PREPARAÇÃO narrativa da
     // Adventure (adventure_scenes, já coberta em adventure-prep.spec.ts). ----
+    // ---- Achado real corrigido nesta rodada (Seção 17, GM View — integração/discovery
+    // faltante): a Campaign detail page mostrava o nome da Adventure vinculada como texto
+    // solto, sem link nenhum para a tela de preparação — GM tinha que ir até o Vault achar a
+    // entidade de novo. Corrigido em campaign-pages.tsx: "Adventure" agora é um Link quando
+    // adventureEntityId existe, mesmo padrão já usado para "Grupo". ----
+    await page.goto(`/app/campaigns/${campaignId}`);
+    // exact:true — a mesma Adventure também aparece no painel "Entidades vinculadas" (Vault
+    // quick lookup, pré-existente), apontando para o Vault genérico; aqui queremos
+    // especificamente o link novo do resumo da campanha, que aponta para a tela de preparação.
+    await page.getByRole("link", { name: `Aventura Fluxo ${suffix}`, exact: true }).click();
+    await expect(page.getByRole("heading", { name: `Aventura Fluxo ${suffix}` })).toBeVisible({ timeout: 15_000 });
+
     await page.goto(`/app/campaigns/${campaignId}/vtt`);
     await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
     const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
