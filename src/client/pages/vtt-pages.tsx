@@ -131,9 +131,18 @@ export function VttPage(){
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível remover o combatente.');}
   };
 
+  const liveUrl=`${location.origin}/app/campaigns/${campaignId}/vtt/live`;
   return <div className="page">
-    <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga. Ainda sem sincronização em tempo real (F-031)." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
+    <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
     {error&&<p className="form-error">{error}</p>}
+
+    {/* F-031: "realtime" em Zero Cost é polling (3s) sobre GET /live, não WebSocket — ver
+        docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md. O GM compartilha este link com os
+        jogadores (fora do produto, ex. Discord) — não existe hoje uma tela "minhas campanhas"
+        para jogador navegar sozinho até aqui (isso é escopo do F-033, Player View integrada). */}
+    <section className="panel">
+      <p className="section-note">Link ao vivo para os jogadores (atualiza a cada poucos segundos): <input readOnly value={liveUrl} onFocus={(event)=>event.target.select()}/></p>
+    </section>
 
     <section className="panel">
       <h2><Map size={20}/>Cenas</h2>
@@ -240,5 +249,62 @@ export function VttPage(){
         <button className="primary-button">Criar cena</button>
       </form>
     </section>
+  </div>;
+}
+
+// F-031 (BATCH17): "realtime" em Zero Cost, sobre GET /vtt/:campaignId/live — ver
+// docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md para o raciocínio completo (Durable
+// Objects, o primitivo correto da Cloudflare para WebSocket coordenado, não existe no plano
+// Free; polling reaproveita a MESMA barreira de segurança de /live, sem abrir canal novo).
+// Poll de 3s, pausado quando a aba não está em foco — GM não precisa dessa página, já vê suas
+// próprias mudanças instantaneamente via estado local depois de cada ação.
+interface LiveToken { id:string; label:string; x:number; y:number }
+interface LiveCombatant { id:string; name:string; isCurrentTurn:boolean }
+interface LiveScene { id:string; title:string; imageUrl:string; fogEnabled:boolean; gridCols:number; gridRows:number; fogCells:FogCell[]; tokens:LiveToken[]; combatActive:boolean; combatRound:number; combatants:LiveCombatant[] }
+
+const LIVE_POLL_INTERVAL_MS = 3000;
+
+export function VttLivePage(){
+  const {id:campaignId}=useParams();
+  const liveResource=useResource<{item:LiveScene|null}>(campaignId?`/vtt/${campaignId}/live`:null);
+
+  useEffect(()=>{
+    if(!campaignId)return;
+    let timer:ReturnType<typeof setInterval>|null=null;
+    const start=()=>{if(!timer)timer=setInterval(()=>liveResource.reload(),LIVE_POLL_INTERVAL_MS);};
+    const stop=()=>{if(timer){clearInterval(timer);timer=null;}};
+    const onVisibility=()=>{if(document.visibilityState==='visible')start();else stop();};
+    if(document.visibilityState==='visible')start();
+    document.addEventListener('visibilitychange',onVisibility);
+    return ()=>{stop();document.removeEventListener('visibilitychange',onVisibility);};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload já é estável o bastante para este poll (mesmo padrão de outros efeitos deste projeto que não incluem funções de useResource nas deps)
+  },[campaignId]);
+
+  if(!campaignId)return null;
+  if(liveResource.status!=='success')return <ResourceFallback state={liveResource} onRetry={liveResource.reload}/>;
+  const scene=liveResource.data.item;
+
+  return <div className="page">
+    <PageHeader eyebrow="Mesa Virtual · visão do jogador" title={scene?scene.title:'Aguardando o mestre'} description="Atualiza a cada poucos segundos — não é instantâneo (ver política Zero Cost)."/>
+    {!scene&&<p>O mestre ainda não ativou nenhuma cena para os jogadores.</p>}
+    {scene&&<section className="panel">
+      {scene.imageUrl?<div className="cartography-image-wrap">
+        <img src={scene.imageUrl} alt={scene.title} referrerPolicy="no-referrer"/>
+        {scene.fogEnabled&&<div className="vtt-fog-grid" style={{gridTemplateColumns:`repeat(${scene.gridCols},1fr)`,gridTemplateRows:`repeat(${scene.gridRows},1fr)`}}>
+          {Array.from({length:scene.gridCols*scene.gridRows}).map((_,index)=>{
+            const col=index%scene.gridCols, row=Math.floor(index/scene.gridCols);
+            const revealed=scene.fogCells.some((cell)=>cell.col===col&&cell.row===row);
+            return <div key={`${col}-${row}`} className={`vtt-fog-cell ${revealed?'vtt-fog-cell-revealed':''}`} aria-hidden="true"/>;
+          })}
+        </div>}
+        {scene.tokens.map((token)=><span key={token.id} className="vtt-token" style={{left:`${token.x}%`,top:`${token.y}%`}} title={token.label}>{token.label.slice(0,2).toUpperCase()}</span>)}
+      </div>:<p>Sem imagem de fundo.</p>}
+      {scene.combatActive&&<div className="panel">
+        <h4><Swords size={16}/>Combate <span className="badge">Round {scene.combatRound}</span></h4>
+        <ul className="clean-list">{scene.combatants.map((combatant)=><li key={combatant.id}>
+          {combatant.isCurrentTurn&&<span className="badge">Turno atual</span>} {combatant.name}
+        </li>)}</ul>
+      </div>}
+    </section>}
   </div>;
 }

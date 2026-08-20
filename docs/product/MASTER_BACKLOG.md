@@ -1447,6 +1447,51 @@ F-031 (realtime), então não precisou esperar a auditoria zero-cost.
 - Vertical F-032 (BATCH17) completa. F-031 (realtime) segue `BLOCKED`
   até a auditoria de arquitetura zero-cost — próximo passo desta sessão.
 
+## F-031 — VTT realtime, resolvido como polling Zero Cost — `DONE` (RPG-1.0-BATCH17)
+
+Segunda metade do BATCH17. Auditoria obrigatória feita ANTES de
+qualquer código — ver `docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md`
+para o raciocínio completo.
+
+- **Conclusão da auditoria:** WebSocket broadcast verdadeiro (GM +
+  vários jogadores vendo o mesmo estado instantaneamente) exige
+  **Durable Objects** — o único primitivo da Cloudflare que coordena
+  várias conexões simultâneas entre isolates. Durable Objects **não
+  existem no plano Free** (exigem Workers Paid) — implementar isso
+  violaria a Política Zero Cost (`CLAUDE.md` §9) diretamente. Decisão:
+  **polling client-side de 3s** sobre `GET /vtt/:campaignId/live` (já
+  existente desde F-029) — a "degradação controlada / sincronização
+  alternativa gratuita" que o próprio pedido de roadmap previu como
+  resultado possível. Adequado ao caso de uso real: mesa de RPG por
+  turnos não exige latência sub-segundo.
+- **`VttLivePage`** (`/app/campaigns/:id/vtt/live`): poll pausa
+  automaticamente quando a aba não está em foco
+  (`document.visibilitychange`) — sem custo desnecessário nem
+  biblioteca nova. Reaproveita a MESMA barreira de segurança de
+  `/live` — nunca um canal de leitura novo (nunca HP, nunca
+  entityId/entityName de token oculto, mesmo filtro de fog já
+  existente).
+- **Sem rota de API nova** — `/live` já cobria tudo que a visão do
+  jogador precisa desde F-029/F-030/F-032; F-031 é só a peça de
+  frontend com polling.
+- Não existe hoje uma tela "minhas campanhas" para o jogador navegar
+  sozinho até o link — o GM compartilha a URL (mostrada em `VttPage`,
+  campo somente-leitura pronto para copiar) por fora do produto (ex.
+  Discord). Uma lista de campanhas do jogador é escopo do F-033
+  (Player View integrada), que agora está desbloqueado (todas as
+  dependências — F-019/F-020/F-029 — já são `DONE`).
+- **Testes:** `tests/e2e/vtt-live.spec.ts` (1 cenário: setup de
+  amizade/grupo/campanha via API para focar no comportamento sob
+  teste; jogador acessa o link direto e vê a cena/token; mestre inicia
+  combate DEPOIS do jogador já estar na tela — o combate só aparece
+  quando o próximo poll busca de novo, provando que a visão realmente
+  atualiza sozinha; não-membro recebe o mesmo estado "Não encontrado"
+  já usado em outras regressões de segurança do produto, anti-
+  enumeração).
+- Vertical F-031/F-032 (BATCH17) completa. Próximo item da ordem de
+  execução do roadmap: BATCH18 — F-033 (Player View integrada) +
+  F-034 (GM View integrada), ambos desbloqueados.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 
