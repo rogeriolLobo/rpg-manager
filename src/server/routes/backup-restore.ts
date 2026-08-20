@@ -39,8 +39,9 @@ import {
   campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, eventTemporalInputSchema, externalResourceInputSchema, journalFolderInputSchema, journalPageInputSchema,
   mapPinInputSchema, memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldCalendarInputSchema, worldEraInputSchema, worldMapInputSchema, worldTagInputSchema,
   vaultEntityInputSchema, worldInputSchema,
+  vttCombatantInputSchema, vttFogCellInputSchema, vttSceneInputSchema, vttTokenInputSchema,
   type AdventureEncounterInput, type AdventureHandoutInput, type AdventureSceneInput,
-  type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type EventTemporalInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldCalendarInput, type WorldEraInput, type WorldInput,
+  type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type EventTemporalInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type VttCombatantInput, type VttFogCellInput, type VttSceneInput, type VttTokenInput, type WorldCalendarInput, type WorldEraInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
 import { normalizeEditorialLabel } from '../../domain/content/wiki';
@@ -127,6 +128,15 @@ interface AdventureScenePlanItem { oldId: string; oldAdventureEntityId: string; 
 interface AdventureEncounterPlanItem { oldId: string; oldSceneId: string; input: AdventureEncounterInput }
 interface AdventureSceneEntityPlanItem { oldSceneId: string; oldEntityId: string; role: string }
 interface AdventureHandoutPlanItem { oldId: string; oldAdventureEntityId: string; oldSceneId: string | null; oldExternalResourceId: string | null; input: AdventureHandoutInput }
+// VTT (F-029/F-030/F-032) — precisa de Campaigns restauradas (campaignIdMap, construído perto
+// do fim do confirm). Estado ao vivo (is_active, combat_active/combat_round, is_current_turn)
+// NUNCA é restaurado como "retomado" — toda cena/combate volta sempre inativo (mesmo valor
+// default do create normal), evitando as UNIQUE INDEX de "só 1 ativo por campanha/turno" e a
+// semântica confusa de "reviver" uma sessão ao vivo a partir de um backup.
+interface VttScenePlanItem { oldId: string; oldCampaignId: string; oldMapId: string | null; input: VttSceneInput }
+interface VttTokenPlanItem { oldId: string; oldSceneId: string; oldEntityId: string | null; input: VttTokenInput }
+interface VttFogCellPlanItem { oldSceneId: string; input: VttFogCellInput }
+interface VttCombatantPlanItem { oldId: string; oldSceneId: string; oldTokenId: string | null; input: VttCombatantInput }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
@@ -139,6 +149,7 @@ interface RestorePlan {
   worldEras: WorldEraPlanItem[]; worldCalendars: WorldCalendarPlanItem[]; eventTemporalDetails: EventTemporalPlanItem[];
   adventureScenes: AdventureScenePlanItem[]; adventureEncounters: AdventureEncounterPlanItem[];
   adventureSceneEntities: AdventureSceneEntityPlanItem[]; adventureHandouts: AdventureHandoutPlanItem[];
+  vttScenes: VttScenePlanItem[]; vttTokens: VttTokenPlanItem[]; vttFogCells: VttFogCellPlanItem[]; vttCombatants: VttCombatantPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -175,6 +186,10 @@ const restorePlanSchema = z.strictObject({
   adventureEncounters: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), input: adventureEncounterInputSchema })),
   adventureSceneEntities: z.array(z.strictObject({ oldSceneId: z.string(), oldEntityId: z.string(), role: adventureSceneEntityInputSchema.shape.role })),
   adventureHandouts: z.array(z.strictObject({ oldId: z.string(), oldAdventureEntityId: z.string(), oldSceneId: z.string().nullable(), oldExternalResourceId: z.string().nullable(), input: adventureHandoutInputSchema })),
+  vttScenes: z.array(z.strictObject({ oldId: z.string(), oldCampaignId: z.string(), oldMapId: z.string().nullable(), input: vttSceneInputSchema })),
+  vttTokens: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), oldEntityId: z.string().nullable(), input: vttTokenInputSchema })),
+  vttFogCells: z.array(z.strictObject({ oldSceneId: z.string(), input: vttFogCellInputSchema })),
+  vttCombatants: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), oldTokenId: z.string().nullable(), input: vttCombatantInputSchema })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -717,6 +732,56 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     campaignSessions.push({ oldId, oldCampaignId, sessionNumber, oldAttendeeMemberIds: oldAttendeeIds, input: { title: parsed.data.title, playedAt: parsed.data.playedAt, summary: parsed.data.summary, gmNotes: parsed.data.gmNotes, nextHooks: parsed.data.nextHooks } });
   }
 
+  // ---- VTT (F-029/F-030/F-032) — precisa de Campaigns restauradas nesta mesma operação. ----
+  const rawVttScenes = rowsOf(data, 'vttScenes');
+  const vttScenes: VttScenePlanItem[] = [];
+  for (const row of rawVttScenes) {
+    const oldId = str(row, 'id'); const oldCampaignId = str(row, 'campaign_id');
+    if (!campaignOldIds.has(oldCampaignId)) { warnings.push({ domain: 'vttScenes', oldId, message: 'Campanha original não pôde ser restaurada — cena de VTT não será restaurada.', category: 'SKIP' }); continue; }
+    const oldMapId = strOrNull(row, 'map_id');
+    if (oldMapId && !worldMapOldIds.has(oldMapId)) warnings.push({ domain: 'vttScenes', oldId, message: 'Mapa original não está neste backup — cena de VTT será restaurada sem mapa vinculado.', category: 'SKIP' });
+    const imageUrl = str(row, 'image_url');
+    const resolvedMapId = oldMapId && worldMapOldIds.has(oldMapId) ? oldMapId : null;
+    if (!resolvedMapId && !imageUrl) { warnings.push({ domain: 'vttScenes', oldId, message: 'Cena de VTT sem mapa nem imagem restauráveis — não será restaurada.', category: 'SKIP' }); continue; }
+    const parsed = vttSceneInputSchema.safeParse({ title: str(row, 'title'), mapId: null, imageUrl, notes: str(row, 'notes'), fogEnabled: num(row, 'fog_enabled') === 1, gridCols: num(row, 'grid_cols') ?? 20, gridRows: num(row, 'grid_rows') ?? 20 });
+    if (!parsed.success) { warnings.push({ domain: 'vttScenes', oldId, message: 'Cena de VTT com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    vttScenes.push({ oldId, oldCampaignId, oldMapId: resolvedMapId, input: parsed.data });
+  }
+  const vttSceneOldIds = new Set(vttScenes.map((item) => item.oldId));
+
+  const rawVttTokens = rowsOf(data, 'vttTokens');
+  const vttTokens: VttTokenPlanItem[] = [];
+  for (const row of rawVttTokens) {
+    const oldId = str(row, 'id'); const oldSceneId = str(row, 'scene_id');
+    if (!vttSceneOldIds.has(oldSceneId)) { warnings.push({ domain: 'vttTokens', oldId, message: 'Cena de VTT original não pôde ser restaurada — token não será restaurado.', category: 'SKIP' }); continue; }
+    const oldEntityId = strOrNull(row, 'entity_id');
+    if (oldEntityId && !entityOldIds.has(oldEntityId)) warnings.push({ domain: 'vttTokens', oldId, message: 'Entidade original não está neste backup — token será restaurado sem entidade vinculada.', category: 'SKIP' });
+    const parsed = vttTokenInputSchema.safeParse({ label: str(row, 'label'), entityId: null, x: num(row, 'x'), y: num(row, 'y'), visibleToPlayers: num(row, 'visible_to_players') === 1 });
+    if (!parsed.success) { warnings.push({ domain: 'vttTokens', oldId, message: 'Token com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    vttTokens.push({ oldId, oldSceneId, oldEntityId: oldEntityId && entityOldIds.has(oldEntityId) ? oldEntityId : null, input: parsed.data });
+  }
+  const vttTokenOldIds = new Set(vttTokens.map((item) => item.oldId));
+
+  const vttFogCells: VttFogCellPlanItem[] = [];
+  for (const row of rowsOf(data, 'vttFogCells')) {
+    const oldSceneId = str(row, 'scene_id');
+    if (!vttSceneOldIds.has(oldSceneId)) continue;
+    const parsed = vttFogCellInputSchema.safeParse({ col: num(row, 'col'), row: num(row, 'row') });
+    if (!parsed.success) continue;
+    vttFogCells.push({ oldSceneId, input: parsed.data });
+  }
+
+  const vttCombatants: VttCombatantPlanItem[] = [];
+  for (const row of rowsOf(data, 'vttCombatants')) {
+    const oldId = str(row, 'id'); const oldSceneId = str(row, 'scene_id');
+    if (!vttSceneOldIds.has(oldSceneId)) { warnings.push({ domain: 'vttCombatants', oldId, message: 'Cena de VTT original não pôde ser restaurada — combatente não será restaurado.', category: 'SKIP' }); continue; }
+    const oldTokenId = strOrNull(row, 'token_id');
+    if (oldTokenId && !vttTokenOldIds.has(oldTokenId)) warnings.push({ domain: 'vttCombatants', oldId, message: 'Token original não está neste backup — combatente será restaurado sem token vinculado.', category: 'SKIP' });
+    const parsed = vttCombatantInputSchema.safeParse({ tokenId: null, name: str(row, 'name'), initiative: num(row, 'initiative') ?? 0, hpCurrent: num(row, 'hp_current'), hpMax: num(row, 'hp_max'), notes: str(row, 'notes'), visibleToPlayers: num(row, 'visible_to_players') === 1 });
+    if (!parsed.success) { warnings.push({ domain: 'vttCombatants', oldId, message: 'Combatente com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    vttCombatants.push({ oldId, oldSceneId, oldTokenId: oldTokenId && vttTokenOldIds.has(oldTokenId) ? oldTokenId : null, input: parsed.data });
+  }
+
   return {
     worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
@@ -724,6 +789,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
     worldMaps, mapPins, externalResources, worldEras, worldCalendars, eventTemporalDetails,
     adventureScenes, adventureEncounters, adventureSceneEntities, adventureHandouts,
+    vttScenes, vttTokens, vttFogCells, vttCombatants,
     warnings,
   };
 }
@@ -743,7 +809,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
     + plan.sheetTemplates.length + plan.characterSheets.length
     + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
     + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length
-    + plan.adventureScenes.length + plan.adventureEncounters.length + plan.adventureSceneEntities.length + plan.adventureHandouts.length;
+    + plan.adventureScenes.length + plan.adventureEncounters.length + plan.adventureSceneEntities.length + plan.adventureHandouts.length
+    + plan.vttScenes.length + plan.vttTokens.length + plan.vttFogCells.length + plan.vttCombatants.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -761,6 +828,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
       worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
       adventureScenes: plan.adventureScenes.length, adventureEncounters: plan.adventureEncounters.length, adventureSceneEntities: plan.adventureSceneEntities.length, adventureHandouts: plan.adventureHandouts.length,
+      vttScenes: plan.vttScenes.length, vttTokens: plan.vttTokens.length, vttFogCells: plan.vttFogCells.length, vttCombatants: plan.vttCombatants.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -1175,6 +1243,43 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     }
   }
 
+  // ---- VTT (F-029/F-030/F-032) — precisa de campaignIdMap (Campaigns, já construído acima).
+  // Estado ao vivo (is_active/combat_active/combat_round/is_current_turn) sempre volta ao
+  // default "inativo" — nunca "revive" uma sessão ao vivo a partir de um backup (ver comentário
+  // no plano). ----
+  const vttSceneIdMap = new Map<string, string>();
+  for (const item of plan.vttScenes) {
+    const newCampaignId = campaignIdMap.get(item.oldCampaignId); if (!newCampaignId) continue;
+    const newId = crypto.randomUUID();
+    const resolvedMapId = item.oldMapId ? worldMapIdMap.get(item.oldMapId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO vtt_scenes (id,campaign_id,map_id,title,image_url,notes,is_active,fog_enabled,grid_cols,grid_rows,combat_active,combat_round,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?,?,0,0,?,?)')
+      .bind(newId, newCampaignId, resolvedMapId, item.input.title, item.input.imageUrl, item.input.notes, Number(item.input.fogEnabled), item.input.gridCols, item.input.gridRows, now, now));
+    vttSceneIdMap.set(item.oldId, newId);
+  }
+  const vttTokenIdMap = new Map<string, string>();
+  for (const item of plan.vttTokens) {
+    const newSceneId = vttSceneIdMap.get(item.oldSceneId); if (!newSceneId) continue;
+    const newId = crypto.randomUUID();
+    const resolvedEntityId = item.oldEntityId ? entityIdMap.get(item.oldEntityId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO vtt_tokens (id,scene_id,entity_id,label,x,y,visible_to_players,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(newId, newSceneId, resolvedEntityId, item.input.label, item.input.x, item.input.y, Number(item.input.visibleToPlayers), now, now));
+    vttTokenIdMap.set(item.oldId, newId);
+  }
+  let vttFogCellsCreated = 0;
+  for (const item of plan.vttFogCells) {
+    const newSceneId = vttSceneIdMap.get(item.oldSceneId); if (!newSceneId) continue;
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO vtt_fog_cells (scene_id,col,row,revealed_at) VALUES (?,?,?,?)').bind(newSceneId, item.input.col, item.input.row, now));
+    vttFogCellsCreated += 1;
+  }
+  let vttCombatantsCreated = 0;
+  for (const item of plan.vttCombatants) {
+    const newSceneId = vttSceneIdMap.get(item.oldSceneId); if (!newSceneId) continue;
+    const resolvedTokenId = item.oldTokenId ? vttTokenIdMap.get(item.oldTokenId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO vtt_combatants (id,scene_id,token_id,name,initiative,hp_current,hp_max,notes,visible_to_players,is_current_turn,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,0,?,?)')
+      .bind(crypto.randomUUID(), newSceneId, resolvedTokenId, item.input.name, item.input.initiative, item.input.hpCurrent ?? null, item.input.hpMax ?? null, item.input.notes, Number(item.input.visibleToPlayers), now, now));
+    vttCombatantsCreated += 1;
+  }
+
   statements.push(c.env.DB.prepare('UPDATE backup_restore_jobs SET confirmed_at=? WHERE id=? AND user_id=?').bind(now, jobId, user.id));
   await c.env.DB.batch(statements);
   return c.json({
@@ -1185,6 +1290,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,
       worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourceIdMap.size, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
       adventureScenes: adventureSceneIdMap.size, adventureEncounters: adventureEncountersCreated, adventureSceneEntities: adventureSceneEntitiesCreated, adventureHandouts: adventureHandoutsCreated,
+      vttScenes: vttSceneIdMap.size, vttTokens: vttTokenIdMap.size, vttFogCells: vttFogCellsCreated, vttCombatants: vttCombatantsCreated,
     },
     warnings: confirmWarnings,
   });

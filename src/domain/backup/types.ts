@@ -58,4 +58,8 @@ export interface BackupRestorePreviewSummary {
   adventureEncounters: number;
   adventureSceneEntities: number;
   adventureHandouts: number;
+  vttScenes: number;
+  vttTokens: number;
+  vttFogCells: number;
+  vttCombatants: number;
 }

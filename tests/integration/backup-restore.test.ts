@@ -607,4 +607,47 @@ describe('F-015: Backup/Restore completo', () => {
     expect(adventureBody.handouts[0].sceneId).not.toBeNull();
     expect(adventureBody.handouts[0].externalResourceId).not.toBe(externalResourceId); // ID novo
   });
+
+  it('round-trip: VTT (Scene+Token+Fog+Combatant) via Campaign restaurada — estado ao vivo sempre volta inativo', async () => {
+    const owner = await register('backup-vtt-roundtrip');
+    const rpgResponse = await request('/rpgs', 'POST', { title: 'RPG do VTT', categoryId: null, subgenreId: null, readingStatus: 'READING', hasPlayed: false, wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', playGroupId: null, plannedPlayDate: null, tableStatus: 'IDEA', gameMaster: '', notes: '', coverUrl: null }, owner);
+    const rpgId = ((await rpgResponse.json()) as { item: { id: string } }).item.id;
+    const campaignResponse = await request('/campaigns', 'POST', { rpgId, name: 'Campanha VTT', status: 'IN_PROGRESS', sessionMode: 'CAMPAIGN', gameMaster: '', playGroupId: null, adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: null, nextSessionDate: null, sessionGoal: null, legacyMembersText: '', legacyCharactersText: '', notes: '' }, owner);
+    const campaignId = ((await campaignResponse.json()) as { item: { id: string } }).item.id;
+    const sceneResponse = await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Sala do Trono', mapId: null, imageUrl: 'https://example.com/sala.png', notes: '', fogEnabled: true, gridCols: 10, gridRows: 10 }, owner);
+    const sceneId = ((await sceneResponse.json()) as { id: string }).id;
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/activate`, 'POST', undefined, owner);
+    const tokenResponse = await request(`/vtt/${campaignId}/scenes/${sceneId}/tokens`, 'POST', { label: 'Rei', entityId: null, x: 50, y: 50, visibleToPlayers: true }, owner);
+    expect(tokenResponse.status).toBe(201);
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/fog/reveal`, 'POST', { col: 2, row: 3 }, owner);
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'Guarda 1', initiative: 12, hpCurrent: 10, hpMax: 10, notes: '', visibleToPlayers: true }] }, owner);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ vttScenes: 1, vttTokens: 1, vttFogCells: 1, vttCombatants: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ vttScenes: 1, vttTokens: 1, vttFogCells: 1, vttCombatants: 1 });
+
+    const campaigns = await request('/campaigns?pageSize=50', 'GET', undefined, owner);
+    const campaignItems = ((await campaigns.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredCampaign = campaignItems.find((item) => item.name === 'Campanha VTT' && item.id !== campaignId)!;
+
+    const scenes = await request(`/vtt/${restoredCampaign.id}/scenes`, 'GET', undefined, owner);
+    const sceneItems = ((await scenes.json()) as { items: Array<{ id: string; title: string; isActive: boolean }> }).items;
+    expect(sceneItems).toHaveLength(1);
+    expect(sceneItems[0].title).toBe('Sala do Trono');
+    expect(sceneItems[0].isActive).toBe(false); // nunca revive a cena ativa a partir do backup
+
+    const sceneDetail = await request(`/vtt/${restoredCampaign.id}/scenes/${sceneItems[0].id}`, 'GET', undefined, owner);
+    const sceneBody = await sceneDetail.json() as { tokens: Array<{ label: string }>; fog: Array<{ col: number; row: number }>; combatants: Array<{ name: string; initiative: number }> };
+    expect(sceneBody.tokens).toHaveLength(1);
+    expect(sceneBody.tokens[0].label).toBe('Rei');
+    expect(sceneBody.fog).toHaveLength(1);
+    expect(sceneBody.fog[0]).toMatchObject({ col: 2, row: 3 });
+    expect(sceneBody.combatants).toHaveLength(1);
+    expect(sceneBody.combatants[0]).toMatchObject({ name: 'Guarda 1', initiative: 12 });
+  });
 });
