@@ -1304,16 +1304,25 @@ criar um mecanismo novo.
   exclui — desktop e mobile).
 - Vertical F-028 (BATCH15) completa. Próximo item da ordem de execução
   do roadmap: BATCH16 — F-029 (VTT fundação) + F-030 (fog of war).
-- **Achado de hardening para BATCH19:** `tests/e2e/vault-worlds-flow.spec.ts`
-  ("getByLabel('Nome')... element was detached from the DOM") voltou a
-  flakar no CI (2ª vez nesta sessão, ambas só quando roda no fim de uma
-  fila longa e sequencial de ~76 testes, workers:1) — sempre passa
-  isolado localmente (confirmado as duas vezes). Consistente com
-  degradação de recursos acumulada ao longo de uma fila sequencial
-  longa, não com uma regressão real de código. `gh run rerun --failed`
-  resolveu as duas vezes. Anotado para revisão no hardening final —
-  candidato a dividir a suíte E2E em mais de um job paralelo ou
-  adicionar uma guarda explícita de estabilidade nesse teste específico.
+- **Achado de hardening, resolvido antecipado do BATCH19 (RPG-1.0-BATCH17):**
+  `tests/e2e/vault-worlds-flow.spec.ts` ("getByLabel('Nome')... element
+  was detached from the DOM") escalou de "ocasional, resolvido por
+  rerun" (2 ocorrências em sessões anteriores) para reprodução 100%
+  consistente nesta sessão — 3 rodadas de CI seguidas, a última já com
+  `gh run rerun --failed` limpo antes, ainda assim falhando nos dois
+  projects (chromium + mobile-chromium). Sempre passa isolado
+  localmente — nunca foi uma regressão de código, é degradação de
+  recurso acumulada ao longo de uma fila sequencial longa (a suíte
+  cresceu de ~56 para ~89 execuções entre BATCH5 e BATCH17). Como o
+  sintoma deixou de ser esporádico, a causa raiz foi corrigida agora em
+  vez de adiada de novo: `.github/workflows/ci.yml` divide o E2E em 2
+  jobs paralelos (`--shard=1/2`/`--shard=2/2`), cada um seu próprio
+  runner/container/`wrangler dev`/arquivo D1 local (nunca compartilham
+  estado — a razão original do `workers:1` em `playwright.config.ts`,
+  que evita 2 workers no MESMO arquivo D1 dentro de um job, continua
+  válida dentro de cada shard). Reduz a fila sequencial de cada worker
+  pela metade, atacando a causa raiz diretamente em vez de mais
+  reruns ou timeout maior.
 
 ## F-029 — VTT — fundação (Scene/Map/tokens) — `DONE` (RPG-1.0-BATCH16)
 

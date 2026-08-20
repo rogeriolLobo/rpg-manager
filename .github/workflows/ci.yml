@@ -30,7 +30,7 @@ jobs:
     # Tag fixada na mesma versão de @playwright/test do package.json —
     # atualizar as duas juntas.
     container: mcr.microsoft.com/playwright:v1.62.1-noble
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - run: npm ci
@@ -40,4 +40,28 @@ jobs:
       - run: npm run test
       - run: npm run test:integration
       - run: npm run build
-      - run: npm run test:e2e
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
+    timeout-minutes: 15
+    # RPG-1.0-BATCH17: E2E dividido em 2 shards paralelos (jobs separados, cada um com seu
+    # próprio container/runner/wrangler-dev/arquivo D1 local — nunca compartilham estado entre
+    # si, então a razão original do workers:1 no playwright.config.ts continua válida DENTRO de
+    # cada shard). Achado real: vault-worlds-flow.spec.ts (já documentado como flake recorrente
+    # em docs/product/MASTER_BACKLOG.md) passou de "ocasional, resolvido por rerun" para
+    # reprodução 100% consistente conforme a suíte cresceu (~45 testes × 2 projects numa fila
+    # totalmente sequencial) — o sintoma ("element was detached from the DOM" por 90s seguidos)
+    # bate com degradação de recurso acumulada ao longo de uma fila longa, a mesma causa raiz já
+    # registrada. Dividir pela metade a fila sequencial de cada worker ataca a causa raiz
+    # diretamente, em vez de mais reruns ou aumentar timeout às cegas.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci
+      - run: cp .dev.vars.example .dev.vars
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
