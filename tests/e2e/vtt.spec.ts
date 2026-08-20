@@ -52,10 +52,13 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
   await expect(page.getByText("Ao vivo")).toBeVisible();
 
   await page.getByRole("button", { name: "Revelar" }).click();
-  // Escopado ao item do token (não a getByText solto na página inteira) — o painel de
-  // Combate (F-032) também tem um checkbox rotulado "Visível aos jogadores", ambíguo com o
-  // texto de status do token se a busca não for escopada.
-  await expect(page.locator("li").filter({ hasText: "Dragão Vermelho" }).getByText("visível aos jogadores")).toBeVisible();
+  // Escopado ao <li> do token DENTRO do corpo da cena expandida (não a qualquer <li> da
+  // página) — o <li> da CENA em si também "contém" o texto "Dragão Vermelho" (o token está
+  // aninhado dentro dele), então um `page.locator("li").filter(...)` sem escopo mais preciso
+  // combina tanto o <li> da cena (que também tem o checkbox "Visível aos jogadores" do painel
+  // de Combate, F-032) quanto o <li> do token — ambíguo. `.adventure-scene-body li` exclui o
+  // <li> externo da cena (ele é ancestral do corpo, não descendente).
+  await expect(page.locator(".adventure-scene-body li").filter({ hasText: "Dragão Vermelho" }).getByText("visível aos jogadores")).toBeVisible();
 
   await page.getByRole("button", { name: "Excluir token Dragão Vermelho" }).click();
   await expect(page.getByText("Nenhum token nesta cena.")).toBeVisible();

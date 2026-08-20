@@ -20,6 +20,10 @@ async function register(page: Page, email: string, name: string) {
 function csrfToken(cookies: Array<{ name: string; value: string }>): string {
   return decodeURIComponent(cookies.find((cookie) => cookie.name === "rpg_csrf")?.value ?? "");
 }
+// page.request não simula todos os headers de um navegador real — sem Origin explícito, o
+// requireTrustedOrigin do backend rejeita o POST antes de chegar na rota (mesmo achado real já
+// documentado em vault-worlds-flow.spec.ts, que usa o mesmo padrão).
+const apiHeaders = (csrf: string) => ({ "X-CSRF-Token": csrf, Origin: "http://127.0.0.1:5173" });
 
 test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o combate aparece após o mestre iniciar (poll)", async ({ page, browser }) => {
   test.setTimeout(60_000);
@@ -38,22 +42,22 @@ test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o c
 
   const ownerCsrf = csrfToken(await page.context().cookies());
   const rpgResponse = await page.request.post("/api/v1/rpgs", {
-    headers: { "X-CSRF-Token": ownerCsrf },
+    headers: apiHeaders(ownerCsrf),
     data: { title: `RPG Live ${suffix}`, categoryId: null, subgenreId: null, readingStatus: "READING", hasPlayed: false, wantsToPlay: true, priority: "HIGH", playGroupNotes: "", playGroupId: null, plannedPlayDate: null, tableStatus: "IDEA", gameMaster: "", notes: "", coverUrl: null },
   });
   const rpgId = ((await rpgResponse.json()) as { item: { id: string } }).item.id;
-  const groupResponse = await page.request.post("/api/v1/groups", { headers: { "X-CSRF-Token": ownerCsrf }, data: { name: `Grupo Live ${suffix}`, notes: "" } });
+  const groupResponse = await page.request.post("/api/v1/groups", { headers: apiHeaders(ownerCsrf), data: { name: `Grupo Live ${suffix}`, notes: "" } });
   const groupId = ((await groupResponse.json()) as { item: { id: string } }).item.id;
-  await page.request.post(`/api/v1/groups/${groupId}/members`, { headers: { "X-CSRF-Token": ownerCsrf }, data: { playerName: "Jogador", userId: playerId, notes: "", active: true, isGameMaster: false } });
+  await page.request.post(`/api/v1/groups/${groupId}/members`, { headers: apiHeaders(ownerCsrf), data: { playerName: "Jogador", userId: playerId, notes: "", active: true, isGameMaster: false } });
   const campaignResponse = await page.request.post("/api/v1/campaigns", {
-    headers: { "X-CSRF-Token": ownerCsrf },
+    headers: apiHeaders(ownerCsrf),
     data: { rpgId, name: `Mesa Live ${suffix}`, status: "PLANNING", gameMaster: "", playGroupId: groupId, adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: null, nextSessionDate: null, sessionGoal: null, legacyMembersText: "", legacyCharactersText: "", notes: "" },
   });
   const campaignId = ((await campaignResponse.json()) as { item: { id: string } }).item.id;
-  const sceneResponse = await page.request.post(`/api/v1/vtt/${campaignId}/scenes`, { headers: { "X-CSRF-Token": ownerCsrf }, data: { title: "Cena Ao Vivo", mapId: null, imageUrl: "https://example.com/live-e2e.png", notes: "" } });
+  const sceneResponse = await page.request.post(`/api/v1/vtt/${campaignId}/scenes`, { headers: apiHeaders(ownerCsrf), data: { title: "Cena Ao Vivo", mapId: null, imageUrl: "https://example.com/live-e2e.png", notes: "" } });
   const sceneId = ((await sceneResponse.json()) as { id: string }).id;
-  await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/tokens`, { headers: { "X-CSRF-Token": ownerCsrf }, data: { label: "Herói", entityId: null, x: 40, y: 60, visibleToPlayers: true } });
-  await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/activate`, { headers: { "X-CSRF-Token": ownerCsrf }, data: {} });
+  await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/tokens`, { headers: apiHeaders(ownerCsrf), data: { label: "Herói", entityId: null, x: 40, y: 60, visibleToPlayers: true } });
+  await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/activate`, { headers: apiHeaders(ownerCsrf), data: {} });
 
   await playerPage.goto(`/app/campaigns/${campaignId}/vtt/live`);
   await expect(playerPage.getByRole("heading", { name: "Cena Ao Vivo" })).toBeVisible();
@@ -62,7 +66,7 @@ test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o c
   // Mestre inicia combate DEPOIS do jogador já estar na tela — o combate só aparece quando o
   // próximo poll (até 3s) buscar de novo, provando que a visão realmente atualiza sozinha.
   await page.request.post(`/api/v1/vtt/${campaignId}/scenes/${sceneId}/combat/start`, {
-    headers: { "X-CSRF-Token": ownerCsrf },
+    headers: apiHeaders(ownerCsrf),
     data: { combatants: [{ tokenId: null, name: "Herói", initiative: 15, hpCurrent: 20, hpMax: 20, notes: "", visibleToPlayers: true }] },
   });
   await expect(playerPage.getByText("Round 1")).toBeVisible({ timeout: 10_000 });
