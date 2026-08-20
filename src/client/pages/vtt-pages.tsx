@@ -49,6 +49,21 @@ export function VttPage(){
   const [adventure,setAdventure]=useState<{id:string;name:string}|null|undefined>(undefined);
   const [adventureSummary,setAdventureSummary]=useState<AdventureSummary|null>(null);
 
+  const loadSceneDetail=async(sceneId:string)=>{
+    try{const detail=await api<{item:SceneDetail;tokens:Token[];fog:FogCell[];combatants:Combatant[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível carregar a cena.');}
+  };
+  // BATCH23 (Seção 6 do pedido de finalização — Multi-GM): esta tela assumia um único GM ("já
+  // vê suas próprias mudanças instantaneamente via estado local depois de cada ação"), premissa
+  // que deixou de valer com Co-GM — sem isto, GM-A nunca veria ao vivo o que GM-B faz (só depois
+  // de um reload manual). Reaproveita o MESMO canal de useCampaignRealtime (compartilhado com
+  // VttLivePage/PlayerCampaignHomePage) — qualquer STATE recebido (de qualquer razão: cena
+  // ativada, token movido, fog revelada, combate avançado) recarrega a lista de cenas e, se
+  // houver uma cena expandida na tela, o detalhe dela também.
+  const {connected:wsConnected}=useCampaignRealtime(campaignId,()=>{
+    scenesResource.reload();
+    if(expandedSceneId)void loadSceneDetail(expandedSceneId);
+  });
   useEffect(()=>{void api<{items:WorldOption[]}>('/worlds?pageSize=50').then((result)=>setWorldOptions(result.items.filter((world)=>world.isOwner))).catch(()=>{});},[]);
   useEffect(()=>{void api<{items:EntityOption[]}>('/vault?pageSize=100&sort=name').then((result)=>setEntityOptions(result.items)).catch(()=>{});},[]);
   useEffect(()=>{
@@ -73,10 +88,6 @@ export function VttPage(){
   if(scenesResource.status!=='success')return <ResourceFallback state={scenesResource} onRetry={scenesResource.reload}/>;
   const scenes=scenesResource.data.items;
 
-  const loadSceneDetail=async(sceneId:string)=>{
-    try{const detail=await api<{item:SceneDetail;tokens:Token[];fog:FogCell[];combatants:Combatant[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
-    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível carregar a cena.');}
-  };
   const toggleExpand=(sceneId:string)=>{
     if(expandedSceneId===sceneId){setExpandedSceneId(null);return;}
     setExpandedSceneId(sceneId);
@@ -155,6 +166,7 @@ export function VttPage(){
   const liveUrl=`${location.origin}/app/campaigns/${campaignId}/vtt/live`;
   return <div className="page">
     <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
+    <p className="badge" style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}>{wsConnected?'● Tempo real (mudanças de outro Co-Mestre aparecem automaticamente)':'○ Sem tempo real (recarregue para ver mudanças de outro Co-Mestre)'}</p>
     {error&&<p className="form-error">{error}</p>}
 
     {/* F-031: WebSocket real via Durable Object é preferido; este link continua funcionando
