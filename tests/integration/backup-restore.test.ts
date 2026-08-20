@@ -299,4 +299,129 @@ describe('F-015: Backup/Restore completo', () => {
     expect(linkItems).toHaveLength(1);
     expect(linkItems[0].worldId).toBe(restoredLinkedWorldId); // ID NOVO, nunca o antigo
   });
+
+  // BATCH20 (Seção 3/4 do pedido de finalização): Library/Groups/Campaigns/Sessions —
+  // reclassificados de export-only para restaurados. Round-trip cobrindo a cadeia completa
+  // Group -> Campaign -> Member -> Session exigida no pedido, incluindo colisão de nome/título
+  // (RPG/Group já existem na mesma conta) e referência a conta externa real (Section 5: nunca
+  // recriar outra pessoa, só preservar se a conta ainda existir).
+  it('round-trip completo: Library + Group + Campaign + Member (com conta externa e personagem) + Sessão/presença, com colisão de título/nome resolvida', async () => {
+    const owner = await register('backup-library-roundtrip');
+    const friend = await register('backup-library-roundtrip-friend');
+
+    const rpgResponse = await request('/rpgs', 'POST', { title: 'Aventuras no Vazio', categoryId: null, subgenreId: null, readingStatus: 'READING', hasPlayed: false, wantsToPlay: true, priority: 'HIGH', playGroupNotes: '', playGroupId: null, plannedPlayDate: null, tableStatus: 'PLAYING', gameMaster: '', notes: '', coverUrl: null }, owner);
+    expect(rpgResponse.status).toBe(201);
+    const rpgId = ((await rpgResponse.json()) as { item: { id: string } }).item.id;
+
+    const groupResponse = await request('/groups', 'POST', { name: 'Mesa de Sexta', notes: 'grupo fixo' }, owner);
+    expect(groupResponse.status).toBe(201);
+    const groupId = ((await groupResponse.json()) as { item: { id: string } }).item.id;
+    await request(`/groups/${groupId}/members`, 'POST', { playerName: 'Jogador Local', userId: null, notes: '', active: true, isGameMaster: true }, owner);
+    await request(`/groups/${groupId}/members`, 'POST', { playerName: 'ignorado (vira nome da conta)', userId: friend.userId, notes: '', active: true, isGameMaster: false }, owner);
+
+    const worldResponse = await request('/worlds', 'POST', { name: 'Mundo com RPG padrão', description: '', defaultRpgId: rpgId, visibility: 'PRIVATE' }, owner);
+    expect(worldResponse.status).toBe(201);
+    const worldId = ((await worldResponse.json()) as { item: { id: string } }).item.id;
+    const characterEntityId = await createEntity(owner, { entityType: 'CHARACTER', name: 'Herói', worldId });
+
+    // playGroupId numa Campaign nova cria automaticamente 1 campaign_member por membro ATIVO do
+    // grupo (groupMemberStatements, campaigns.ts) — não precisa POST manual para os 2 membros.
+    const campaignResponse = await request('/campaigns', 'POST', { rpgId, name: 'Campanha Real', status: 'IN_PROGRESS', sessionMode: 'CAMPAIGN', gameMaster: '', playGroupId: groupId, adventureEntityId: null, sessionZeroDate: null, firstSessionDate: null, frequency: null, nextSessionDate: null, sessionGoal: null, legacyMembersText: '', legacyCharactersText: '', notes: '' }, owner);
+    expect(campaignResponse.status).toBe(201);
+    const campaignId = ((await campaignResponse.json()) as { item: { id: string } }).item.id;
+
+    const campaignDetail = await request(`/campaigns/${campaignId}`, 'GET', undefined, owner);
+    const campaignMembers = ((await campaignDetail.json()) as { members: Array<{ id: string; playerName: string; linkedUserId: string | null }> }).members;
+    expect(campaignMembers).toHaveLength(2);
+    const localMember = campaignMembers.find((member) => member.playerName === 'Jogador Local')!;
+    const friendMember = campaignMembers.find((member) => member.linkedUserId === friend.userId)!;
+    await request(`/campaigns/${campaignId}/members/${localMember.id}`, 'PATCH', { playerName: 'Jogador Local', characterName: 'Herói', notes: '', active: true, characterEntityId }, owner);
+
+    const sessionResponse = await request(`/campaigns/${campaignId}/sessions`, 'POST', { title: 'Sessão 1', playedAt: '2026-01-05', summary: '', gmNotes: 'segredo do mestre', nextHooks: '', attendeeMemberIds: [localMember.id, friendMember.id] }, owner);
+    expect(sessionResponse.status).toBe(201);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number>; canConfirm: boolean };
+    expect(previewBody.summary).toMatchObject({ library: 1, groups: 1, groupMembers: 2, campaigns: 1, campaignMembers: 2, campaignSessions: 1 });
+    expect(previewBody.canConfirm).toBe(true);
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ library: 1, groups: 1, groupMembers: 2, campaigns: 1, campaignMembers: 2, campaignSessions: 1, campaignAttendance: 2 });
+
+    // Título/nome já existiam na mesma conta -> colisão resolvida com sufixo " (2)", nunca
+    // derruba o batch inteiro (UNIQUE(user_id,title)/UNIQUE(user_id,name) do schema).
+    const rpgs = await request('/rpgs?pageSize=50', 'GET', undefined, owner);
+    const rpgItems = ((await rpgs.json()) as { items: Array<{ id: string; title: string }> }).items;
+    const restoredRpg = rpgItems.find((item) => item.title === 'Aventuras no Vazio (2)')!;
+    expect(restoredRpg).toBeTruthy();
+    expect(restoredRpg.id).not.toBe(rpgId);
+
+    const groups = await request('/groups', 'GET', undefined, owner);
+    const groupItems = ((await groups.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredGroup = groupItems.find((item) => item.name === 'Mesa de Sexta (2)')!;
+    expect(restoredGroup).toBeTruthy();
+
+    const restoredGroupDetail = await request(`/groups/${restoredGroup.id}`, 'GET', undefined, owner);
+    const restoredGroupMembers = ((await restoredGroupDetail.json()) as { members: Array<{ playerName: string; linkedUserId: string | null; isGameMaster: boolean }> }).members;
+    expect(restoredGroupMembers).toHaveLength(2);
+    // Referência a conta externa real (o amigo) preservada — nunca recriada como pessoa nova.
+    expect(restoredGroupMembers.some((member) => member.linkedUserId === friend.userId)).toBe(true);
+    expect(restoredGroupMembers.some((member) => member.playerName === 'Jogador Local' && member.isGameMaster)).toBe(true);
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredWorldId = worldItems.find((item) => item.name === 'Mundo com RPG padrão' && item.id !== worldId)!.id;
+    const restoredWorldDetail = await request(`/worlds/${restoredWorldId}`, 'GET', undefined, owner);
+    const restoredWorldItem = ((await restoredWorldDetail.json()) as { item: { defaultRpgId: string | null } }).item;
+    // World -> Library: defaultRpgId aponta para o RPG restaurado NESTA MESMA operação (ID
+    // novo), nunca para o RPG original nem fica nulo.
+    expect(restoredWorldItem.defaultRpgId).toBe(restoredRpg.id);
+
+    const campaigns = await request('/campaigns?pageSize=50', 'GET', undefined, owner);
+    const campaignItems = ((await campaigns.json()) as { items: Array<{ id: string; name: string; rpgId: string; playGroupId: string | null }> }).items;
+    const restoredCampaigns = campaignItems.filter((item) => item.name === 'Campanha Real');
+    expect(restoredCampaigns).toHaveLength(2);
+    const restoredCampaign = restoredCampaigns.find((item) => item.id !== campaignId)!;
+    expect(restoredCampaign.rpgId).toBe(restoredRpg.id); // FK remapeada, nunca o RPG original
+    expect(restoredCampaign.playGroupId).toBe(restoredGroup.id); // FK remapeada, nunca o Group original
+
+    const restoredCampaignDetail = await request(`/campaigns/${restoredCampaign.id}`, 'GET', undefined, owner);
+    const restoredCampaignBody = await restoredCampaignDetail.json() as { members: Array<{ characterName: string; characterEntityId: string | null; groupMemberId: string | null; linkedUserId: string | null }>; sessions: Array<{ id: string; title: string; gmNotes: string }> };
+    expect(restoredCampaignBody.members).toHaveLength(2);
+    const restoredCharacterMember = restoredCampaignBody.members.find((member) => member.characterName === 'Herói')!;
+    expect(restoredCharacterMember.characterEntityId).toBeTruthy();
+    expect(restoredCharacterMember.characterEntityId).not.toBe(characterEntityId); // ID novo
+    expect(restoredCharacterMember.groupMemberId).toBeTruthy(); // vínculo Group Member -> Campaign Member preservado
+    expect(restoredCampaignBody.members.some((member) => member.linkedUserId === friend.userId)).toBe(true);
+
+    expect(restoredCampaignBody.sessions).toHaveLength(1);
+    expect(restoredCampaignBody.sessions[0]).toMatchObject({ title: 'Sessão 1', gmNotes: 'segredo do mestre' });
+    const sessionDetail = await request(`/campaigns/${restoredCampaign.id}/sessions/${restoredCampaignBody.sessions[0].id}`, 'GET', undefined, owner);
+    const sessionBody = await sessionDetail.json() as { item: { attendeeMemberIds: string[] } };
+    expect(sessionBody.item.attendeeMemberIds).toHaveLength(2); // presença dos 2 membros restaurada
+  });
+
+  it('conta externa removida vira EXTERNAL_DEPENDENCY no preview — membro é restaurado sem o vínculo, nunca reatribuído a outra pessoa', async () => {
+    const owner = await register('backup-external-dep-owner');
+    const groupResponse = await request('/groups', 'POST', { name: 'Grupo com conta fantasma', notes: '' }, owner);
+    const groupId = ((await groupResponse.json()) as { item: { id: string } }).item.id;
+    const backup = await exportBackup(owner);
+    // Simula um membro cujo user_id não corresponde a nenhuma conta real (conta apagada/nunca
+    // existiu) — nunca pode ser inventada nem reatribuída a outra pessoa (Seção 5 do pedido).
+    (backup.data.groupMembers as Array<Record<string, unknown>>).push({ id: 'fake-member-id', group_id: groupId, player_name: 'Fantasma', user_id: 'user-que-nao-existe', notes: '', active: 1, is_game_master: 0, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' });
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: { groupMembers: number }; warnings: Array<{ domain: string; category?: string }>; canConfirm: boolean };
+    expect(previewBody.summary.groupMembers).toBe(1); // o membro fantasma ainda é restaurado, só sem o vínculo
+    const externalWarning = previewBody.warnings.find((warning) => warning.domain === 'groupMembers' && warning.category === 'EXTERNAL_DEPENDENCY');
+    expect(externalWarning).toBeTruthy();
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: { groupMembers: number } };
+    expect(confirmBody.restored.groupMembers).toBe(1);
+  });
 });

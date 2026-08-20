@@ -9,21 +9,23 @@
 // mapeamento de todo schema antigo, custo real sem usuário afetado hoje).
 export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
 
-// Escopo de restore automatizado da v1 (ver docs/product/RPG_MANAGER_FINAL_STATUS.md,
-// seção F-015): Worlds, Vault entities (+ todos os campos especializados),
-// Creature Stat Templates (dependência de Creature), Journal (pastas+páginas),
-// world_entity_links (F-022 — extensão BATCH19: liga dois IDs já restaurados na
-// mesma operação, sem domínio/parsing próprio).
-// Groups/Campaigns/Library, Wiki (organização), Relations, Cartografia,
-// External Resources, Timeline/Calendar, Revision History, Social (F-016/018/019),
-// Sheets (F-020/021), Adventures estruturadas (F-025), Files/Handouts metadata
-// (F-028) e VTT (F-029/030/031/032) continuam cobertos pelo EXPORT (nenhum dado
-// é perdido no backup), mas ainda não têm restore automatizado — documentado
-// como limitação conhecida, não escondida (BATCH19 revalidou a cobertura do
-// export para 100% dos domínios; restore automatizado do restante fica para uma
-// iteração futura se houver demanda real, mesma decisão já tomada para
-// Groups/Campaigns desde o BATCH6 original).
-export interface BackupRestoreWarning { domain: string; oldId: string; message: string }
+// Escopo de restore automatizado (ver docs/product/RPG_MANAGER_FINAL_STATUS.md, seção F-015):
+// Worlds, Vault entities (+ todos os campos especializados), Creature Stat Templates, Journal
+// (pastas+páginas), world_entity_links (F-022), Library (rpgs/publications/game_systems, via a
+// mesma camada canônica do create manual — library-writes.ts), Groups/GroupMembers, Campaigns/
+// CampaignMembers/Sessions/Attendance (BATCH20 — reclassificado de export-only para restaurado,
+// ver comentário no topo de backup-restore.ts).
+// Wiki (organização), Relations, Cartografia, External Resources, Timeline/Calendar, Revision
+// History, Social (F-016/018/019), Sheets (F-020/021), Adventures estruturadas (F-025),
+// Files/Handouts metadata (F-028) e VTT (F-029/030/031/032) continuam cobertos pelo EXPORT
+// (nenhum dado é perdido no backup), mas ainda não têm restore automatizado — documentado como
+// limitação conhecida, não escondida.
+export interface BackupRestoreWarning {
+  domain: string; oldId: string; message: string;
+  // Categoria explícita do achado (Seção 6 do pedido de finalização) — quando ausente, o
+  // achado é um SKIP simples (campo/relação descartada, resto do registro é restaurado).
+  category?: 'SKIP' | 'CONFLICT' | 'EXTERNAL_DEPENDENCY' | 'MISSING_ASSET';
+}
 
 export interface BackupRestorePreviewSummary {
   worlds: number;
@@ -32,4 +34,10 @@ export interface BackupRestorePreviewSummary {
   journalFolders: number;
   journalPages: number;
   worldEntityLinks: number;
+  library: number;
+  groups: number;
+  groupMembers: number;
+  campaigns: number;
+  campaignMembers: number;
+  campaignSessions: number;
 }

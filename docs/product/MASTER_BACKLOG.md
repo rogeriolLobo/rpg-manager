@@ -720,7 +720,22 @@ completo (arquitetura, decisão snapshot-vs-diff, autorização, testes).
   recurso arquivado bloqueia restore) + `tests/e2e/revision-history.spec.ts`
   (fluxo completo Vault + World, desktop/mobile via projects do CI).
 
-## F-015 — Backup/Restore completo — `DONE` (RPG-1.0-BATCH6)
+## F-015 — Backup/Restore completo — `IN_PROGRESS` (RPG-1.0-BATCH6, revalidado BATCH19, expandido BATCH20)
+
+BATCH20 (pedido de finalização absoluta): reclassificado de `DONE` para
+`IN_PROGRESS` — "Backup/Restore completo" só é aceito quando o restore
+automatizado cobre todos os domínios persistentes relevantes, não apenas
+o export. Restore agora também cobre Library (rpgs/publications/
+game_systems, via a mesma camada canônica de `library-writes.ts`),
+Groups/GroupMembers, Campaigns/CampaignMembers/Sessions/Attendance —
+com deduplicação de título (`rpgs.title` UNIQUE) e nome de grupo
+(`play_groups.name` UNIQUE) resolvida ao vivo no confirm (mesmo padrão
+do slug de World), e a regra "nunca recriar outra pessoa" para
+`user_id` de Group/Campaign Member (só preserva o vínculo se a conta
+ainda existir; caso contrário `EXTERNAL_DEPENDENCY` no preview, membro
+restaurado sem o vínculo). Wiki/Relations/Cartografia/External
+Resources/Timeline/Revision History/Social/Sheets/Adventures
+estruturadas/Files/VTT continuam export-only — próximo incremento.
 
 Primeiro item do roadmap pós-1.0 (correção de direção do responsável do
 produto: congelamento revogado, ver `docs/product/FULL_ROADMAP.md`) —
@@ -1844,7 +1859,7 @@ SYSTEM auditadas como `COMPLETE` ou `PARTIAL` não-bloqueador. Nenhuma
 | F-009 | Metadata provider Open Library (`METADATA_PROVIDERS.md`) | P2 | `DONE` (LIB-004) |
 | F-010 | Dedup de RPG por ISBN em vez de título exato | P2 | `DONE` (LIB-003) |
 | F-011 | Archive de RPG (schema pronto desde LIB-002: `rpgs.archived_at`; endpoint/UI ausentes) | P3 | `DONE` (LIB-006) |
-| F-015 | Backup/Restore completo (export `schemaVersion:8` + restore com preview/confirm) | P2 | `DONE` (RPG-1.0-BATCH6) — export cobre 100% dos domínios; restore automatizado cobre Worlds/Creature Stat Templates/Vault/Journal (escopo v1, ver nota abaixo); Groups/Campaigns/Library/Wiki/Relations/Cartografia/External Resources/Revision History continuam exportados mas sem restore automatizado ainda (documentado, não silenciado) |
+| F-015 | Backup/Restore completo (export `schemaVersion:9` + restore com preview/confirm) | P2 | `IN_PROGRESS` (RPG-1.0-BATCH6, revalidado BATCH19, expandido BATCH20) — export cobre 100% dos domínios; restore automatizado cobre Worlds/Creature Stat Templates/Vault/Journal/world_entity_links/Library/Groups/GroupMembers/Campaigns/CampaignMembers/Sessions/Attendance; Wiki/Relations/Cartografia/External Resources/Revision History/Social/Sheets/Adventures/Files/VTT continuam exportados mas sem restore automatizado ainda (documentado, não silenciado) |
 
 **Nota (2026-08-19, correção de direção do responsável do produto):** a
 linha "Explicitamente fora de escopo: VTT, Sheets, Social/Amizades" que
