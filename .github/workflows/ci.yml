@@ -65,3 +65,15 @@ jobs:
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+      # BATCH19: trace/screenshot já eram capturados (playwright.config.ts:
+      # retain-on-failure/only-on-failure) mas nunca sobreviviam ao runner efêmero — toda
+      # investigação de flake até agora dependeu só do log de texto. Sobe como artifact só
+      # quando falha, curta retenção (é evidência de depuração, não histórico permanente).
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
