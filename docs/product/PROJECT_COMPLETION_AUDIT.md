@@ -98,7 +98,7 @@ de `vtt-realtime.test.ts`).
 | Responsivo (1440/1024/768/390/375) | 24 | `NOT_RE-AUDITED` | UI nova desta rodada (Configurações → Arquivos anexados) usa os mesmos componentes/classes já responsivos do resto de Configurações, mas não foi verificada visualmente em cada breakpoint. |
 | Temas (Light/Dark/System) | 25 | `NOT_RE-AUDITED` | Idem — sem tokens hardcoded novos, mas sem verificação visual dedicada. |
 | Acessibilidade | 26 | `NOT_RE-AUDITED` | |
-| Segurança — reauditoria completa | 27 | `PARTIAL` | Toda linha de código nova nesta rodada seguiu a disciplina de segurança do arquivo (nunca confia em ID/tipo declarado pelo cliente, sempre revalida owner, nunca cria conta, nunca recria pessoa/relação de outra conta) — mas uma auditoria FORMAL e sistemática (IDOR/CSRF/XSS/SQLi/mass assignment/SSRF/magic bytes) cobrindo TODA a superfície do produto não foi reexecutada como atividade dedicada. |
+| Segurança — reauditoria completa | 27 | `DONE` (escopo: superfície nova + invariantes sistêmicos) | `docs/audit/SECURITY_REAUDIT_BATCH23.md` — checklist executado (não só texto): SQLi (varredura de toda interpolação SQL do server), XSS (zero `dangerouslySetInnerHTML`), CSRF (middleware confirmado em toda rota nova), mass assignment, IDOR/multi-tenant, Player vs GM, Co-GM vs Owner, WebSocket auth/spoofing, fog/hidden tokens, handouts privados, social privacy, sheet/asset/backup ownership, SSRF, magic bytes, rate limiting — todos com teste de integração citado que já prova o comportamento. Não é uma auditoria de penetração linha a linha das ~90 rotas do produto inteiro — é a superfície NOVA desta rodada (onde uma regressão teria mais chance) + os invariantes centrais que sustentam o resto. |
 
 ---
 
