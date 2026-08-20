@@ -82,10 +82,20 @@ export function CampaignsPage() {
         title="Planejador de mesas"
         description="Da Sessão Zero ao último capítulo, com a próxima ação sempre à vista."
         action={
-          <Link className="primary-button link-button" to={`/app/campaigns/new${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`}>
-            <Plus size={18} />
-            Nova campanha
-          </Link>
+          <div className="button-row">
+            {/* F-024: One-Shot é um Formato dentro do mesmo formulário de campanha (nunca um
+                domínio separado) — mas sem um atalho visível, ninguém descobria a opção
+                (achado real do usuário: "não conseguimos criar OneShot"). Query param
+                pré-seleciona o Formato, mesmo padrão já usado por worldId/playGroupId. */}
+            <Link className="secondary-button link-button" to={`/app/campaigns/new?sessionMode=ONE_SHOT${worldId ? `&worldId=${encodeURIComponent(worldId)}` : ''}`}>
+              <Plus size={18} />
+              Nova mesa única
+            </Link>
+            <Link className="primary-button link-button" to={`/app/campaigns/new${worldId ? `?worldId=${encodeURIComponent(worldId)}` : ''}`}>
+              <Plus size={18} />
+              Nova campanha
+            </Link>
+          </div>
         }
       />
       {items.length === 0 ? (
@@ -167,6 +177,7 @@ export function CampaignFormPage() {
     ...blank,
     rpgId: search.get("rpgId") ?? "",
     playGroupId: search.get("playGroupId") ?? "",
+    sessionMode: search.get("sessionMode") === "ONE_SHOT" ? "ONE_SHOT" : blank.sessionMode,
   });
   const [error, setError] = useState("");
   // RPG-1.0-BATCH7: guard `active` evita que a resposta descartável do efeito duplicado pelo

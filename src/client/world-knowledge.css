@@ -17,15 +17,14 @@
 .command-results button:hover { background: var(--surface-hover); }
 .command-results button span { display: grid; gap: .12rem; }
 
-/* F-019 (BATCH7): botão de notificações ao lado da paleta de comandos na sidebar. */
 .sidebar-toolbar { display: flex; gap: .5rem; align-items: stretch; margin-bottom: .7rem; }
 .sidebar-toolbar .command-trigger { flex: 1; margin-bottom: 0; }
-/* O botão de sino tinha altura fixa (2.7rem) dentro de um wrapper esticado por
-   align-items:stretch da .sidebar-toolbar — como a altura real da .sidebar-toolbar é
-   ditada pelo .command-trigger (padding próprio, maior que 2.7rem), sobrava espaço morto
-   abaixo do sino e ele ficava desalinhado/"flutuando" em vez de preencher a mesma altura
-   do botão de busca ao lado. Achado real via screenshot do usuário. */
-.notifications-widget { position: relative; display: flex; }
+/* BATCH19: o botão de notificações vivia espremido dentro de .sidebar-toolbar, ao lado do
+   botão de busca (Comandos) — ficava cortado/sobreposto pela scrollbar da sidebar em telas
+   mais estreitas (achado real via screenshot do usuário). Movido para a linha do brand
+   (topo da sidebar, sempre visível, nunca disputando espaço com outro controle) — ver
+   app-shell.tsx. */
+.notifications-widget { position: relative; display: flex; margin-left: auto; }
 .notifications-widget > .icon-button { color: var(--sidebar-text-muted); border: 1px solid var(--sidebar-border); border-radius: .6rem; width: 2.7rem; }
 .notification-badge { position: absolute; top: -.25rem; right: -.25rem; min-width: 1.1rem; height: 1.1rem; padding: 0 .3rem; border-radius: 999px; background: var(--danger); color: var(--text-on-brand); font-size: .65rem; font-weight: 700; display: grid; place-items: center; }
 .notifications-dropdown { position: absolute; top: calc(100% + .5rem); right: 0; z-index: 1000; width: min(18rem, calc(100vw - 2.5rem)); max-height: 22rem; overflow-y: auto; }
