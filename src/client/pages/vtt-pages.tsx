@@ -1,8 +1,9 @@
 import { BookOpen, ChevronDown, ChevronUp, Map, Plus, Swords, Trash2 } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { VttPlayerScenePayload, VttRealtimeClientMessage, VttRealtimeServerMessage } from '../../domain/vtt-realtime';
+import type { VttPlayerScenePayload } from '../../domain/vtt-realtime';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
+import { useCampaignRealtime } from '../api/campaign-realtime';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import { EntityFilesPanel } from './file-asset-pages';
@@ -294,73 +295,20 @@ export function VttPage(){
 type LiveScene = VttPlayerScenePayload;
 
 const LIVE_POLL_INTERVAL_MS = 3000;
-// F-031 (correção 2026-08-20): tempo antes de tentar reconectar o WebSocket depois de uma
-// queda — não instantâneo de propósito, para não martelar o Durable Object/Worker em caso de
-// indisponibilidade real (fica dentro do polling de 3s enquanto isso, nunca sem atualização).
-const WS_RECONNECT_DELAY_MS = 5000;
-const WS_PING_INTERVAL_MS = 25000;
 
 export function VttLivePage(){
   const {id:campaignId}=useParams();
   const liveResource=useResource<{item:LiveScene|null}>(campaignId?`/vtt/${campaignId}/live`:null);
-  // F-031 (correção 2026-08-20): WebSocket é preferido; enquanto não conectado, o polling de 3s
-  // (já existente, preservado como fallback) continua ativo — nunca os dois mecanismos rodando
-  // de forma permanente ao mesmo tempo (ver docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md).
-  const [wsConnected,setWsConnected]=useState(false);
+  // BATCH23 (Seção 8 do pedido de finalização): canal WebSocket compartilhado
+  // (useCampaignRealtime, src/client/api/campaign-realtime.ts) — mesmo hook usado por
+  // PlayerCampaignHomePage, nunca dois protocolos divergentes. Enquanto não conectado, o
+  // polling de 3s (já existente, preservado como fallback) continua ativo — nunca os dois
+  // mecanismos rodando de forma permanente ao mesmo tempo (ver
+  // docs/architecture/VTT_REALTIME_ZERO_COST_AUDIT.md).
   const [wsScene,setWsScene]=useState<LiveScene|null|undefined>(undefined);
-  const sequenceRef=useRef(0);
-
-  useEffect(()=>{
-    if(!campaignId)return;
-    let stopped=false;
-    let ws:WebSocket|null=null;
-    let reconnectTimer:ReturnType<typeof setTimeout>|null=null;
-    let pingTimer:ReturnType<typeof setInterval>|null=null;
-    const clearTimers=()=>{if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null;}if(pingTimer){clearInterval(pingTimer);pingTimer=null;}};
-    const send=(message:VttRealtimeClientMessage)=>{try{ws?.send(JSON.stringify(message));}catch{/* socket já pode ter caído — próximo onclose reconecta */}};
-    const connect=()=>{
-      if(stopped)return;
-      const protocol=window.location.protocol==='https:'?'wss:':'ws:';
-      const socket=new WebSocket(`${protocol}//${window.location.host}/api/v1/vtt/${campaignId}/realtime`);
-      ws=socket;
-      socket.addEventListener('open',()=>{
-        setWsConnected(true);
-        pingTimer=setInterval(()=>send({type:'PING'}),WS_PING_INTERVAL_MS);
-        // Pede o snapshot ativamente em vez de confiar só no HELLO/STATE que o servidor envia
-        // sem ser solicitado — nunca faz mal (o protocolo já é resiliente a STATE duplicado via
-        // `sequence`), e cobre qualquer rede que perca a primeira mensagem entre o upgrade e o
-        // client terminar de se inscrever nos listeners.
-        send({type:'RESYNC'});
-      });
-      socket.addEventListener('message',(event)=>{
-        let message:VttRealtimeServerMessage;
-        try{message=JSON.parse(event.data);}catch{return;}
-        if(message.type==='HELLO'){sequenceRef.current=message.sequence;return;}
-        if(message.type==='STATE'){
-          // Sequência atrasada (rede fora de ordem): nunca sobrescreve um estado mais novo já
-          // aplicado — mesma proteção contra "stale client" pedida na correção do F-031.
-          if(message.sequence<sequenceRef.current)return;
-          sequenceRef.current=message.sequence;
-          if(message.role==='PLAYER')setWsScene(message.payload);
-          return;
-        }
-        if(message.type==='RESYNC_REQUIRED')send({type:'RESYNC'});
-      });
-      const onDown=()=>{
-        setWsConnected(false);
-        if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
-        if(!stopped)reconnectTimer=setTimeout(connect,WS_RECONNECT_DELAY_MS);
-      };
-      socket.addEventListener('close',onDown);
-      socket.addEventListener('error',onDown);
-    };
-    // Adia a conexão inicial em vez de abrir sincronamente: o React StrictMode (dev only)
-    // monta→desmonta→remonta o efeito na mesma tick — sem o adiamento, a PRIMEIRA conexão
-    // (descartável) chega a ser aberta e fechada no meio do handshake antes do `stopped=true`
-    // do StrictMode conseguir cancelá-la a tempo. Adiando, o cancelamento sempre chega primeiro.
-    const initialConnectTimer=setTimeout(connect,0);
-    return ()=>{stopped=true;clearTimeout(initialConnectTimer);clearTimers();ws?.close();};
-  },[campaignId]);
+  const {connected:wsConnected}=useCampaignRealtime(campaignId,(message)=>{
+    if(message.role==='PLAYER')setWsScene(message.payload);
+  });
 
   useEffect(()=>{
     if(!campaignId||wsConnected)return;

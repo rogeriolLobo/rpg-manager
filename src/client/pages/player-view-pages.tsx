@@ -1,6 +1,7 @@
 import { CalendarDays, Shield, Swords } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useCampaignRealtime } from '../api/campaign-realtime';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import { Badge, Empty, formatDate, PageHeader } from './dashboard-page';
@@ -38,20 +39,25 @@ export function PlayerCampaignsPage(){
 interface PlayerCampaignHome { id:string; name:string; status:string; rpgTitle:string; gameMaster:string; nextSessionDate:string|null; characterName:string; characterEntityId:string|null; hasActiveScene:boolean }
 interface PlayerHandout { id:string; title:string; content:string; externalResourceTitle:string|null }
 
-// Seção 9 da correção de finalização (Handout reveal via realtime): o GM revela/oculta um
-// handout via PATCH /adventures/.../handouts/:id, que já notifica o Durable Object da(s)
-// Campaign(s) que usam a Adventure (ver adventures.ts). Esta página ainda não abre o WebSocket
-// (isso vive hoje só no VttLivePage) — poll leve, pausado quando a aba não está em foco, mesmo
-// princípio Zero-Cost já validado/documentado para o realtime de VTT (F-031: polling é uma
-// estratégia realtime aceita, não um fallback de segunda classe). Suficiente para o jogador ver
-// um handout revelado sem precisar recarregar a página manualmente.
+// Seção 7/9 da correção de finalização (Handout reveal via realtime — "corrigir: usar o mesmo
+// canal WebSocket/VTT realtime... polling só como fallback/recovery"): o GM revela/oculta um
+// handout via PATCH /adventures/.../handouts/:id (ou POST /vtt/:campaignId/handouts/:id/reveal|
+// hide, BATCH23), que notifica o Durable Object da(s) Campaign(s) que usam a Adventure. Esta
+// página conecta ao MESMO canal de useCampaignRealtime (src/client/api/campaign-realtime.ts,
+// compartilhado com VttLivePage — nunca um segundo protocolo) e refaz a busca autorizada
+// (GET /player-home) assim que recebe HANDOUT_REVEALED/HANDOUT_HIDDEN — o evento é só o sinal,
+// nunca o conteúdo. Polling (8s) permanece SOMENTE como fallback enquanto o WebSocket não está
+// conectado, mesmo padrão já usado por VttLivePage.
 const PLAYER_HOME_POLL_INTERVAL_MS = 8000;
 
 export function PlayerCampaignHomePage(){
   const {id}=useParams();
   const home=useResource<{item:PlayerCampaignHome;handouts:PlayerHandout[]}>(id?`/campaigns/${id}/player-home`:null);
+  const {connected:wsConnected}=useCampaignRealtime(id,(message)=>{
+    if(message.reason==='HANDOUT_REVEALED'||message.reason==='HANDOUT_HIDDEN')home.reload();
+  });
   useEffect(()=>{
-    if(!id)return;
+    if(!id||wsConnected)return;
     let timer:ReturnType<typeof setInterval>|null=null;
     const start=()=>{if(!timer)timer=setInterval(()=>home.reload(),PLAYER_HOME_POLL_INTERVAL_MS);};
     const stop=()=>{if(timer){clearInterval(timer);timer=null;}};
@@ -60,7 +66,7 @@ export function PlayerCampaignHomePage(){
     document.addEventListener('visibilitychange',onVisibility);
     return ()=>{stop();document.removeEventListener('visibilitychange',onVisibility);};
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload já é estável o bastante para este poll (mesmo padrão já usado em VttLivePage)
-  },[id]);
+  },[id,wsConnected]);
   const characterId=home.status==='success'?home.data.item.characterEntityId:null;
   // GET /vault/:id já aplica a mesma barreira de visibility PLAYERS/CAMPAIGN via
   // campaign_entities (authorizedEntity, reaproveitado) — nenhuma autorização nova aqui.
@@ -72,6 +78,7 @@ export function PlayerCampaignHomePage(){
   return <div className="page">
     <PageHeader eyebrow="Minhas Mesas" title={campaign.name} description={`${campaign.rpgTitle}${campaign.gameMaster?` · Mestre: ${campaign.gameMaster}`:''}`}
       action={<div className="button-row"><Badge>{campaign.status}</Badge>{campaign.nextSessionDate&&<Badge>{formatDate(campaign.nextSessionDate)}</Badge>}</div>}/>
+    <p className="badge" style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}>{wsConnected?'● Tempo real':'○ Atualização periódica'}</p>
 
     <section className="panel">
       <h2><Swords size={20}/>Mesa Virtual</h2>
