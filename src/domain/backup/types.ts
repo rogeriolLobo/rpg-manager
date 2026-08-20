@@ -9,17 +9,22 @@
 // mapeamento de todo schema antigo, custo real sem usuário afetado hoje).
 export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
 
-// Escopo de restore automatizado (ver docs/product/RPG_MANAGER_FINAL_STATUS.md, seção F-015):
-// Worlds, Vault entities (+ todos os campos especializados), Creature Stat Templates, Journal
-// (pastas+páginas), world_entity_links (F-022), Library (rpgs/publications/game_systems, via a
-// mesma camada canônica do create manual — library-writes.ts), Groups/GroupMembers, Campaigns/
-// CampaignMembers/Sessions/Attendance (BATCH20 — reclassificado de export-only para restaurado,
-// ver comentário no topo de backup-restore.ts).
-// Wiki (organização), Relations, Cartografia, External Resources, Timeline/Calendar, Revision
-// History, Social (F-016/018/019), Sheets (F-020/021), Adventures estruturadas (F-025),
-// Files/Handouts metadata (F-028) e VTT (F-029/030/031/032) continuam cobertos pelo EXPORT
-// (nenhum dado é perdido no backup), mas ainda não têm restore automatizado — documentado como
-// limitação conhecida, não escondida.
+// Escopo de restore automatizado (ver docs/product/RPG_MANAGER_FINAL_STATUS.md, seção F-015;
+// BATCH20 — pedido de finalização absoluta, reclassificou F-015 de DONE para IN_PROGRESS até
+// o restore cobrir todo domínio persistente relevante, não só o export):
+// Worlds, Vault entities (+ especializados), Creature Stat Templates, Journal, world_entity_links,
+// Library (rpgs/publications/game_systems), Groups/GroupMembers, Campaigns/CampaignMembers/
+// Sessions/Attendance, Sheet Templates/Character Sheets, Wiki (pastas/tags/aliases), Relations,
+// Cartografia, External Resources, Timeline/Calendar, Adventures estruturadas, VTT (estado ao
+// vivo sempre restaurado inativo — nunca "revive" uma sessão), Social (friendships/blocks/
+// invites — só quando quem restaura é uma das partes reais) e Social Library Interest.
+// Files/Handouts: metadata restaurada junto com os bytes reais via o BUNDLE separado
+// (GET/POST /api/v1/files/backup — ver src/server/routes/files.ts, BATCH21/Seção 8 do pedido
+// de finalização) — nunca embutido no JSON principal (bytes não cabem no armazenamento do job
+// de preview/confirm em D1). Revision History continua coberta pelo EXPORT mas sem restore
+// automatizado (repor o histórico exigiria uma linha do tempo artificial "no meio" do
+// histórico real do dono; toda entidade/World/página restaurada já ganha uma revisão CREATE
+// inicial própria, com paridade total de comportamento a partir do dia da restauração).
 export interface BackupRestoreWarning {
   domain: string; oldId: string; message: string;
   // Categoria explícita do achado (Seção 6 do pedido de finalização) — quando ausente, o

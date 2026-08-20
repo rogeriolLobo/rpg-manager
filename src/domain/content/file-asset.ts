@@ -14,6 +14,15 @@
 export const MAX_FILE_ASSET_BYTES = 5_000_000; // 5MB — maior que capa (2MB): pode ser um mapa/handout digitalizado.
 export const MAX_FILE_ASSETS_PER_USER = 40; // controla acúmulo por conta dentro da cota KV Free (1GB para todos os usuários).
 
+// F-015 Seção 8 (BATCH21): backup REAL de assets — bytes empacotados junto com a metadata num
+// bundle próprio (GET/POST /api/v1/files/backup, src/server/routes/files.ts), nunca embutidos
+// no JSON principal (não cabem no armazenamento de job de preview/confirm em D1). O cap total
+// (bruto, antes de base64) protege o CPU time do Worker Free numa única invocação — acima
+// disso, o endpoint recusa com 413 explícito (nunca trunca silenciosamente): o usuário sabe
+// exatamente por que o bundle não coube e pode reduzir a cota antes de tentar de novo. Uma
+// falha limpa aqui nunca gera cobrança (Workers Free não tem billing de overage — só erro).
+export const MAX_ASSET_BUNDLE_TOTAL_BYTES = 15_000_000; // 15MB brutos (~20MB em base64 no JSON).
+
 export type FileAssetContentType = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
 
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
@@ -46,4 +55,24 @@ export function isValidFileAssetId(value: string): boolean {
 
 export function fileAssetKvKey(assetId: string): string {
   return `asset/${assetId}`;
+}
+
+// Base64 padrão (não URL-safe — o bundle é JSON, nunca uma URL) para os bytes reais no bundle
+// de backup de assets. Em blocos (nunca `String.fromCharCode(...bytes)` de uma vez só — um
+// array de milhões de bytes estoura o limite de argumentos de uma call spread) — mesmo
+// cuidado de robustez do toBase64Url em security/crypto.ts, mas dimensionado para arquivos de
+// até MAX_FILE_ASSET_BYTES, não tokens de poucos bytes.
+const BASE64_CHUNK_SIZE = 8192;
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_SIZE) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + BASE64_CHUNK_SIZE));
+  }
+  return btoa(binary);
+}
+export function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }

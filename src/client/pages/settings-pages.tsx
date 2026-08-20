@@ -70,10 +70,25 @@ export function SettingsPage() {
           <h2>Restaurar backup</h2>
           <p>
             Envie um backup JSON completo (v{SUPPORTED_BACKUP_SCHEMA_VERSION}) para restaurar
-            Worlds, Vault e Diário. Sempre cria registros novos — nunca sobrescreve nem apaga
-            dados existentes. Revise a prévia antes de confirmar.
+            Biblioteca, Grupos, Campanhas, Worlds, Vault, Wiki, Relações, Cartografia, Diário,
+            Timeline, Aventuras, Fichas, VTT e Social. Sempre cria registros novos — nunca
+            sobrescreve nem apaga dados existentes. Revise a prévia antes de confirmar.
           </p>
           <BackupRestoreForm />
+        </section>
+        <section className="panel setting-card">
+          <FileJson />
+          <h2>Arquivos anexados</h2>
+          <p>
+            Backup JSON e CSV não incluem os bytes de imagens/PDFs enviados em Arquivos — baixe
+            este pacote separado para preservá-los, e restaure-o (nesta conta ou em outra) para
+            recuperá-los de verdade, não só a referência.
+          </p>
+          <button className="secondary-button" onClick={() => download("/files/backup")}>
+            <Download size={17} />
+            Baixar arquivos
+          </button>
+          <FileAssetBackupRestoreForm />
         </section>
         <AboutSettings />
       </div>
@@ -326,7 +341,20 @@ function BackupRestoreForm() {
       setBusy(false);
     }
   };
-  const summaryLabels: Record<string, string> = { worlds: "Worlds", creatureStatTemplates: "Modelos de ficha", entities: "Entidades do Vault", journalFolders: "Pastas do Diário", journalPages: "Páginas do Diário", worldEntityLinks: "Vínculos entre Worlds" };
+  // BATCH20: rótulos para todos os domínios que entraram no restore automatizado desde o
+  // escopo v1 original (worlds..worldEntityLinks) — nunca deixar um domínio novo aparecer só
+  // com a chave técnica bruta na prévia (mesmo princípio de discoverability da Seção 23 do
+  // pedido de finalização: um resumo ilegível é tão ruim quanto um botão escondido).
+  const summaryLabels: Record<string, string> = {
+    worlds: "Worlds", creatureStatTemplates: "Modelos de ficha", entities: "Entidades do Vault", journalFolders: "Pastas do Diário", journalPages: "Páginas do Diário", worldEntityLinks: "Vínculos entre Worlds",
+    library: "RPGs da Biblioteca", groups: "Grupos", groupMembers: "Membros de Grupo", campaigns: "Campanhas", campaignMembers: "Membros de Campanha", campaignSessions: "Sessões",
+    sheetTemplates: "Modelos de ficha de personagem", characterSheets: "Fichas de personagem",
+    wikiFolders: "Pastas da Wiki", wikiEntityMetadata: "Organização da Wiki", worldTags: "Tags", wikiEntityTags: "Vínculos de tag", wikiEntityAliases: "Apelidos", entityRelations: "Relações",
+    worldMaps: "Mapas", mapPins: "Pins de mapa", externalResources: "Recursos externos", worldEras: "Eras", worldCalendars: "Calendários", eventTemporalDetails: "Datas de eventos",
+    adventureScenes: "Cenas de Aventura", adventureEncounters: "Encontros", adventureSceneEntities: "Entidades em cena", adventureHandouts: "Handouts",
+    vttScenes: "Cenas de VTT", vttTokens: "Tokens de VTT", vttFogCells: "Névoa de guerra", vttCombatants: "Combatentes",
+    friendRequests: "Pedidos de amizade", friendships: "Amizades", userBlocks: "Bloqueios", socialInvites: "Convites sociais", rpgSocialInterests: "Interesses compartilhados",
+  };
   return (
     <>
       <form onSubmit={submit}>
@@ -355,6 +383,75 @@ function BackupRestoreForm() {
           )}
           <button className="primary-button" disabled={!preview.canConfirm || busy} onClick={() => void confirmRestore()}>
             Confirmar restore
+          </button>
+        </div>
+      )}
+      {message && <p className="success-message">{message}</p>}
+    </>
+  );
+}
+
+// F-015 Seção 8 (BATCH21): mesmo padrão preview/confirm da ficha acima, mas para o bundle de
+// bytes (imagens/PDFs) — nunca embutido no backup JSON principal (ver src/server/routes/files.ts).
+function FileAssetBackupRestoreForm() {
+  const [preview, setPreview] = useState<{
+    summary: { toRestore: number };
+    warnings: Array<{ oldId: string; message: string; category: string }>;
+    canConfirm: boolean;
+  }>();
+  const [bundleText, setBundleText] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(""); setMessage("");
+    const input = event.currentTarget.elements.namedItem("bundle") as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const result = await postJson<NonNullable<typeof preview>>("/files/backup/preview", { bundle: text });
+      setPreview(result); setBundleText(text);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível ler este pacote de arquivos.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmRestore = async () => {
+    if (!preview) return;
+    setBusy(true); setError("");
+    try {
+      const result = await postJson<{ restored: { fileAssets: number } }>("/files/backup/confirm", { bundle: bundleText });
+      setMessage(result.restored.fileAssets > 0 ? `${result.restored.fileAssets} arquivo(s) restaurado(s).` : "Nenhum arquivo precisou ser restaurado.");
+      setPreview(undefined); setBundleText("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível restaurar este pacote de arquivos.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <form onSubmit={submit}>
+        <label>
+          Pacote de arquivos (.json, baixado acima)
+          <input name="bundle" type="file" accept=".json,application/json" required />
+        </label>
+        <button className="primary-button" disabled={busy}>Gerar prévia</button>
+      </form>
+      {error && <p className="form-error">{error}</p>}
+      {preview && (
+        <div className="import-preview">
+          <strong>Prévia da restauração de arquivos</strong>
+          <p>{preview.summary.toRestore} arquivo(s) prontos para restaurar.</p>
+          {preview.warnings.length > 0 && preview.warnings.map((warning, index) => (
+            <p className="form-error" key={`${warning.oldId}-${index}`}>{warning.message}</p>
+          ))}
+          <button className="primary-button" disabled={!preview.canConfirm || busy} onClick={() => void confirmRestore()}>
+            Confirmar restauração
           </button>
         </div>
       )}
