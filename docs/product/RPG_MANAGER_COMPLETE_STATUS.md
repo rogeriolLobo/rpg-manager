@@ -1,4 +1,14 @@
-# RPG Manager — `PLANNED_ROADMAP_COMPLETE`
+# RPG Manager — `PLANNED_ROADMAP_COMPLETE` (SUPERADO — ver nota abaixo)
+
+> **Nota (BATCH20-22):** esta declaração foi rejeitada pelo responsável do
+> produto ("FINALIZAÇÃO ABSOLUTA DO PROJETO") por existirem funcionalidades
+> planejadas que continuavam parciais, principalmente F-015 (Backup/Restore
+> — restore automatizado cobria só 6 de ~30 domínios persistentes reais).
+> O documento abaixo permanece como registro histórico válido do estado
+> real em `366dfc6`/`a62d847`, mas **não é mais a fonte da verdade sobre
+> completude do projeto**. Ver `docs/product/PROJECT_COMPLETION_AUDIT.md`
+> para o estado atual, honesto e não-fabricado (que também NÃO declara
+> `PROJECT_COMPLETE` — itens reais continuam pendentes).
 
 Relatório final da meta estabelecida em `docs/product/FULL_ROADMAP.md`:
 todo item planejado do roadmap (F-022 a F-034) concluído, F-015

@@ -1807,6 +1807,11 @@ corrigido na raiz, não mascarado), deploy real confirmado. Ver
 `docs/product/RPG_MANAGER_COMPLETE_STATUS.md` para o relatório final
 da meta original.
 
+> **Nota (BATCH20-22):** declaração rejeitada pelo responsável do produto
+> logo em seguida — F-015 reclassificado de `DONE` para `IN_PROGRESS`
+> (restore automatizado cobria só 6 de ~30 domínios persistentes reais).
+> Ver `docs/product/PROJECT_COMPLETION_AUDIT.md` para o estado atual.
+
 ## Polimento pós-roadmap — relato real do usuário (2026-08-20)
 
 Dois achados reportados diretamente pelo usuário em produção, corrigidos

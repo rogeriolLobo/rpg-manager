@@ -95,6 +95,14 @@ a F-034 está `DONE`, F-015 foi revalidado cobrindo os domínios novos, e
 CI/deploy/produção convergem — ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md`
 para o relatório final.
 
+> **Nota (BATCH20-22):** declaração rejeitada pelo responsável do produto
+> logo em seguida — "revalidado cobrindo os domínios novos" não significava
+> restore automatizado real (só export). F-015 reclassificado para
+> `IN_PROGRESS` e expandido nesta rodada para cobrir automaticamente ~30
+> domínios persistentes (era 6). Ver `docs/product/PROJECT_COMPLETION_AUDIT.md`
+> para o estado atual e o que ainda falta antes de qualquer nova declaração
+> de conclusão.
+
 **Causa raiz real do flake de `vault-worlds-flow.spec.ts` encontrada e
 corrigida (2026-08-20):** o CI artifact upload (item acima) permitiu
 baixar o trace/screenshot da falha pela primeira vez — a evidência
