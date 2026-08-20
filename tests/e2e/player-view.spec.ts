@@ -92,4 +92,13 @@ test("Minhas Mesas (F-033): jogador descobre a campanha sem link do GM, vê seu 
   await register(outsiderPage, `e2e-pv-outsider-${suffix}@example.com`, `Fora PV ${suffix}`);
   await outsiderPage.goto(`/app/my-tables/${campaignId}`);
   await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible({ timeout: 30_000 });
+
+  // BATCH19: contexts extras criados via browser.newContext() nunca fecham sozinhos (só o
+  // fixture `page` padrão tem teardown automático) — sem isso, ficavam abertos pelo resto da
+  // fila inteira de testes do worker (workers:1, mesmo processo/browser para toda a suíte),
+  // acumulando memória até travar um teste bem mais adiante (achado real: era a causa raiz do
+  // flake recorrente de vault-worlds-flow.spec.ts, confirmado via trace/screenshot de CI —
+  // ver docs/product/MASTER_BACKLOG.md).
+  await playerContext.close();
+  await outsiderContext.close();
 });

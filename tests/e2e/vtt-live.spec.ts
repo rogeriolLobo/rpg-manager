@@ -87,4 +87,12 @@ test("VTT ao vivo (F-031): jogador acessa o link direto, vê a cena/token, e o c
   await register(outsiderPage, `e2e-vtt-live-outsider-${suffix}@example.com`, `Fora Live ${suffix}`);
   await outsiderPage.goto(`/app/campaigns/${campaignId}/vtt/live`);
   await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible({ timeout: 30_000 });
+
+  // BATCH19: contexts extras criados via browser.newContext() nunca fecham sozinhos — sem
+  // isso, ficavam abertos pelo resto da fila de testes do worker (workers:1, mesmo processo/
+  // browser para toda a suíte), com o WebSocket de playerPage ainda conectado ao Durable
+  // Object, acumulando memória/conexões até travar um teste bem mais adiante (achado real:
+  // causa raiz do flake recorrente de vault-worlds-flow.spec.ts).
+  await playerContext.close();
+  await outsiderContext.close();
 });
