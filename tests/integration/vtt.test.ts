@@ -239,3 +239,126 @@ describe('VTT — fog of war / visibilidade por grade (F-030)', () => {
     expect(afterReset.item.tokens).toEqual([]);
   });
 });
+
+describe('VTT — iniciativa/combate system-neutral (F-032)', () => {
+  async function activeScene(owner: Account, campaignId: string, title = 'Combate'): Promise<string> {
+    const sceneId = (await (await request(`/vtt/${campaignId}/scenes`, 'POST', { title, mapId: null, imageUrl: 'https://example.com/combat.png', notes: '' }, owner)).json() as { id: string }).id;
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/activate`, 'POST', {}, owner);
+    return sceneId;
+  }
+
+  it('inicia combate ordenado por iniciativa desc, avança turnos, envolve round ao voltar ao primeiro, e encerra limpando combatentes', async () => {
+    const owner = await register('vtt-combat-owner-1');
+    const campaignId = await createCampaign(owner);
+    const sceneId = await activeScene(owner, campaignId);
+
+    const start = await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', {
+      combatants: [
+        { tokenId: null, name: 'Goblin A', initiative: 8, notes: '', visibleToPlayers: false },
+        { tokenId: null, name: 'Herói', initiative: 15, hpCurrent: 20, hpMax: 20, notes: '', visibleToPlayers: true },
+        { tokenId: null, name: 'Goblin B', initiative: 8, notes: '', visibleToPlayers: false },
+      ],
+    }, owner);
+    expect(start.status).toBe(201);
+
+    const detail1 = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { item: { combatActive: boolean; combatRound: number }; combatants: Array<{ name: string; isCurrentTurn: boolean; hpCurrent: number | null }> };
+    expect(detail1.item.combatActive).toBe(true);
+    expect(detail1.item.combatRound).toBe(1);
+    expect(detail1.combatants[0]).toMatchObject({ name: 'Herói', isCurrentTurn: true, hpCurrent: 20 }); // maior iniciativa primeiro
+
+    // Só um combate por vez — iniciar de novo sem encerrar é rejeitado.
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'X', initiative: 1, notes: '', visibleToPlayers: false }] }, owner)).status).toBe(409);
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`, 'POST', {}, owner)).status).toBe(200);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`, 'POST', {}, owner)).status).toBe(200);
+    const detail2 = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { item: { combatRound: number }; combatants: Array<{ name: string; isCurrentTurn: boolean }> };
+    expect(detail2.item.combatRound).toBe(1); // ainda não deu a volta completa (3 combatentes, 2 avanços)
+    expect(detail2.combatants.filter((combatant) => combatant.isCurrentTurn)).toHaveLength(1);
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`, 'POST', {}, owner)).status).toBe(200); // volta para o Herói -> round 2
+    const detail3 = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { item: { combatRound: number }; combatants: Array<{ name: string; isCurrentTurn: boolean }> };
+    expect(detail3.item.combatRound).toBe(2);
+    expect(detail3.combatants.find((combatant) => combatant.name === 'Herói')?.isCurrentTurn).toBe(true);
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/end`, 'POST', {}, owner)).status).toBe(200);
+    const detail4 = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { item: { combatActive: boolean; combatRound: number }; combatants: unknown[] };
+    expect(detail4.item.combatActive).toBe(false);
+    expect(detail4.item.combatRound).toBe(0);
+    expect(detail4.combatants).toEqual([]);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`, 'POST', {}, owner)).status).toBe(409); // sem combate ativo
+  });
+
+  it('adiciona/edita/remove combatente mid-combate; remover o combatente do turno atual passa o turno adiante sem deixar a cena sem turno', async () => {
+    const owner = await register('vtt-combat-owner-2');
+    const campaignId = await createCampaign(owner);
+    const sceneId = await activeScene(owner, campaignId, 'Emboscada');
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'A', initiative: 10, notes: '', visibleToPlayers: false }] }, owner);
+
+    const addResponse = await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants`, 'POST', { tokenId: null, name: 'Reforço', initiative: 20, notes: '', visibleToPlayers: false }, owner);
+    expect(addResponse.status).toBe(201);
+    const reinforcementId = (await addResponse.json() as { id: string }).id;
+
+    const editResponse = await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants/${reinforcementId}`, 'PATCH', { tokenId: null, name: 'Reforço', initiative: 20, hpCurrent: 5, hpMax: 10, notes: 'ferido', visibleToPlayers: false }, owner);
+    expect(editResponse.status).toBe(200);
+
+    // Adicionar um combatente mid-combate NUNCA move o turno automaticamente — "A" continua
+    // com o turno (só /combat/next avança), mesmo "Reforço" tendo iniciativa maior e aparecendo
+    // primeiro na ordem agora.
+    const detail = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { combatants: Array<{ id: string; name: string; isCurrentTurn: boolean; hpCurrent: number | null }> };
+    expect(detail.combatants[0]).toMatchObject({ id: reinforcementId, name: 'Reforço', hpCurrent: 5 });
+    const currentTurnCombatant = detail.combatants.find((combatant) => combatant.isCurrentTurn)!;
+    expect(currentTurnCombatant.name).toBe('A');
+
+    // Remove exatamente o combatente que está com o turno atual — o turno precisa passar
+    // adiante para quem sobrou, nunca ficar "sem ninguém".
+    const removeCurrent = await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants/${currentTurnCombatant.id}`, 'DELETE', undefined, owner);
+    expect(removeCurrent.status).toBe(204);
+
+    const afterRemove = await (await request(`/vtt/${campaignId}/scenes/${sceneId}`, 'GET', undefined, owner)).json() as { combatants: Array<{ id: string; isCurrentTurn: boolean }> };
+    expect(afterRemove.combatants).toHaveLength(1);
+    expect(afterRemove.combatants[0]).toMatchObject({ id: reinforcementId, isCurrentTurn: true }); // nunca fica sem ninguém no turno
+  });
+
+  it('visão "ao vivo": só combatentes visibleToPlayers aparecem, sem HP nunca, mesmo para o dono via /live', async () => {
+    const owner = await register('vtt-combat-owner-3');
+    const player = await register('vtt-combat-player-3');
+    const campaignId = await createCampaignWithPlayer(owner, player);
+    const sceneId = await activeScene(owner, campaignId, 'Sala do Chefe');
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', {
+      combatants: [
+        { tokenId: null, name: 'Herói', initiative: 12, hpCurrent: 30, hpMax: 30, notes: '', visibleToPlayers: true },
+        { tokenId: null, name: 'Chefe (segredo)', initiative: 18, hpCurrent: 200, hpMax: 200, notes: 'fraqueza: fogo', visibleToPlayers: false },
+      ],
+    }, owner);
+
+    const live = await (await request(`/vtt/${campaignId}/live`, 'GET', undefined, player)).json() as { item: { combatActive: boolean; combatRound: number; combatants: Array<Record<string, unknown>> } };
+    expect(live.item.combatActive).toBe(true);
+    expect(live.item.combatRound).toBe(1);
+    expect(live.item.combatants).toHaveLength(1);
+    expect(live.item.combatants[0]).toEqual({ id: expect.any(String), name: 'Herói', isCurrentTurn: false }); // Chefe tem iniciativa maior, é quem tem o turno — mas nunca aparece pro jogador
+    expect(Object.keys(live.item.combatants[0]).sort()).toEqual(['id', 'isCurrentTurn', 'name']); // nunca hpCurrent/hpMax/notes
+  });
+
+  it('IDOR: outsider nunca inicia/avança/encerra combate nem lê/escreve combatentes de campanha alheia', async () => {
+    const owner = await register('vtt-combat-owner-4');
+    const outsider = await register('vtt-combat-outsider-4');
+    const campaignId = await createCampaign(owner);
+    const sceneId = await activeScene(owner, campaignId, 'Cena Alheia');
+    await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'A', initiative: 5, notes: '', visibleToPlayers: false }] }, owner);
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'X', initiative: 1, notes: '', visibleToPlayers: false }] }, outsider)).status).toBe(404);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`, 'POST', {}, outsider)).status).toBe(404);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/end`, 'POST', {}, outsider)).status).toBe(404);
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants`, 'POST', { tokenId: null, name: 'X', initiative: 1, notes: '', visibleToPlayers: false }, outsider)).status).toBe(404);
+  });
+
+  it('token de combatente precisa pertencer à mesma cena (422 se de outra cena/inexistente)', async () => {
+    const owner = await register('vtt-combat-owner-5');
+    const campaignId = await createCampaign(owner);
+    const sceneId = await activeScene(owner, campaignId, 'Cena com token');
+    const otherSceneId = (await (await request(`/vtt/${campaignId}/scenes`, 'POST', { title: 'Outra cena', mapId: null, imageUrl: 'https://example.com/other.png', notes: '' }, owner)).json() as { id: string }).id;
+    const foreignTokenId = (await (await request(`/vtt/${campaignId}/scenes/${otherSceneId}/tokens`, 'POST', { label: 'T', entityId: null, x: 1, y: 1, visibleToPlayers: false }, owner)).json() as { id: string }).id;
+
+    expect((await request(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`, 'POST', { combatants: [{ tokenId: foreignTokenId, name: 'X', initiative: 1, notes: '', visibleToPlayers: false }] }, owner)).status).toBe(422);
+  });
+});

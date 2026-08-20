@@ -279,6 +279,21 @@ export const vttFogCellInputSchema = z.strictObject({
   row: z.number().int().min(0).max(999),
 });
 
+// F-032 (BATCH17): HP é opcional e deliberadamente GM-only (nunca enviado à visão do
+// jogador) — ver migrations/0039_vtt_combat.sql.
+export const vttCombatantInputSchema = z.strictObject({
+  tokenId: z.string().trim().max(80).nullable().optional(),
+  name: z.string().trim().min(1).max(160),
+  initiative: z.number().finite(),
+  hpCurrent: z.number().int().nullable().optional(),
+  hpMax: z.number().int().positive().nullable().optional(),
+  notes: trimmed(2000).default(''),
+  visibleToPlayers: z.boolean().default(false),
+});
+export const vttCombatStartSchema = z.strictObject({
+  combatants: z.array(vttCombatantInputSchema).min(1).max(40),
+});
+
 export const loreDetailsSchema = z.strictObject({
   loreType: z.enum(LORE_TYPES),
   canonStatus: z.enum(LORE_CANON_STATUSES),
@@ -524,6 +539,8 @@ export type AdventureHandoutInput = z.infer<typeof adventureHandoutInputSchema>;
 export type VttSceneInput = z.infer<typeof vttSceneInputSchema>;
 export type VttTokenInput = z.infer<typeof vttTokenInputSchema>;
 export type VttFogCellInput = z.infer<typeof vttFogCellInputSchema>;
+export type VttCombatantInput = z.infer<typeof vttCombatantInputSchema>;
+export type VttCombatStartInput = z.infer<typeof vttCombatStartSchema>;
 export type EntityRelationInput = z.infer<typeof entityRelationInputSchema>;
 export type WorldEraInput = z.infer<typeof worldEraInputSchema>;
 export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;

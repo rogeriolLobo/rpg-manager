@@ -61,3 +61,67 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
   await page.getByRole("button", { name: "Excluir cena Câmara do Dragão" }).click();
   await expect(page.getByText("Nenhuma cena criada ainda.")).toBeVisible();
 });
+
+// F-032 (BATCH17): iniciativa/combate system-neutral, sobre a fundação do F-029.
+test("VTT: inicia combate, adiciona combatente, avança turno, ajusta PV e encerra", async ({ page }) => {
+  test.setTimeout(60_000);
+  const suffix = Date.now();
+
+  await page.goto("/register");
+  await page.getByLabel("Como quer ser chamado?").fill(`Mestre Combate ${suffix}`);
+  await page.getByLabel("E-mail").fill(`e2e-vtt-combat-${suffix}@example.com`);
+  await page.getByLabel("Senha mínimo de 12 caracteres").fill("uma senha longa para e2e 2026");
+  await page.getByLabel("Confirmar senha").fill("uma senha longa para e2e 2026");
+  await page.getByRole("button", { name: "Criar conta" }).click();
+  await page.getByRole("link", { name: "Já guardei, continuar" }).click();
+
+  await page.goto("/app/library/new");
+  await page.getByLabel("Título", { exact: true }).fill(`RPG Combate ${suffix}`);
+  await page.getByLabel("Categoria").selectOption("fantasia");
+  await page.getByLabel("Subgênero").selectOption("alta-fantasia");
+  await page.getByLabel("Status da leitura").selectOption("READ");
+  await page.getByLabel("Prioridade").selectOption("HIGH");
+  await page.getByRole("button", { name: "Salvar RPG" }).click();
+  await expect(page.getByRole("heading", { name: `RPG Combate ${suffix}` })).toBeVisible();
+
+  await page.getByRole("link", { name: "Criar campanha" }).click();
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await page.getByLabel("Nome da campanha").fill(`Mesa Combate ${suffix}`);
+  await page.getByRole("button", { name: "Salvar campanha" }).click();
+  await expect(page.getByRole("heading", { name: `Mesa Combate ${suffix}` })).toBeVisible();
+
+  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
+  await sceneForm.getByLabel("Título").fill("Sala do Chefe");
+  await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/chefe.png");
+  await page.getByRole("button", { name: "Criar cena" }).click();
+  await page.getByRole("button", { name: "Expandir cena" }).click();
+
+  const startForm = page.locator("form.inline-form").filter({ hasText: "Iniciar combate" });
+  await startForm.getByLabel("Primeiro combatente").fill("Herói");
+  await startForm.getByLabel("Iniciativa").fill("15");
+  await startForm.getByLabel("PV atual").fill("20");
+  await startForm.getByLabel("PV máximo").fill("20");
+  await page.getByRole("button", { name: "Iniciar combate" }).click();
+  await expect(page.getByText("Round 1")).toBeVisible();
+  await expect(page.getByText("Turno atual")).toBeVisible();
+  await expect(page.getByText("PV 20/20")).toBeVisible();
+
+  const addCombatantForm = page.locator("form.inline-form").filter({ hasText: "Adicionar combatente" });
+  await addCombatantForm.getByLabel("Nome").fill("Chefe");
+  await addCombatantForm.getByLabel("Iniciativa").fill("10");
+  await page.getByRole("button", { name: "Adicionar combatente" }).click();
+  await expect(page.getByText("Chefe")).toBeVisible();
+
+  await page.getByRole("button", { name: "Aumentar PV de Herói" }).click();
+  await expect(page.getByText("PV 21/20")).toBeVisible();
+
+  await page.getByRole("button", { name: "Próximo turno" }).click();
+  // Herói (iniciativa 15) passou o turno para Chefe (iniciativa 10, único restante) — ainda round 1.
+  await expect(page.getByText("Round 1")).toBeVisible();
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Encerrar combate" }).click();
+  await expect(page.getByText("Iniciar combate")).toBeVisible();
+  await expect(page.getByText("Round")).toHaveCount(0);
+});

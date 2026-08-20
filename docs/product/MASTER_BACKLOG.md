@@ -1399,6 +1399,54 @@ Segunda metade do BATCH16, sobre a fundação do F-029.
   execução do roadmap: BATCH17 — F-031 (VTT realtime, auditoria
   zero-cost obrigatória primeiro) + F-032 (iniciativa/combate).
 
+## F-032 — Iniciativa/combate system-neutral — `DONE` (RPG-1.0-BATCH17)
+
+Primeira metade do BATCH17, sobre a fundação do F-029 — não depende de
+F-031 (realtime), então não precisou esperar a auditoria zero-cost.
+
+- **Migration `0039_vtt_combat.sql`** (aditiva): `vtt_combatants`
+  (nome/iniciativa/PV atual+máximo opcionais/notas/`visible_to_players`/
+  `is_current_turn`, `token_id` opcional para reaproveitar um token já
+  posicionado na cena — nunca duplica) + `vtt_scenes.combat_active`/
+  `combat_round`. Ordem de turno é sempre DERIVADA
+  (`initiative DESC, created_at` como desempate), nunca uma coluna de
+  posição própria para manter — reordenar é só um `UPDATE initiative`.
+  Índice único parcial garante só um combatente com `is_current_turn=1`
+  por cena.
+- **HP é deliberadamente GM-only nesta v1** — nunca enviado à visão do
+  jogador (`GET /vtt/:campaignId/live`), só nome + de quem é o turno +
+  round. Reduz risco de meta-gaming e mantém o v1 simples; mostrar PV
+  ao jogador (ex. barra de vida) fica para uma iteração futura se
+  houver demanda real — documentado, não escondido.
+- **`POST /combat/start`** cria os combatentes iniciais e marca o
+  primeiro (maior iniciativa) com o turno; rejeita iniciar de novo
+  sobre um combate já ativo (409). **`POST /combat/next`** avança para
+  o próximo da ordem, incrementando `combat_round` quando dá a volta
+  completa. **`POST /combat/end`** limpa os combatentes — combate é
+  ferramenta de mesa efêmera (mesmo princípio do F-001 de nunca
+  versionar dado de VTT a cada movimento/turno), não fica arquivado.
+  Adicionar/editar/remover combatente funciona com o combate em
+  andamento; remover o combatente do turno atual sempre passa o turno
+  para quem sobrou (nunca deixa a cena "sem ninguém" no turno enquanto
+  houver combatentes). `token_id` de um combatente é validado contra a
+  própria cena — nunca aceita token de outra cena/campanha.
+- **UI:** painel "Combate" na cena expandida — formulário para iniciar
+  (primeiro combatente) ou, com combate ativo, lista ordenada por
+  iniciativa com badge "Turno atual", ajuste rápido de PV (+1/-1),
+  remover combatente, "Próximo turno"/"Encerrar combate", e formulário
+  para adicionar reforços a qualquer momento.
+- **Testes:** `tests/integration/vtt.test.ts` (+5 casos: inicia
+  ordenado por iniciativa desc/avança turno/round incrementa ao voltar
+  ao primeiro/encerra limpando combatentes; adiciona-edita-remove
+  combatente mid-combate sem nunca deixar a cena sem turno atual; visão
+  "ao vivo" só mostra combatente visível, nunca HP, mesmo o de maior
+  iniciativa se estiver oculto; IDOR em start/next/end/combatentes;
+  token de combatente precisa pertencer à mesma cena) +
+  `tests/e2e/vtt.spec.ts` (+1 cenário: iniciar/adicionar/ajustar PV/
+  avançar turno/encerrar, desktop+mobile).
+- Vertical F-032 (BATCH17) completa. F-031 (realtime) segue `BLOCKED`
+  até a auditoria de arquitetura zero-cost — próximo passo desta sessão.
+
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)
 

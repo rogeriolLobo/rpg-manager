@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Map, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Map, Plus, Swords, Trash2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
@@ -6,22 +6,24 @@ import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import { PageHeader } from './dashboard-page';
 
-// F-029/F-030 (BATCH16): VTT — fundação (Scene/Map/tokens) + fog of war, sem realtime — ver
-// src/server/routes/vtt.ts. Ferramenta de preparação/condução do GM: tudo aqui é owned-only
-// (mesmo modelo do Diário/Adventures). A visão do jogador (o que efetivamente chega no
-// Portal/Player View, F-033) usa GET /vtt/:campaignId/live, filtrado no servidor — não existe
-// aqui ainda porque F-033 está bloqueada aguardando esta fundação.
+// F-029/F-030/F-032 (BATCH16/17): VTT — fundação (Scene/Map/tokens) + fog of war + iniciativa/
+// combate, sem realtime — ver src/server/routes/vtt.ts. Ferramenta de preparação/condução do
+// GM: tudo aqui é owned-only (mesmo modelo do Diário/Adventures). A visão do jogador (o que
+// efetivamente chega no Portal/Player View, F-033) usa GET /vtt/:campaignId/live, filtrado no
+// servidor — não existe aqui ainda porque F-033 está bloqueada aguardando esta fundação.
 
-interface Scene { id:string; mapId:string|null; title:string; imageUrl:string; notes:string; isActive:boolean; fogEnabled:boolean; gridCols:number; gridRows:number }
+interface Scene { id:string; mapId:string|null; title:string; imageUrl:string; notes:string; isActive:boolean; fogEnabled:boolean; gridCols:number; gridRows:number; combatActive:boolean; combatRound:number }
 interface SceneDetail extends Scene { resolvedImageUrl:string }
 interface Token { id:string; sceneId:string; entityId:string|null; entityName:string|null; entityType:string|null; label:string; x:number; y:number; visibleToPlayers:boolean }
 interface FogCell { col:number; row:number }
+interface Combatant { id:string; tokenId:string|null; name:string; initiative:number; hpCurrent:number|null; hpMax:number|null; notes:string; visibleToPlayers:boolean; isCurrentTurn:boolean }
 interface WorldOption { id:string; name:string; isOwner:boolean }
 interface MapOption { id:string; title:string }
 interface EntityOption { id:string; name:string; entityType:string }
 
 const emptyScene = { title:'', worldId:'', mapId:'', imageUrl:'', notes:'', fogEnabled:false, gridCols:'20', gridRows:'20' };
 const emptyToken = { label:'', entityId:'', x:'50', y:'50', visibleToPlayers:false };
+const emptyCombatant = { name:'', initiative:'10', hpCurrent:'', hpMax:'', visibleToPlayers:false };
 
 export function VttPage(){
   const {id:campaignId}=useParams();
@@ -31,8 +33,9 @@ export function VttPage(){
   const [entityOptions,setEntityOptions]=useState<EntityOption[]>([]);
   const [sceneForm,setSceneForm]=useState(emptyScene);
   const [expandedSceneId,setExpandedSceneId]=useState<string|null>(null);
-  const [sceneDetail,setSceneDetail]=useState<Record<string,{item:SceneDetail;tokens:Token[];fog:FogCell[]}>>({});
+  const [sceneDetail,setSceneDetail]=useState<Record<string,{item:SceneDetail;tokens:Token[];fog:FogCell[];combatants:Combatant[]}>>({});
   const [tokenForms,setTokenForms]=useState<Record<string,typeof emptyToken>>({});
+  const [combatantForms,setCombatantForms]=useState<Record<string,typeof emptyCombatant>>({});
   const [error,setError]=useState('');
 
   useEffect(()=>{void api<{items:WorldOption[]}>('/worlds?pageSize=50').then((result)=>setWorldOptions(result.items.filter((world)=>world.isOwner))).catch(()=>{});},[]);
@@ -50,7 +53,7 @@ export function VttPage(){
   const scenes=scenesResource.data.items;
 
   const loadSceneDetail=async(sceneId:string)=>{
-    try{const detail=await api<{item:SceneDetail;tokens:Token[];fog:FogCell[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
+    try{const detail=await api<{item:SceneDetail;tokens:Token[];fog:FogCell[];combatants:Combatant[]}>(`/vtt/${campaignId}/scenes/${sceneId}`);setSceneDetail((current)=>({...current,[sceneId]:detail}));}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível carregar a cena.');}
   };
   const toggleExpand=(sceneId:string)=>{
@@ -98,6 +101,34 @@ export function VttPage(){
   const resetFog=async(sceneId:string)=>{if(!confirm('Reencobrir a cena inteira?'))return;setError('');
     try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/fog/reset`,{});void loadSceneDetail(sceneId);}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível reencobrir a cena.');}
+  };
+  const combatantPayload=(form:typeof emptyCombatant)=>({tokenId:null,name:form.name,initiative:Number(form.initiative||0),hpCurrent:form.hpCurrent?Number(form.hpCurrent):null,hpMax:form.hpMax?Number(form.hpMax):null,notes:'',visibleToPlayers:form.visibleToPlayers});
+  const startCombat=async(sceneId:string,event:FormEvent)=>{event.preventDefault();setError('');
+    const form=combatantForms[sceneId]??emptyCombatant;if(!form.name)return;
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/combat/start`,{combatants:[combatantPayload(form)]});setCombatantForms((current)=>({...current,[sceneId]:emptyCombatant}));void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível iniciar o combate.');}
+  };
+  const addCombatant=async(sceneId:string,event:FormEvent)=>{event.preventDefault();setError('');
+    const form=combatantForms[sceneId]??emptyCombatant;if(!form.name)return;
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants`,combatantPayload(form));setCombatantForms((current)=>({...current,[sceneId]:emptyCombatant}));void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível adicionar o combatente.');}
+  };
+  const nextTurn=async(sceneId:string)=>{setError('');
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/combat/next`,{});void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível avançar o turno.');}
+  };
+  const endCombat=async(sceneId:string)=>{if(!confirm('Encerrar o combate? Os combatentes serão removidos (o combate não fica no histórico).'))return;setError('');
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/combat/end`,{});void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível encerrar o combate.');}
+  };
+  const adjustHp=async(sceneId:string,combatant:Combatant,delta:number)=>{setError('');
+    const hpCurrent=combatant.hpCurrent===null?null:combatant.hpCurrent+delta;
+    try{await patchJson(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants/${combatant.id}`,{tokenId:combatant.tokenId,name:combatant.name,initiative:combatant.initiative,hpCurrent,hpMax:combatant.hpMax,notes:combatant.notes,visibleToPlayers:combatant.visibleToPlayers});void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível atualizar o PV.');}
+  };
+  const removeCombatant=async(sceneId:string,combatantId:string)=>{setError('');
+    try{await deleteApi(`/vtt/${campaignId}/scenes/${sceneId}/combat/combatants/${combatantId}`);void loadSceneDetail(sceneId);}
+    catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível remover o combatente.');}
   };
 
   return <div className="page">
@@ -156,6 +187,43 @@ export function VttPage(){
               <label className="checkbox-row"><input type="checkbox" checked={tokenForms[scene.id]?.visibleToPlayers??false} onChange={(event)=>setTokenForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyToken),visibleToPlayers:event.target.checked}}))}/>Visível aos jogadores</label>
               <button className="secondary-button"><Plus size={16}/>Adicionar token</button>
             </form>
+
+            <h4><Swords size={16}/>Combate {sceneDetail[scene.id].item.combatActive&&<span className="badge">Round {sceneDetail[scene.id].item.combatRound}</span>}</h4>
+            {sceneDetail[scene.id].item.combatActive?<>
+              <ul className="clean-list">{sceneDetail[scene.id].combatants.map((combatant)=><li key={combatant.id}>
+                <span>
+                  {combatant.isCurrentTurn&&<span className="badge">Turno atual</span>} <strong>{combatant.name}</strong> · iniciativa {combatant.initiative}
+                  {combatant.hpMax!==null&&<> · PV {combatant.hpCurrent??'?'}/{combatant.hpMax}</>}
+                  <small>{combatant.visibleToPlayers?' · visível aos jogadores':' · oculto (GM only)'}</small>
+                </span>
+                <div className="button-row">
+                  {combatant.hpCurrent!==null&&<>
+                    <button type="button" className="icon-button" aria-label={`Reduzir PV de ${combatant.name}`} onClick={()=>void adjustHp(scene.id,combatant,-1)}>-1</button>
+                    <button type="button" className="icon-button" aria-label={`Aumentar PV de ${combatant.name}`} onClick={()=>void adjustHp(scene.id,combatant,1)}>+1</button>
+                  </>}
+                  <button type="button" className="ghost-button" aria-label={`Remover ${combatant.name} do combate`} onClick={()=>void removeCombatant(scene.id,combatant.id)}><Trash2 size={15}/></button>
+                </div>
+              </li>)}</ul>
+              <div className="button-row">
+                <button type="button" className="primary-button" onClick={()=>void nextTurn(scene.id)}>Próximo turno</button>
+                <button type="button" className="ghost-button" onClick={()=>void endCombat(scene.id)}>Encerrar combate</button>
+              </div>
+              <form className="inline-form" onSubmit={(event)=>void addCombatant(scene.id,event)}>
+                <label>Nome<input required maxLength={160} value={combatantForms[scene.id]?.name??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),name:event.target.value}}))}/></label>
+                <label>Iniciativa<input type="number" step={0.1} value={combatantForms[scene.id]?.initiative??'10'} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),initiative:event.target.value}}))}/></label>
+                <label>PV atual<input type="number" value={combatantForms[scene.id]?.hpCurrent??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),hpCurrent:event.target.value}}))}/></label>
+                <label>PV máximo<input type="number" min={1} value={combatantForms[scene.id]?.hpMax??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),hpMax:event.target.value}}))}/></label>
+                <label className="checkbox-row"><input type="checkbox" checked={combatantForms[scene.id]?.visibleToPlayers??false} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),visibleToPlayers:event.target.checked}}))}/>Visível aos jogadores</label>
+                <button className="secondary-button"><Plus size={16}/>Adicionar combatente</button>
+              </form>
+            </>:<form className="inline-form" onSubmit={(event)=>void startCombat(scene.id,event)}>
+              <label>Primeiro combatente<input required maxLength={160} placeholder="Nome" value={combatantForms[scene.id]?.name??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),name:event.target.value}}))}/></label>
+              <label>Iniciativa<input type="number" step={0.1} value={combatantForms[scene.id]?.initiative??'10'} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),initiative:event.target.value}}))}/></label>
+              <label>PV atual<input type="number" value={combatantForms[scene.id]?.hpCurrent??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),hpCurrent:event.target.value}}))}/></label>
+              <label>PV máximo<input type="number" min={1} value={combatantForms[scene.id]?.hpMax??''} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),hpMax:event.target.value}}))}/></label>
+              <label className="checkbox-row"><input type="checkbox" checked={combatantForms[scene.id]?.visibleToPlayers??false} onChange={(event)=>setCombatantForms((current)=>({...current,[scene.id]:{...(current[scene.id]??emptyCombatant),visibleToPlayers:event.target.checked}}))}/>Visível aos jogadores</label>
+              <button className="secondary-button"><Swords size={16}/>Iniciar combate</button>
+            </form>}
           </div>}
         </li>)}
       </ul>
