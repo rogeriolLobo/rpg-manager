@@ -166,7 +166,7 @@ export function VttPage(){
   const liveUrl=`${location.origin}/app/campaigns/${campaignId}/vtt/live`;
   return <div className="page">
     <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
-    <p className="badge" style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}}>{wsConnected?'● Tempo real (mudanças de outro Co-Mestre aparecem automaticamente)':'○ Sem tempo real (recarregue para ver mudanças de outro Co-Mestre)'}</p>
+    <p className="badge" style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}} title={wsConnected?'Mudanças de outro Co-Mestre aparecem automaticamente.':'Recarregue a página para ver mudanças feitas por outro Co-Mestre.'}>{wsConnected?'● Tempo real':'○ Sem tempo real'}</p>
     {error&&<p className="form-error">{error}</p>}
 
     {/* F-031: WebSocket real via Durable Object é preferido; este link continua funcionando
