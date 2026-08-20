@@ -462,4 +462,51 @@ describe('F-015: Backup/Restore completo', () => {
     expect(restoredTemplate).toBeTruthy();
     expect(sheetBody.item!.templateId).toBe(restoredTemplate.id); // vínculo remapeado, nunca o modelo original
   });
+
+  it('round-trip: Wiki (pasta/tag/alias) + Relation entre duas entidades', async () => {
+    const owner = await register('backup-wiki-relations-roundtrip');
+    const worldId = await createWorld(owner, 'Mundo da Wiki');
+    const folderResponse = await request(`/knowledge/${worldId}/folders`, 'POST', { name: 'Pasta de NPCs', parentFolderId: null }, owner);
+    const folderId = ((await folderResponse.json()) as { item: { id: string } }).item.id;
+    const tagResponse = await request(`/knowledge/${worldId}/tags`, 'POST', { name: 'vilão' }, owner);
+    const tagId = ((await tagResponse.json()) as { item: { id: string } }).item.id;
+    const npcId = await createEntity(owner, { entityType: 'NPC', name: 'Vilão Principal', worldId });
+    const allyId = await createEntity(owner, { entityType: 'NPC', name: 'Aliado', worldId });
+    await request(`/knowledge/${worldId}/entities/${npcId}`, 'PATCH', { folderId, tagIds: [tagId], aliases: ['O Encapuzado'] }, owner);
+    await request(`/relations/worlds/${worldId}`, 'POST', { sourceEntityId: npcId, targetEntityId: allyId, relationType: 'ENEMY', label: 'rivalidade antiga', description: '', direction: 'BIDIRECTIONAL', visibility: 'PRIVATE', strength: 4 }, owner);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ wikiFolders: 1, wikiEntityMetadata: 1, worldTags: 1, wikiEntityTags: 1, wikiEntityAliases: 1, entityRelations: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ wikiFolders: 1, wikiEntityMetadata: 1, worldTags: 1, wikiEntityTags: 1, wikiEntityAliases: 1, entityRelations: 1 });
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredWorldId = worldItems.find((item) => item.name === 'Mundo da Wiki' && item.id !== worldId)!.id;
+
+    const knowledge = await request(`/knowledge/${restoredWorldId}`, 'GET', undefined, owner);
+    const knowledgeBody = await knowledge.json() as {
+      items: Array<{ id: string; name: string; folderName: string | null }>;
+      folders: Array<{ id: string; name: string }>; tags: Array<{ id: string; name: string }>;
+      entityTags: Array<{ entityId: string; name: string }>; aliases: Array<{ entityId: string; alias: string }>;
+    };
+    expect(knowledgeBody.folders).toHaveLength(1);
+    expect(knowledgeBody.folders[0].name).toBe('Pasta de NPCs');
+    expect(knowledgeBody.tags).toHaveLength(1);
+    expect(knowledgeBody.tags[0].name).toBe('vilão');
+    const restoredNpc = knowledgeBody.items.find((item) => item.name === 'Vilão Principal')!;
+    expect(restoredNpc.folderName).toBe('Pasta de NPCs');
+    expect(knowledgeBody.entityTags.some((entry) => entry.entityId === restoredNpc.id && entry.name === 'vilão')).toBe(true);
+    expect(knowledgeBody.aliases.some((entry) => entry.entityId === restoredNpc.id && entry.alias === 'O Encapuzado')).toBe(true);
+
+    const relations = await request(`/relations/worlds/${restoredWorldId}`, 'GET', undefined, owner);
+    const relationItems = ((await relations.json()) as { relations: Array<{ label: string; relationType: string; strength: number | null; sourceEntityId: string; targetEntityId: string }> }).relations;
+    expect(relationItems).toHaveLength(1);
+    expect(relationItems[0]).toMatchObject({ label: 'rivalidade antiga', relationType: 'ENEMY', strength: 4 });
+    expect(relationItems[0].sourceEntityId).not.toBe(npcId); // IDs novos, nunca os originais
+  });
 });

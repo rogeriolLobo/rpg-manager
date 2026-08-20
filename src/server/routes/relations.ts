@@ -58,7 +58,9 @@ function presentRelation(row: RelationRow) {
   };
 }
 
-function normalizeLabel(label: string): string {
+// Exportada para o restore de backup (backup-restore.ts) reconstruir label_normalized com a
+// MESMA função usada aqui — nunca uma reimplementação paralela que possa divergir.
+export function normalizeLabel(label: string): string {
   return label.trim().normalize('NFKC').toLocaleLowerCase('pt-BR');
 }
 

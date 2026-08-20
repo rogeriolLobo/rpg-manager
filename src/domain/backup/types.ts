@@ -42,4 +42,10 @@ export interface BackupRestorePreviewSummary {
   campaignSessions: number;
   sheetTemplates: number;
   characterSheets: number;
+  wikiFolders: number;
+  wikiEntityMetadata: number;
+  worldTags: number;
+  wikiEntityTags: number;
+  wikiEntityAliases: number;
+  entityRelations: number;
 }

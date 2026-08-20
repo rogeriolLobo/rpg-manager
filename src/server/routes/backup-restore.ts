@@ -35,12 +35,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, journalFolderInputSchema, journalPageInputSchema,
-  memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema,
+  campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, journalFolderInputSchema, journalPageInputSchema,
+  memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldTagInputSchema,
   vaultEntityInputSchema, worldInputSchema,
-  type CampaignInput, type CreatureStatTemplateInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldInput,
+  type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
+import { normalizeEditorialLabel } from '../../domain/content/wiki';
 import { SUPPORTED_BACKUP_SCHEMA_VERSION, type BackupRestoreWarning } from '../../domain/backup/types';
 import { validateSheet } from '../../domain/sheets';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
@@ -48,6 +49,7 @@ import { hashSecret } from '../security/crypto';
 import { recordRevisionStatement } from '../content/revisions';
 import { specializedStatements } from './vault';
 import { buildCreateLibraryEntryStatements } from './library-writes';
+import { normalizeLabel } from './relations';
 import type { AppVariables, Env } from '../types';
 
 export const backupRestoreRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -95,12 +97,22 @@ interface CampaignSessionPlanItem {
 // (worldId/gameSystemId resolvidos por oldId contra os maps construídos NA MESMA operação).
 interface SheetTemplatePlanItem { oldId: string; oldWorldId: string | null; oldGameSystemId: string | null; input: SheetTemplateInput }
 interface CharacterSheetPlanItem { oldEntityId: string; oldTemplateId: string; values: Record<string, string | number | boolean> }
+// Wiki (organização)/Relations — mesmo padrão: oldId cru viaja no plano, resolvido contra os
+// maps já construídos NA MESMA operação no confirm; alvo fora de escopo -> SKIP, nunca erro fatal.
+interface WikiFolderPlanItem { oldId: string; oldWorldId: string; oldParentFolderId: string | null; name: string }
+interface WikiEntityMetadataPlanItem { oldEntityId: string; oldFolderId: string | null; sortOrder: number }
+interface WorldTagPlanItem { oldId: string; oldWorldId: string; name: string }
+interface WikiEntityTagPlanItem { oldEntityId: string; oldTagId: string }
+interface WikiEntityAliasPlanItem { oldEntityId: string; alias: string }
+interface EntityRelationPlanItem { oldId: string; oldWorldId: string; oldSourceEntityId: string; oldTargetEntityId: string; input: EntityRelationInput }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
   library: LibraryPlanItem[]; groups: GroupPlanItem[]; groupMembers: GroupMemberPlanItem[];
   campaigns: CampaignPlanItem[]; campaignMembers: CampaignMemberPlanItem[]; campaignSessions: CampaignSessionPlanItem[];
   sheetTemplates: SheetTemplatePlanItem[]; characterSheets: CharacterSheetPlanItem[];
+  wikiFolders: WikiFolderPlanItem[]; wikiEntityMetadata: WikiEntityMetadataPlanItem[]; worldTags: WorldTagPlanItem[];
+  wikiEntityTags: WikiEntityTagPlanItem[]; wikiEntityAliases: WikiEntityAliasPlanItem[]; entityRelations: EntityRelationPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -121,6 +133,12 @@ const restorePlanSchema = z.strictObject({
   campaignSessions: z.array(z.strictObject({ oldId: z.string(), oldCampaignId: z.string(), sessionNumber: z.number().int().positive(), oldAttendeeMemberIds: z.array(z.string()), input: sessionInputSchema.omit({ attendeeMemberIds: true }) })),
   sheetTemplates: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string().nullable(), oldGameSystemId: z.string().nullable(), input: sheetTemplateInputSchema })),
   characterSheets: z.array(z.strictObject({ oldEntityId: z.string(), oldTemplateId: z.string(), values: characterSheetInputSchema.shape.values })),
+  wikiFolders: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldParentFolderId: z.string().nullable(), name: journalFolderInputSchema.shape.name })),
+  wikiEntityMetadata: z.array(z.strictObject({ oldEntityId: z.string(), oldFolderId: z.string().nullable(), sortOrder: z.number().int() })),
+  worldTags: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), name: worldTagInputSchema.shape.name })),
+  wikiEntityTags: z.array(z.strictObject({ oldEntityId: z.string(), oldTagId: z.string() })),
+  wikiEntityAliases: z.array(z.strictObject({ oldEntityId: z.string(), alias: wikiEntityOrganizationSchema.shape.aliases.element })),
+  entityRelations: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldSourceEntityId: z.string(), oldTargetEntityId: z.string(), input: entityRelationInputSchema })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -297,6 +315,72 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     characterSheets.push({ oldEntityId, oldTemplateId, values: parsed.data });
   }
 
+  // ---- Wiki (organização): pastas (2 passagens para parent_folder_id, mesmo padrão de
+  // Journal), metadata por entidade (pasta+ordenação), tags de World e aliases por entidade. ----
+  const rawWikiFolders = rowsOf(data, 'wikiFolders');
+  const wikiFolders: WikiFolderPlanItem[] = [];
+  const wikiFolderOldIds = new Set(rawWikiFolders.map((row) => str(row, 'id')));
+  for (const row of rawWikiFolders) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'wikiFolders', oldId, message: 'World original não pôde ser restaurado — pasta da Wiki não será restaurada.', category: 'SKIP' }); continue; }
+    const name = str(row, 'name');
+    if (!name.trim() || name.length > 120) { warnings.push({ domain: 'wikiFolders', oldId, message: 'Pasta com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    const oldParentFolderId = strOrNull(row, 'parent_folder_id');
+    wikiFolders.push({ oldId, oldWorldId, oldParentFolderId: oldParentFolderId && wikiFolderOldIds.has(oldParentFolderId) ? oldParentFolderId : null, name });
+  }
+  const restorableWikiFolderOldIds = new Set(wikiFolders.map((item) => item.oldId));
+
+  const wikiEntityMetadata: WikiEntityMetadataPlanItem[] = [];
+  for (const row of rowsOf(data, 'wikiEntityMetadata')) {
+    const oldEntityId = str(row, 'entity_id');
+    if (!entityOldIds.has(oldEntityId)) continue;
+    const oldFolderId = strOrNull(row, 'folder_id');
+    wikiEntityMetadata.push({ oldEntityId, oldFolderId: oldFolderId && restorableWikiFolderOldIds.has(oldFolderId) ? oldFolderId : null, sortOrder: num(row, 'sort_order') ?? 0 });
+  }
+
+  const rawWorldTags = rowsOf(data, 'worldTags');
+  const worldTags: WorldTagPlanItem[] = [];
+  for (const row of rawWorldTags) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'worldTags', oldId, message: 'World original não pôde ser restaurado — tag não será restaurada.', category: 'SKIP' }); continue; }
+    const name = str(row, 'name');
+    if (!name.trim() || name.length > 60) { warnings.push({ domain: 'worldTags', oldId, message: 'Tag com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    worldTags.push({ oldId, oldWorldId, name });
+  }
+  const restorableWorldTagOldIds = new Set(worldTags.map((item) => item.oldId));
+
+  const wikiEntityTags: WikiEntityTagPlanItem[] = [];
+  for (const row of rowsOf(data, 'wikiEntityTags')) {
+    const oldEntityId = str(row, 'entity_id'); const oldTagId = str(row, 'tag_id');
+    if (!entityOldIds.has(oldEntityId) || !restorableWorldTagOldIds.has(oldTagId)) continue;
+    wikiEntityTags.push({ oldEntityId, oldTagId });
+  }
+
+  const wikiEntityAliases: WikiEntityAliasPlanItem[] = [];
+  for (const row of rowsOf(data, 'wikiEntityAliases')) {
+    const oldEntityId = str(row, 'entity_id');
+    if (!entityOldIds.has(oldEntityId)) continue;
+    const alias = str(row, 'alias');
+    if (!alias.trim() || alias.length > 160) continue;
+    wikiEntityAliases.push({ oldEntityId, alias });
+  }
+
+  // ---- Relations (F-... entity_relations) — precisa de World + as duas entidades (source e
+  // target) restauradas nesta mesma operação. ----
+  const rawRelations = rowsOf(data, 'entityRelations');
+  if (rawRelations.length > 3000) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais Relações do que a v1 do restore suporta (3000 por operação).');
+  const entityRelations: EntityRelationPlanItem[] = [];
+  for (const row of rawRelations) {
+    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
+    const oldSourceEntityId = str(row, 'source_entity_id'); const oldTargetEntityId = str(row, 'target_entity_id');
+    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'entityRelations', oldId, message: 'World original não pôde ser restaurado — relação não será restaurada.', category: 'SKIP' }); continue; }
+    if (!entityOldIds.has(oldSourceEntityId) || !entityOldIds.has(oldTargetEntityId)) { warnings.push({ domain: 'entityRelations', oldId, message: 'Uma das entidades da relação não pôde ser restaurada — relação não será restaurada.', category: 'SKIP' }); continue; }
+    const candidate = { sourceEntityId: oldSourceEntityId, targetEntityId: oldTargetEntityId, relationType: str(row, 'relation_type'), label: str(row, 'label'), description: str(row, 'description'), direction: str(row, 'direction'), visibility: str(row, 'visibility') || 'PRIVATE', strength: num(row, 'strength') };
+    const parsed = entityRelationInputSchema.safeParse(candidate);
+    if (!parsed.success) { warnings.push({ domain: 'entityRelations', oldId, message: 'Relação com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    entityRelations.push({ oldId, oldWorldId, oldSourceEntityId, oldTargetEntityId, input: parsed.data });
+  }
+
   // ---- Groups (precisa vir antes de Library/Campaigns: ambos podem referenciar um Group) ----
   const rawGroups = rowsOf(data, 'groups');
   if (rawGroups.length > 200) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais Grupos do que a v1 do restore suporta (200 por operação).');
@@ -471,7 +555,9 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
   return {
     worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
-    sheetTemplates, characterSheets, warnings,
+    sheetTemplates, characterSheets,
+    wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
+    warnings,
   };
 }
 
@@ -487,7 +573,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   const plan = await buildRestorePlan(c.env, user.id, rootRow);
   const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.worldEntityLinks.length
     + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
-    + plan.sheetTemplates.length + plan.characterSheets.length;
+    + plan.sheetTemplates.length + plan.characterSheets.length
+    + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -502,6 +589,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length, worldEntityLinks: plan.worldEntityLinks.length,
       library: plan.library.length, groups: plan.groups.length, groupMembers: plan.groupMembers.length, campaigns: plan.campaigns.length, campaignMembers: plan.campaignMembers.length, campaignSessions: plan.campaignSessions.length,
       sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
+      wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -695,6 +783,65 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     characterSheetsCreated += 1;
   }
 
+  // ---- Wiki (organização) — cada World/entidade restaurado nesta operação é sempre NOVO,
+  // então as UNIQUE INDEX de nome/alias por World/entidade nunca colidem com dado pré-existente
+  // nem entre si (a origem já garantia unicidade; o remapeamento 1:1 preserva isso). ----
+  const wikiFolderIdMap = new Map<string, string>();
+  const wikiFolderParentPending: Array<{ newId: string; oldParentFolderId: string }> = [];
+  for (const item of plan.wikiFolders) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO wiki_folders (id,world_id,parent_folder_id,name,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind(newId, newWorldId, null, item.name, now, now));
+    wikiFolderIdMap.set(item.oldId, newId);
+    if (item.oldParentFolderId) wikiFolderParentPending.push({ newId, oldParentFolderId: item.oldParentFolderId });
+  }
+  for (const pending of wikiFolderParentPending) {
+    const newParentId = wikiFolderIdMap.get(pending.oldParentFolderId);
+    if (newParentId) statements.push(c.env.DB.prepare('UPDATE wiki_folders SET parent_folder_id=? WHERE id=?').bind(newParentId, pending.newId));
+  }
+
+  let wikiEntityMetadataCreated = 0;
+  for (const item of plan.wikiEntityMetadata) {
+    const newEntityId = entityIdMap.get(item.oldEntityId); if (!newEntityId) continue;
+    const resolvedFolderId = item.oldFolderId ? wikiFolderIdMap.get(item.oldFolderId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO wiki_entity_metadata (entity_id,folder_id,sort_order,updated_at) VALUES (?,?,?,?)').bind(newEntityId, resolvedFolderId, item.sortOrder, now));
+    wikiEntityMetadataCreated += 1;
+  }
+
+  const worldTagIdMap = new Map<string, string>();
+  for (const item of plan.worldTags) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO world_tags (id,world_id,name,normalized_name,created_at) VALUES (?,?,?,?,?)').bind(newId, newWorldId, item.name, normalizeEditorialLabel(item.name), now));
+    worldTagIdMap.set(item.oldId, newId);
+  }
+
+  let wikiEntityTagsCreated = 0;
+  for (const item of plan.wikiEntityTags) {
+    const newEntityId = entityIdMap.get(item.oldEntityId); const newTagId = worldTagIdMap.get(item.oldTagId);
+    if (!newEntityId || !newTagId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO wiki_entity_tags (entity_id,tag_id,created_at) VALUES (?,?,?)').bind(newEntityId, newTagId, now));
+    wikiEntityTagsCreated += 1;
+  }
+
+  let wikiEntityAliasesCreated = 0;
+  for (const item of plan.wikiEntityAliases) {
+    const newEntityId = entityIdMap.get(item.oldEntityId); if (!newEntityId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO wiki_entity_aliases (id,entity_id,alias,normalized_alias,created_at) VALUES (?,?,?,?,?)').bind(crypto.randomUUID(), newEntityId, item.alias, normalizeEditorialLabel(item.alias), now));
+    wikiEntityAliasesCreated += 1;
+  }
+
+  // ---- Relations — created_by_user_id é SEMPRE o usuário autenticado (nunca o valor do
+  // backup), mesmo princípio de owner_user_id/user_id usado em todo o restore. ----
+  let entityRelationsCreated = 0;
+  for (const item of plan.entityRelations) {
+    const newWorldId = worldIdMap.get(item.oldWorldId); const newSourceId = entityIdMap.get(item.oldSourceEntityId); const newTargetId = entityIdMap.get(item.oldTargetEntityId);
+    if (!newWorldId || !newSourceId || !newTargetId) continue;
+    statements.push(c.env.DB.prepare(`INSERT INTO entity_relations (id,world_id,source_entity_id,target_entity_id,relation_type,label,label_normalized,description,direction,visibility,strength,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), newWorldId, newSourceId, newTargetId, item.input.relationType, item.input.label, normalizeLabel(item.input.label), item.input.description, item.input.direction, item.input.visibility, item.input.strength, user.id, now, now));
+    entityRelationsCreated += 1;
+  }
+
   // ---- Journal folders (2ª passagem para parent_folder_id, mesmo padrão) ----
   const folderIdMap = new Map<string, string>();
   const folderParentPending: Array<{ newId: string; oldParentFolderId: string }> = [];
@@ -775,6 +922,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated, worldEntityLinks: worldEntityLinksCreated,
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
       sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
+      wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,
     },
     warnings: confirmWarnings,
   });
