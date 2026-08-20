@@ -1706,24 +1706,35 @@ escrever qualquer código).
   sobrevivia ao runner efêmero; toda investigação de flake até agora
   dependeu só de log de texto. Sem impacto em produção (mudança só de
   CI).
-- **Achado real durante o próprio BATCH19:** o push do F-034 (antes
-  deste commit) expôs `tests/e2e/vault-worlds-flow.spec.ts` falhando
-  de forma consistente 2x seguidas (`gh run rerun --failed` resolveu
-  as duas), sempre no mesmo ponto (`getByLabel('Nome')` nunca resolve
-  por até 270s, mesmo depois do wait explícito por
-  `World.locator('option')` já ter passado) — sintoma diferente do
-  "element detached" original (aqui o locator nunca encontra nada, não
-  encontra-e-perde). Investigado até o limite do que dava para
-  concluir só com log de texto (sem screenshot real do momento da
-  falha, porque o CI ainda não subia artifact — corrigido agora para a
-  PRÓXIMA ocorrência). Hipótese mais provável, não confirmada: o
-  webServer de E2E roda `vite dev` (StrictMode + compilação sob
-  demanda), não um build de produção — trocar para build+preview
-  eliminaria as duas causas possíveis de uma vez, mas é uma mudança de
-  infraestrutura grande demais para fazer às cegas sob pressão de
-  tempo. Documentado como achado residual não bloqueante (nunca
-  impediu um release nesta sessão, sempre resolvido por rerun) — ver
-  `docs/product/FULL_ROADMAP.md`.
+- **Achado real durante o próprio BATCH19, causa raiz encontrada e
+  corrigida:** o push do F-034 (antes deste commit) expôs
+  `tests/e2e/vault-worlds-flow.spec.ts` falhando de forma consistente,
+  sempre no mesmo ponto (`getByLabel('Nome')` nunca resolve por até
+  270s). Primeira tentativa (`--disable-dev-shm-usage`) não resolveu —
+  o flake se repetiu de forma idêntica no push seguinte. Com o CI já
+  subindo artifact (item acima), baixei o trace/screenshot real da
+  segunda falha: o screenshot mostrava a tela de OUTRO teste
+  (`player-view.spec.ts` — "Mesa de Valdren"/"Elyndra Lâmina de
+  Prata"/"Fora PV.../Não encontrado"), e o `trace.zip` extraído revelou
+  só 2 frames de screencast em 270 segundos inteiros (um no início, um
+  no fim) — o processo de renderer do Chromium ficou completamente
+  congelado, não um elemento lento. **Causa raiz real:**
+  `player-view.spec.ts`, `vtt-live.spec.ts` e `vtt-realtime.spec.ts`
+  criam contexts extras via `browser.newContext()` para os cenários
+  multi-conta (jogador/outsider) e nunca os fechavam — só o fixture
+  `page` padrão do Playwright tem teardown automático; um context
+  criado manualmente é responsabilidade do teste. Com `workers:1`
+  (mesmo processo/browser para a fila inteira), cada um desses 3
+  testes deixava contexts abertos (alguns com WebSocket ainda
+  conectado ao Durable Object) acumulando memória/conexões até o
+  browser travar bem mais adiante na fila — sempre o mesmo teste,
+  sempre a mesma trava completa, batendo exatamente com o padrão
+  observado ao longo de toda a sessão. Fix: `await xContext.close()`
+  nos 3 arquivos, mesmo padrão já usado corretamente em
+  `social-friends.spec.ts`/`social-library-invites.spec.ts` (nunca
+  vazavam). **CI verde de primeira depois do fix, sem rerun** — suíte
+  local completa de 49 testes (chromium) também confirmada limpa,
+  incluindo `vault-worlds-flow.spec.ts` rodando por último na fila.
 
 **F-015 revalidado — export v9:**
 - `schemaVersion` 8→9. Todas as tabelas dos domínios criados desde o
@@ -1773,12 +1784,40 @@ escrever qualquer código).
   `docs/product/FULL_ROADMAP.md` atualizados com a cobertura v9 e a
   fronteira de escopo do restore.
 - typecheck/lint/build limpos; 195 unit + 224 integration (30
-  arquivos) sem flake (fora do achado de CI documentado acima).
+  arquivos) sem flake.
 
 **`RPG MANAGER — PLANNED_ROADMAP_COMPLETE` alcançado** — todo item de
-F-022 a F-034 `DONE`, F-015 revalidado, CI verde, deploy real
-confirmado. Ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md` para o
-relatório final da meta original.
+F-022 a F-034 `DONE`, F-015 revalidado, CI verde (flake recorrente
+corrigido na raiz, não mascarado), deploy real confirmado. Ver
+`docs/product/RPG_MANAGER_COMPLETE_STATUS.md` para o relatório final
+da meta original.
+
+## Polimento pós-roadmap — relato real do usuário (2026-08-20)
+
+Dois achados reportados diretamente pelo usuário em produção, corrigidos
+na sequência (fora do escopo original F-022..F-034, mas genuínos):
+
+- **Botão de notificações desalinhado (2ª ocorrência):** vivia dentro
+  de `.sidebar-toolbar`, ao lado do botão de busca (Comandos) —
+  cortado/sobreposto pela scrollbar da sidebar em telas mais estreitas
+  (achado real via screenshot do usuário; a correção anterior desta
+  sessão só tinha ajustado a altura, não a posição). Movido para a
+  linha do brand (topo da sidebar, `margin-left:auto` dentro do flex),
+  sempre visível, nunca disputando espaço com outro controle.
+- **"Ainda não conseguimos criar OneShot":** o mecanismo sempre existiu
+  (F-024, BATCH13 — Formato dentro do mesmo formulário de campanha),
+  confirmado funcionando via reprodução real em Playwright local, mas
+  sem NENHUM atalho visível na tela de Campanhas ninguém descobria a
+  opção — um gap real de descoberta, não um bug funcional. Adiciona
+  "Nova mesa única" ao lado de "Nova campanha" em `CampaignsPage`,
+  pré-selecionando o Formato via query param (`?sessionMode=ONE_SHOT`),
+  mesmo padrão já usado por `worldId`/`playGroupId`. Nenhuma rota nova,
+  nenhum domínio novo.
+- Teste: `tests/e2e/campaign-one-shot-shortcut.spec.ts` (novo,
+  desktop+mobile) — clica no atalho, confirma o Formato pré-selecionado,
+  cria a mesa e confirma o badge "One-Shot" na listagem.
+- typecheck/lint limpos; deploy confirmado em produção
+  (`GET /api/v1/version` → `commit: "366dfc6"`).
 
 ## Itens auditados nesta sessão, sem ação necessária (ver
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md` para a auditoria completa)

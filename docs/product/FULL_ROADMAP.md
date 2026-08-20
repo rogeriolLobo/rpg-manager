@@ -92,16 +92,31 @@ do escopo v1 preservada para o restante — ver
 `RPG MANAGER — PLANNED_ROADMAP_COMPLETE` alcançado: todo item de F-022
 a F-034 está `DONE`, F-015 foi revalidado cobrindo os domínios novos, e
 CI/deploy/produção convergem — ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md`
-para o relatório final. Achado residual não bloqueante, documentado
-para uma sessão futura com evidência real (agora capturável via CI
-artifact): `tests/e2e/vault-worlds-flow.spec.ts` segue com flake
-intermitente sob carga de CI (`getByLabel('Nome')` não resolve por até
-270s) — resolvido por `gh run rerun --failed` em toda ocorrência desta
-sessão, nunca bloqueou um release; um fix definitivo provavelmente
-exige trocar o webServer de E2E de `vite dev` (StrictMode + compile
-sob demanda) para build de produção servido, mudança de infraestrutura
-maior demais para investigar às cegas sem a evidência visual que o
-artifact upload agora permite coletar na próxima ocorrência.
+para o relatório final.
+
+**Causa raiz real do flake de `vault-worlds-flow.spec.ts` encontrada e
+corrigida (2026-08-20):** o CI artifact upload (item acima) permitiu
+baixar o trace/screenshot da falha pela primeira vez — a evidência
+mudou o diagnóstico por completo. O screenshot da falha mostrava a
+tela de OUTRO teste (`player-view.spec.ts`), e o `trace.zip` mostrou
+apenas 2 frames de screencast em 270s inteiros: o processo de renderer
+do Chromium ficou completamente congelado, não um elemento lento.
+Causa raiz real: `player-view.spec.ts`, `vtt-live.spec.ts` e
+`vtt-realtime.spec.ts` criavam contexts extras via `browser.newContext()`
+para cenários multi-conta e nunca os fechavam — com `workers:1` (mesmo
+processo/browser para a fila inteira), cada um deixava contexts abertos
+(alguns com WebSocket ainda conectado ao Durable Object) acumulando
+memória/conexões até travar o browser bem mais adiante na fila.
+Corrigido com `await xContext.close()` nos 3 arquivos — CI verde de
+primeira depois do fix, sem rerun. Ver `docs/product/MASTER_BACKLOG.md`.
+
+**Polimento adicional encontrado por relato real do usuário
+(2026-08-20):** botão de notificações reposicionado (vivia espremido
+dentro de `.sidebar-toolbar`, cortado pela scrollbar em telas mais
+estreitas — movido para a linha do brand); atalho "Nova mesa única" em
+`CampaignsPage` (One-Shot sempre existiu como Formato do formulário de
+campanha, F-024, mas sem nenhum atalho visível ninguém descobria a
+opção).
 
 ## Critério de conclusão
 
