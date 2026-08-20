@@ -560,4 +560,51 @@ describe('F-015: Backup/Restore completo', () => {
     expect(restoredEvent.temporal.calendarDate).toMatchObject({ year: 1, monthIndex: 0, day: 1 });
     expect(restoredEvent.temporal.eraId).not.toBe(eraId); // ID novo, nunca o original
   });
+
+  it('round-trip: Adventure (Scene->Encounter/SceneEntity) + Handout com External Resource', async () => {
+    const owner = await register('backup-adventure-roundtrip');
+    const worldId = await createWorld(owner, 'Mundo da Aventura');
+    const resourceResponse = await request(`/external-resources/${worldId}`, 'POST', { title: 'Mapa oficial', url: 'https://example.com/mapa-oficial', description: '', resourceType: 'MAP' }, owner);
+    const externalResourceId = ((await resourceResponse.json()) as { item: { id: string } }).item.id;
+    const npcId = await createEntity(owner, { entityType: 'NPC', name: 'Guarda', worldId });
+    const adventureId = await createEntity(owner, { entityType: 'ADVENTURE', name: 'A Caverna Perdida', worldId, adventure: { adventureType: 'ONE_SHOT', recommendedSessions: null, notes: '', premise: '', hooks: '', keyScenes: '', rewards: '' } });
+    const sceneResponse = await request(`/adventures/${adventureId}/scenes`, 'POST', { act: 'Ato 1', title: 'Entrada da Caverna', summary: '', readAloud: '', gmNotes: '', completed: false, sortOrder: 0 }, owner);
+    const sceneId = ((await sceneResponse.json()) as { id: string }).id;
+    await request(`/adventures/${adventureId}/scenes/${sceneId}/encounters`, 'POST', { name: 'Emboscada', difficulty: 'Médio', description: '', gmNotes: '', sortOrder: 0 }, owner);
+    await request(`/adventures/${adventureId}/scenes/${sceneId}/entities`, 'POST', { entityId: npcId, role: 'Guardião' }, owner);
+    await request(`/adventures/${adventureId}/handouts`, 'POST', { title: 'Bilhete Rasgado', content: 'texto secreto', sceneId, externalResourceId, revealed: false, sortOrder: 0 }, owner);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ adventureScenes: 1, adventureEncounters: 1, adventureSceneEntities: 1, adventureHandouts: 1, externalResources: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ adventureScenes: 1, adventureEncounters: 1, adventureSceneEntities: 1, adventureHandouts: 1, externalResources: 1 });
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredWorldId = worldItems.find((item) => item.name === 'Mundo da Aventura' && item.id !== worldId)!.id;
+    const restoredEntities = await request(`/vault?worldId=${restoredWorldId}&pageSize=50`, 'GET', undefined, owner);
+    const restoredEntityItems = ((await restoredEntities.json()) as { items: Array<{ id: string; name: string; entityType: string }> }).items;
+    const restoredAdventureId = restoredEntityItems.find((item) => item.entityType === 'ADVENTURE')!.id;
+    const restoredNpcId = restoredEntityItems.find((item) => item.entityType === 'NPC')!.id;
+
+    const adventureDetail = await request(`/adventures/${restoredAdventureId}`, 'GET', undefined, owner);
+    const adventureBody = await adventureDetail.json() as {
+      scenes: Array<{ title: string; encounters: Array<{ name: string }>; entities: Array<{ entityId: string; role: string }> }>;
+      handouts: Array<{ title: string; sceneId: string | null; externalResourceId: string | null }>;
+    };
+    expect(adventureBody.scenes).toHaveLength(1);
+    expect(adventureBody.scenes[0].title).toBe('Entrada da Caverna');
+    expect(adventureBody.scenes[0].encounters).toHaveLength(1);
+    expect(adventureBody.scenes[0].encounters[0].name).toBe('Emboscada');
+    expect(adventureBody.scenes[0].entities).toHaveLength(1);
+    expect(adventureBody.scenes[0].entities[0]).toMatchObject({ entityId: restoredNpcId, role: 'Guardião' });
+    expect(adventureBody.handouts).toHaveLength(1);
+    expect(adventureBody.handouts[0].title).toBe('Bilhete Rasgado');
+    expect(adventureBody.handouts[0].sceneId).not.toBeNull();
+    expect(adventureBody.handouts[0].externalResourceId).not.toBe(externalResourceId); // ID novo
+  });
 });

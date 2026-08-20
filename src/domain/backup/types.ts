@@ -54,4 +54,8 @@ export interface BackupRestorePreviewSummary {
   worldEras: number;
   worldCalendars: number;
   eventTemporalDetails: number;
+  adventureScenes: number;
+  adventureEncounters: number;
+  adventureSceneEntities: number;
+  adventureHandouts: number;
 }

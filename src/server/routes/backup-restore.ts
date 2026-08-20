@@ -35,9 +35,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
+  adventureEncounterInputSchema, adventureHandoutInputSchema, adventureSceneEntityInputSchema, adventureSceneInputSchema,
   campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, eventTemporalInputSchema, externalResourceInputSchema, journalFolderInputSchema, journalPageInputSchema,
   mapPinInputSchema, memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldCalendarInputSchema, worldEraInputSchema, worldMapInputSchema, worldTagInputSchema,
   vaultEntityInputSchema, worldInputSchema,
+  type AdventureEncounterInput, type AdventureHandoutInput, type AdventureSceneInput,
   type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type EventTemporalInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldCalendarInput, type WorldEraInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
@@ -119,6 +121,12 @@ interface ExternalResourcePlanItem { oldId: string; oldWorldId: string; input: E
 interface WorldEraPlanItem { oldId: string; oldWorldId: string; input: WorldEraInput }
 interface WorldCalendarPlanItem { oldWorldId: string; input: WorldCalendarInput }
 interface EventTemporalPlanItem { oldEntityId: string; oldEraId: string | null; hasCalendarDate: boolean; input: EventTemporalInput }
+// Adventures estruturadas (F-025): Scene -> Encounter/SceneEntity; Handout (adventure_entity_id
+// + scene_id opcional + external_resource_id opcional).
+interface AdventureScenePlanItem { oldId: string; oldAdventureEntityId: string; input: AdventureSceneInput }
+interface AdventureEncounterPlanItem { oldId: string; oldSceneId: string; input: AdventureEncounterInput }
+interface AdventureSceneEntityPlanItem { oldSceneId: string; oldEntityId: string; role: string }
+interface AdventureHandoutPlanItem { oldId: string; oldAdventureEntityId: string; oldSceneId: string | null; oldExternalResourceId: string | null; input: AdventureHandoutInput }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
@@ -129,6 +137,8 @@ interface RestorePlan {
   wikiEntityTags: WikiEntityTagPlanItem[]; wikiEntityAliases: WikiEntityAliasPlanItem[]; entityRelations: EntityRelationPlanItem[];
   worldMaps: WorldMapPlanItem[]; mapPins: MapPinPlanItem[]; externalResources: ExternalResourcePlanItem[];
   worldEras: WorldEraPlanItem[]; worldCalendars: WorldCalendarPlanItem[]; eventTemporalDetails: EventTemporalPlanItem[];
+  adventureScenes: AdventureScenePlanItem[]; adventureEncounters: AdventureEncounterPlanItem[];
+  adventureSceneEntities: AdventureSceneEntityPlanItem[]; adventureHandouts: AdventureHandoutPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -161,6 +171,10 @@ const restorePlanSchema = z.strictObject({
   worldEras: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: worldEraInputSchema })),
   worldCalendars: z.array(z.strictObject({ oldWorldId: z.string(), input: worldCalendarInputSchema })),
   eventTemporalDetails: z.array(z.strictObject({ oldEntityId: z.string(), oldEraId: z.string().nullable(), hasCalendarDate: z.boolean(), input: eventTemporalInputSchema })),
+  adventureScenes: z.array(z.strictObject({ oldId: z.string(), oldAdventureEntityId: z.string(), input: adventureSceneInputSchema })),
+  adventureEncounters: z.array(z.strictObject({ oldId: z.string(), oldSceneId: z.string(), input: adventureEncounterInputSchema })),
+  adventureSceneEntities: z.array(z.strictObject({ oldSceneId: z.string(), oldEntityId: z.string(), role: adventureSceneEntityInputSchema.shape.role })),
+  adventureHandouts: z.array(z.strictObject({ oldId: z.string(), oldAdventureEntityId: z.string(), oldSceneId: z.string().nullable(), oldExternalResourceId: z.string().nullable(), input: adventureHandoutInputSchema })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -438,6 +452,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     if (!parsed.success) { warnings.push({ domain: 'externalResources', oldId, message: 'Recurso externo com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
     externalResources.push({ oldId, oldWorldId, input: parsed.data });
   }
+  const externalResourceOldIds = new Set(externalResources.map((item) => item.oldId));
 
   // ---- Timeline/Calendar: Eras -> Calendar (1 por World) -> Event temporal details (Events). ----
   const rawEras = rowsOf(data, 'worldEras');
@@ -486,6 +501,49 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     const parsed = eventTemporalInputSchema.safeParse(candidate);
     if (!parsed.success) { warnings.push({ domain: 'eventTemporalDetails', oldId: oldEntityId, message: 'Evento com data histórica inválida após validação — data não será restaurada.', category: 'SKIP' }); continue; }
     eventTemporalDetails.push({ oldEntityId, oldEraId: oldEraId && worldEraOldIds.has(oldEraId) ? oldEraId : null, hasCalendarDate, input: parsed.data });
+  }
+
+  // ---- Adventures estruturadas (F-025): Scene -> Encounter/SceneEntity; Handout. ----
+  const rawScenes = rowsOf(data, 'adventureScenes');
+  const adventureScenes: AdventureScenePlanItem[] = [];
+  for (const row of rawScenes) {
+    const oldId = str(row, 'id'); const oldAdventureEntityId = str(row, 'adventure_entity_id');
+    if (!entityOldIds.has(oldAdventureEntityId)) { warnings.push({ domain: 'adventureScenes', oldId, message: 'Adventure original não pôde ser restaurada — cena não será restaurada.', category: 'SKIP' }); continue; }
+    const parsed = adventureSceneInputSchema.safeParse({ act: str(row, 'act'), title: str(row, 'title'), summary: str(row, 'summary'), readAloud: str(row, 'read_aloud'), gmNotes: str(row, 'gm_notes'), completed: Boolean(strOrNull(row, 'completed_at')), sortOrder: num(row, 'sort_order') ?? 0 });
+    if (!parsed.success) { warnings.push({ domain: 'adventureScenes', oldId, message: 'Cena com dados inválidos após validação — não será restaurada.', category: 'SKIP' }); continue; }
+    adventureScenes.push({ oldId, oldAdventureEntityId, input: parsed.data });
+  }
+  const adventureSceneOldIds = new Set(adventureScenes.map((item) => item.oldId));
+
+  const rawEncounters = rowsOf(data, 'adventureEncounters');
+  const adventureEncounters: AdventureEncounterPlanItem[] = [];
+  for (const row of rawEncounters) {
+    const oldId = str(row, 'id'); const oldSceneId = str(row, 'scene_id');
+    if (!adventureSceneOldIds.has(oldSceneId)) { warnings.push({ domain: 'adventureEncounters', oldId, message: 'Cena original não pôde ser restaurada — encontro não será restaurado.', category: 'SKIP' }); continue; }
+    const parsed = adventureEncounterInputSchema.safeParse({ name: str(row, 'name'), difficulty: str(row, 'difficulty'), description: str(row, 'description'), gmNotes: str(row, 'gm_notes'), sortOrder: num(row, 'sort_order') ?? 0 });
+    if (!parsed.success) { warnings.push({ domain: 'adventureEncounters', oldId, message: 'Encontro com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    adventureEncounters.push({ oldId, oldSceneId, input: parsed.data });
+  }
+
+  const adventureSceneEntities: AdventureSceneEntityPlanItem[] = [];
+  for (const row of rowsOf(data, 'adventureSceneEntities')) {
+    const oldSceneId = str(row, 'scene_id'); const oldEntityId = str(row, 'entity_id');
+    if (!adventureSceneOldIds.has(oldSceneId) || !entityOldIds.has(oldEntityId)) continue;
+    adventureSceneEntities.push({ oldSceneId, oldEntityId, role: str(row, 'role') });
+  }
+
+  const rawHandouts = rowsOf(data, 'adventureHandouts');
+  const adventureHandouts: AdventureHandoutPlanItem[] = [];
+  for (const row of rawHandouts) {
+    const oldId = str(row, 'id'); const oldAdventureEntityId = str(row, 'adventure_entity_id');
+    if (!entityOldIds.has(oldAdventureEntityId)) { warnings.push({ domain: 'adventureHandouts', oldId, message: 'Adventure original não pôde ser restaurada — handout não será restaurado.', category: 'SKIP' }); continue; }
+    const oldSceneId = strOrNull(row, 'scene_id');
+    if (oldSceneId && !adventureSceneOldIds.has(oldSceneId)) warnings.push({ domain: 'adventureHandouts', oldId, message: 'Cena original não está neste backup — handout será restaurado sem cena vinculada.', category: 'SKIP' });
+    const oldExternalResourceId = strOrNull(row, 'external_resource_id');
+    if (oldExternalResourceId && !externalResourceOldIds.has(oldExternalResourceId)) warnings.push({ domain: 'adventureHandouts', oldId, message: 'Recurso externo original não está neste backup — handout será restaurado sem recurso vinculado.', category: 'SKIP' });
+    const parsed = adventureHandoutInputSchema.safeParse({ title: str(row, 'title'), content: str(row, 'content'), sceneId: null, externalResourceId: null, revealed: Boolean(strOrNull(row, 'revealed_at')), sortOrder: num(row, 'sort_order') ?? 0 });
+    if (!parsed.success) { warnings.push({ domain: 'adventureHandouts', oldId, message: 'Handout com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    adventureHandouts.push({ oldId, oldAdventureEntityId, oldSceneId: oldSceneId && adventureSceneOldIds.has(oldSceneId) ? oldSceneId : null, oldExternalResourceId: oldExternalResourceId && externalResourceOldIds.has(oldExternalResourceId) ? oldExternalResourceId : null, input: parsed.data });
   }
 
   // ---- Groups (precisa vir antes de Library/Campaigns: ambos podem referenciar um Group) ----
@@ -665,6 +723,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     sheetTemplates, characterSheets,
     wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
     worldMaps, mapPins, externalResources, worldEras, worldCalendars, eventTemporalDetails,
+    adventureScenes, adventureEncounters, adventureSceneEntities, adventureHandouts,
     warnings,
   };
 }
@@ -683,7 +742,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
     + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
     + plan.sheetTemplates.length + plan.characterSheets.length
     + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
-    + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length;
+    + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length
+    + plan.adventureScenes.length + plan.adventureEncounters.length + plan.adventureSceneEntities.length + plan.adventureHandouts.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -700,6 +760,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
       wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
       worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
+      adventureScenes: plan.adventureScenes.length, adventureEncounters: plan.adventureEncounters.length, adventureSceneEntities: plan.adventureSceneEntities.length, adventureHandouts: plan.adventureHandouts.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -969,11 +1030,12 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
   }
 
   // ---- External Resources (F-003) ----
-  let externalResourcesCreated = 0;
+  const externalResourceIdMap = new Map<string, string>();
   for (const item of plan.externalResources) {
     const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
-    statements.push(c.env.DB.prepare('INSERT INTO external_resources (id,world_id,title,url,description,resource_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(), newWorldId, item.input.title, item.input.url, item.input.description, item.input.resourceType, now, now));
-    externalResourcesCreated += 1;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO external_resources (id,world_id,title,url,description,resource_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(newId, newWorldId, item.input.title, item.input.url, item.input.description, item.input.resourceType, now, now));
+    externalResourceIdMap.set(item.oldId, newId);
   }
 
   // ---- Timeline/Calendar: Eras -> Calendar (1 por World, mesma UNIQUE INDEX que garante isso
@@ -1005,6 +1067,39 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     statements.push(c.env.DB.prepare(`INSERT INTO event_temporal_details (entity_id,era_id,historical_date,sort_key,precision,calendar_id,calendar_year,calendar_month_index,calendar_day,display_text,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(newEntityId, resolvedEraId, item.input.historicalDate, item.input.sortKey, item.input.precision, newCalendarId, calendarDate?.year ?? null, calendarDate?.monthIndex ?? null, calendarDate?.day ?? null, item.input.displayText, now));
     eventTemporalDetailsCreated += 1;
+  }
+
+  // ---- Adventures estruturadas (F-025): Scene -> Encounter/SceneEntity; Handout. ----
+  const adventureSceneIdMap = new Map<string, string>();
+  for (const item of plan.adventureScenes) {
+    const newAdventureEntityId = entityIdMap.get(item.oldAdventureEntityId); if (!newAdventureEntityId) continue;
+    const newId = crypto.randomUUID();
+    statements.push(c.env.DB.prepare('INSERT INTO adventure_scenes (id,adventure_entity_id,sort_order,act,title,summary,read_aloud,gm_notes,completed_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(newId, newAdventureEntityId, item.input.sortOrder, item.input.act, item.input.title, item.input.summary, item.input.readAloud, item.input.gmNotes, item.input.completed ? now : null, now, now));
+    adventureSceneIdMap.set(item.oldId, newId);
+  }
+  let adventureEncountersCreated = 0;
+  for (const item of plan.adventureEncounters) {
+    const newSceneId = adventureSceneIdMap.get(item.oldSceneId); if (!newSceneId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO adventure_encounters (id,scene_id,sort_order,name,difficulty,description,gm_notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(crypto.randomUUID(), newSceneId, item.input.sortOrder, item.input.name, item.input.difficulty, item.input.description, item.input.gmNotes, now, now));
+    adventureEncountersCreated += 1;
+  }
+  let adventureSceneEntitiesCreated = 0;
+  for (const item of plan.adventureSceneEntities) {
+    const newSceneId = adventureSceneIdMap.get(item.oldSceneId); const newEntityId = entityIdMap.get(item.oldEntityId);
+    if (!newSceneId || !newEntityId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO adventure_scene_entities (scene_id,entity_id,role,created_at) VALUES (?,?,?,?)').bind(newSceneId, newEntityId, item.role, now));
+    adventureSceneEntitiesCreated += 1;
+  }
+  let adventureHandoutsCreated = 0;
+  for (const item of plan.adventureHandouts) {
+    const newAdventureEntityId = entityIdMap.get(item.oldAdventureEntityId); if (!newAdventureEntityId) continue;
+    const resolvedSceneId = item.oldSceneId ? adventureSceneIdMap.get(item.oldSceneId) ?? null : null;
+    const resolvedExternalResourceId = item.oldExternalResourceId ? externalResourceIdMap.get(item.oldExternalResourceId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO adventure_handouts (id,adventure_entity_id,scene_id,external_resource_id,title,content,revealed_at,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .bind(crypto.randomUUID(), newAdventureEntityId, resolvedSceneId, resolvedExternalResourceId, item.input.title, item.input.content, item.input.revealed ? now : null, item.input.sortOrder, now, now));
+    adventureHandoutsCreated += 1;
   }
 
   // ---- Journal folders (2ª passagem para parent_folder_id, mesmo padrão) ----
@@ -1088,7 +1183,8 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
       sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
       wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,
-      worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourcesCreated, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
+      worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourceIdMap.size, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
+      adventureScenes: adventureSceneIdMap.size, adventureEncounters: adventureEncountersCreated, adventureSceneEntities: adventureSceneEntitiesCreated, adventureHandouts: adventureHandoutsCreated,
     },
     warnings: confirmWarnings,
   });
