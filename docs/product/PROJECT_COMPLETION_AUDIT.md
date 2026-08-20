@@ -83,7 +83,7 @@ de `vtt-realtime.test.ts`).
 
 | Item do pedido | Seção | Status | Observação |
 |---|---|---|---|
-| Multi-GM (Owner + Co-GM) | 10-11 | `NOT_STARTED` | Modelo de Campaign continua single-owner. Requer: coluna/tabela de Co-GM, extensão de toda authorization de VTT/Adventures/Sessions para aceitar Co-GM, teste de concorrência real com 2 GMs simultâneos. |
+| Multi-GM (Owner + Co-GM) | 10-11 (implementado como BATCH23/F-036) | `DONE` | `campaign_co_gms` + autorização centralizada (VTT completo, handout reveal/hide, membros, sessões) + convite via fluxo social existente + revogação Owner-only + descoberta na listagem de Campaigns + 6 testes (matriz de segurança completa + realtime com 2 GMs reais). Escopo NÃO coberto nesta rodada, documentado: edição da ESTRUTURA da Adventure (scenes/encounters/handout content, distinto de reveal/hide) continua Owner-only — estender exigiria mudar a semântica single-owner de Vault Entity, mudança arquitetural maior fora de escopo. |
 | QA funcional de Player View integrada | 12 | `NOT_RE-AUDITED` | F-033 permanece `DONE` da implementação original; nenhuma auditoria FRESCA foi rodada nesta rodada além do que os testes de restore tocam incidentalmente. |
 | QA funcional de GM View integrada | 13 | `NOT_RE-AUDITED` | Idem, F-034. |
 | One-Shot E2E completo (desktop+mobile) | 14 | `NOT_RE-VALIDATED` | Corrigido em rodada anterior (discoverability); não reexecutado nesta rodada. |

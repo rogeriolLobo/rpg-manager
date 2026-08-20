@@ -268,6 +268,12 @@ socialRoutes.post('/invites/:id/accept', async (c) => {
     if (invite.role === 'GM') statements.push(c.env.DB.prepare('UPDATE campaign_members SET is_game_master=0,updated_at=? WHERE campaign_id=? AND is_game_master=1').bind(now, invite.target_id));
     statements.push(c.env.DB.prepare('INSERT INTO campaign_members (id,campaign_id,player_name,user_id,notes,active,is_game_master,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?,?)')
       .bind(memberId, invite.target_id, displayName, userId, '', invite.role === 'GM' ? 1 : 0, now, now));
+    // BATCH23 (Multi-GM): is_game_master acima é só o rótulo de exibição pré-existente (nunca
+    // dá poder administrativo real, ver comentário em migrations/0041_campaign_co_gms.sql) —
+    // campaign_co_gms é a autorização de verdade, concedida aqui sem demotar nenhum outro
+    // Co-GM já existente (a Campaign aceita Owner + 0..N Co-GMs simultâneos).
+    if (invite.role === 'GM') statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO campaign_co_gms (campaign_id,user_id,created_at,created_by) VALUES (?,?,?,?)')
+      .bind(invite.target_id, userId, now, invite.inviter_user_id));
   }
   statements.push(notify(c.env, invite.inviter_user_id, 'SOCIAL_INVITE_ACCEPTED', { userId, targetType: invite.target_type, targetId: invite.target_id }));
   await c.env.DB.batch(statements);

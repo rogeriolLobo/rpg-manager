@@ -1,15 +1,19 @@
 import { Hono, type Context } from 'hono';
 import { vttCombatantInputSchema, vttCombatStartSchema, vttFogCellInputSchema, vttSceneInputSchema, vttTokenInputSchema } from '../../shared/validation/schemas';
 import type { VttGmScenePayload, VttPlayerScenePayload, VttRealtimeStateReason } from '../../domain/vtt-realtime';
-import { ownedEntity } from '../content/authorization';
+import { authorizeCampaignManagement, authorizeCampaignParticipation, ownedEntity } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
 
 // F-029/F-030 (BATCH16): VTT — fundação (Scene/Map/tokens) + fog of war, sem realtime — ver
-// migrations/0037_vtt_foundation.sql e migrations/0038_vtt_fog.sql. Escrita é sempre
-// owner-only (mesmo modelo de todo o resto de campaigns.ts — membros com is_game_master=1
-// hoje só têm leitura em qualquer parte do produto, nunca escrita; não é uma restrição nova
-// criada aqui).
+// migrations/0037_vtt_foundation.sql e migrations/0038_vtt_fog.sql.
+//
+// BATCH23 (Multi-GM, Seção 2-3 do pedido de finalização): escrita deixou de ser estritamente
+// owner-only — Owner OU Co-GM (campaign_co_gms, migration 0041) via
+// authorizeCampaignManagement() (src/server/content/authorization.ts), centralizado ali para
+// nunca espalhar a checagem por cada rota. Membros comuns (is_game_master=1 ou não) continuam
+// só com leitura filtrada via GET /live — isso não mudou; Co-GM é uma autorização própria,
+// nunca derivada do rótulo de exibição is_game_master de campaign_members.
 //
 // GET /:campaignId/live é o único ponto do VTT onde alguém além do dono lê dados — por isso o
 // filtro de visibilidade é aplicado sempre, para todo mundo, mesmo o dono (quem quiser o
@@ -45,8 +49,7 @@ function presentToken(row: TokenRow) { return { id: row.id, sceneId: row.scene_i
 function presentPlayerToken(row: TokenRow) { return { id: row.id, label: row.label, x: row.x, y: row.y }; }
 
 async function ownedCampaignId(c: AppContext, id: string): Promise<string> {
-  const row = await c.env.DB.prepare('SELECT id FROM campaigns WHERE id=? AND user_id=?').bind(id, c.get('user').id).first();
-  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+  await authorizeCampaignManagement(c, id); // Owner OU Co-GM — ver comentário no topo do arquivo
   return id;
 }
 async function ownedScene(c: AppContext, campaignId: string, sceneId: string): Promise<SceneRow> {
@@ -373,17 +376,43 @@ vttRoutes.delete('/:campaignId/scenes/:sceneId/combat/combatants/:combatantId', 
   return c.body(null, 204);
 });
 
+// BATCH23 (Multi-GM, Seção 3 do pedido de finalização — "revelar/ocultar handouts" está na
+// lista do que Co-GM pode fazer): reveal/hide ESCOPADOS POR CAMPANHA, autorizados via
+// authorizeCampaignManagement (Owner OU Co-GM) — nunca a rota de adventures.ts
+// (PATCH /adventures/:adventureId/handouts/:handoutId), que continua exigindo posse da Vault
+// Entity (owner_user_id do dono da Adventure) e por isso não pode ser aberta a um Co-GM sem
+// estender a semântica single-owner de Vault Entity — mudança maior, fora do escopo desta
+// rodada (ver docs/product/MASTER_BACKLOG.md). O handout precisa pertencer à Adventure
+// vinculada à MESMA Campaign (campaigns.adventure_entity_id) — nunca um handout de outra
+// Adventure do Owner.
+async function toggleCampaignHandout(c: AppContext, campaignId: string, handoutId: string, reveal: boolean): Promise<void> {
+  await authorizeCampaignManagement(c, campaignId);
+  const campaign = await c.env.DB.prepare('SELECT adventure_entity_id FROM campaigns WHERE id=?').bind(campaignId).first<{ adventure_entity_id: string | null }>();
+  if (!campaign?.adventure_entity_id) throw new ApiError(404, 'NOT_FOUND', 'Handout não encontrado.');
+  const handout = await c.env.DB.prepare('SELECT revealed_at FROM adventure_handouts WHERE id=? AND adventure_entity_id=?').bind(handoutId, campaign.adventure_entity_id).first<{ revealed_at: string | null }>();
+  if (!handout) throw new ApiError(404, 'NOT_FOUND', 'Handout não encontrado.');
+  const wasRevealed = handout.revealed_at !== null;
+  if (wasRevealed === reveal) return; // já está no estado pedido — no-op idempotente, sem notificar de novo
+  await c.env.DB.prepare('UPDATE adventure_handouts SET revealed_at=? WHERE id=?').bind(reveal ? nowIso() : null, handoutId).run();
+  await notifyRoom(c.env, campaignId, reveal ? 'HANDOUT_REVEALED' : 'HANDOUT_HIDDEN');
+}
+vttRoutes.post('/:campaignId/handouts/:handoutId/reveal', async (c) => {
+  await toggleCampaignHandout(c, c.req.param('campaignId'), c.req.param('handoutId'), true);
+  return c.json({ success: true });
+});
+vttRoutes.post('/:campaignId/handouts/:handoutId/hide', async (c) => {
+  await toggleCampaignHandout(c, c.req.param('campaignId'), c.req.param('handoutId'), false);
+  return c.json({ success: true });
+});
+
 // Checagem de authorization compartilhada entre GET /live e a rota de upgrade de WebSocket
 // (F-031) — dono OU membro ativo da Campaign. Não-membro sempre recebe 404 (nunca 403 — mesmo
 // padrão anti-enumeração do resto do produto), e o papel (GM/PLAYER) é resolvido aqui, no
 // servidor, nunca aceito de um valor informado pelo client.
 async function authorizeLiveAccess(c: AppContext, campaignId: string): Promise<'GM' | 'PLAYER'> {
-  const userId = c.get('user').id;
-  const access = await c.env.DB.prepare(`SELECT c.id, c.user_id owner_id,
-    (c.user_id=? OR EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.user_id=? AND cm.active=1)) authorized
-    FROM campaigns c WHERE c.id=?`).bind(userId, userId, campaignId).first<{ id: string; owner_id: string; authorized: number }>();
-  if (!access || !access.authorized) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
-  return access.owner_id === userId ? 'GM' : 'PLAYER';
+  // BATCH23: Co-GM resolve como 'GM' — mesmo tipo já usado pelo protocolo realtime (nenhuma
+  // mudança de schema/mensagem necessária). Ver authorizeCampaignParticipation.
+  return authorizeCampaignParticipation(c, campaignId);
 }
 
 vttRoutes.get('/:campaignId/live', async (c) => {

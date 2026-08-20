@@ -97,6 +97,54 @@ export async function ownedWorld(c: AppContext,id:string):Promise<AuthorizedWorl
   return {...row,is_world_member:1};
 }
 
+// BATCH23 (Multi-GM, Seção 3 do pedido de finalização): três níveis distintos de acesso a uma
+// Campaign, centralizados aqui para nunca espalhar `owner_id === userId || ...` por dezenas de
+// arquivos (campaigns.ts/vtt.ts/adventures.ts todos importam daqui, nunca reimplementam).
+// Anti-enumeração preservado: outsider e Player (quando a rota exige GM) sempre recebem 404,
+// nunca 403 — mesmo padrão do resto do produto.
+//
+// - authorizeCampaignManagement: Owner OU Co-GM. Cobre VTT (scenes/tokens/fog/combat),
+//   handout reveal/hide, sessões — tudo que a Seção 3 do pedido lista como permitido a Co-GM.
+// - authorizeCampaignOwnership: SOMENTE Owner. Cobre excluir Campaign, transferir ownership,
+//   promover/remover Co-GM, editar configurações administrativas sensíveis (PATCH da própria
+//   Campaign) — tudo que a Seção 3 lista como PROIBIDO a Co-GM, mesmo que ele already tenha
+//   passado por authorizeCampaignManagement em outra rota.
+// - authorizeCampaignParticipation: Owner, Co-GM OU Player ativo — resolve o papel realtime
+//   (GM/PLAYER) usado por VttRoomDO; Co-GM sempre resolve como 'GM' (mesmo tipo já usado pelo
+//   protocolo realtime — nenhuma mudança de schema/mensagem necessária, ver
+//   src/domain/vtt-realtime.ts).
+export type CampaignManagerRole = 'OWNER' | 'CO_GM';
+
+export async function authorizeCampaignManagement(c: AppContext, campaignId: string): Promise<CampaignManagerRole> {
+  const userId = c.get('user').id;
+  const row = await c.env.DB.prepare(
+    `SELECT c.user_id owner_id, EXISTS(SELECT 1 FROM campaign_co_gms cg WHERE cg.campaign_id=c.id AND cg.user_id=?) is_co_gm FROM campaigns c WHERE c.id=?`,
+  ).bind(userId, campaignId).first<{ owner_id: string; is_co_gm: number }>();
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+  if (row.owner_id === userId) return 'OWNER';
+  if (row.is_co_gm) return 'CO_GM';
+  throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+}
+
+export async function authorizeCampaignOwnership(c: AppContext, campaignId: string): Promise<void> {
+  const row = await c.env.DB.prepare('SELECT id FROM campaigns WHERE id=? AND user_id=?').bind(campaignId, c.get('user').id).first();
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+}
+
+export async function authorizeCampaignParticipation(c: AppContext, campaignId: string): Promise<'GM' | 'PLAYER'> {
+  const userId = c.get('user').id;
+  const row = await c.env.DB.prepare(
+    `SELECT c.user_id owner_id,
+      EXISTS(SELECT 1 FROM campaign_co_gms cg WHERE cg.campaign_id=c.id AND cg.user_id=?) is_co_gm,
+      EXISTS(SELECT 1 FROM campaign_members cm WHERE cm.campaign_id=c.id AND cm.user_id=? AND cm.active=1) is_active_member
+      FROM campaigns c WHERE c.id=?`,
+  ).bind(userId, userId, campaignId).first<{ owner_id: string; is_co_gm: number; is_active_member: number }>();
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+  if (row.owner_id === userId || row.is_co_gm) return 'GM';
+  if (row.is_active_member) return 'PLAYER';
+  throw new ApiError(404, 'NOT_FOUND', 'Campanha não encontrada.');
+}
+
 // F-022 (BATCH12): predicado de DESCOBERTA por World — NUNCA de autorização (sempre
 // combinado com entityAuthorizationPredicate/entityAuthorizationColumns na mesma query,
 // nunca usado sozinho). Uma entidade "pertence" ao seu world_id OU foi explicitamente

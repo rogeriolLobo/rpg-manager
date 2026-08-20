@@ -312,7 +312,10 @@ export function InviteFriendPanel({ targetType, targetId, allowGameMaster = true
           <label>Papel
             <select value={role} onChange={(event) => setRole(event.target.value as "PLAYER" | "GM")}>
               <option value="PLAYER">Jogador</option>
-              <option value="GM">Narrador</option>
+              {/* BATCH23 (Multi-GM): numa Campaign, aceitar como "Narrador" concede acesso real de
+                  Co-Mestre (VTT/handouts/sessões) — nunca só o rótulo de exibição que já existia
+                  para Grupos. */}
+              <option value="GM">{targetType === "CAMPAIGN" ? "Narrador (Co-Mestre — administra a mesa)" : "Narrador"}</option>
             </select>
           </label>
         )}

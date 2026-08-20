@@ -21,6 +21,9 @@ import { InviteFriendPanel } from "./social-pages";
 
 interface Campaign {
   id: string;
+  // BATCH23 (Multi-GM): Owner vs Co-GM — só para decidir o que mostrar (excluir campanha,
+  // revogar Co-GM); a autorização de verdade é sempre no servidor.
+  isOwner: boolean;
   rpgId: string;
   rpgTitle: string;
   // LIB-006: indicador para a Campaign continuar funcionando/mostrando o RPG mesmo depois de
@@ -531,6 +534,7 @@ export function CampaignDetailPage() {
           {data.item.legacyCharactersText && <p className="legacy-note"><strong>Personagens legados:</strong> {data.item.legacyCharactersText}</p>}
         </section>
         <InviteFriendPanel targetType="CAMPAIGN" targetId={id!}/>
+        <CoGmPanel campaignId={id!} isOwner={data.item.isOwner}/>
         <section className="panel">
           <h2>Planejamento</h2>
           <dl className="stacked-dl">
@@ -587,11 +591,48 @@ export function CampaignDetailPage() {
           <p>Nenhuma sessão registrada ainda.</p>
         )}
       </section>
-      <button className="danger-button" onClick={() => void remove()}>
-        <Trash2 size={17} />
-        Excluir campanha
-      </button>
+      {data.item.isOwner && (
+        <button className="danger-button" onClick={() => void remove()}>
+          <Trash2 size={17} />
+          Excluir campanha
+        </button>
+      )}
     </div>
+  );
+}
+
+// BATCH23 (Multi-GM, Seção 4 do pedido de finalização): lista de Co-GMs + revogar (Owner-only
+// no servidor — authorizeCampaignOwnership; o botão só aparece para o Owner aqui por UX, nunca
+// como a barreira real). Conceder acesso continua pelo fluxo já existente de convite social
+// (InviteFriendPanel, papel "Narrador (Co-GM)" — aceitar já grava em campaign_co_gms, ver
+// src/server/routes/social.ts).
+interface CoGm { userId: string; displayName: string; createdAt: string }
+function CoGmPanel({ campaignId, isOwner }: { campaignId: string; isOwner: boolean }) {
+  const resource = useResource<{ items: CoGm[] }>(`/campaigns/${campaignId}/co-gms`);
+  const revoke = async (userId: string) => {
+    if (!confirm("Remover o acesso deste Co-GM?")) return;
+    await deleteApi(`/campaigns/${campaignId}/co-gms/${userId}`);
+    resource.reload();
+  };
+  if (resource.status !== "success" || resource.data.items.length === 0) return null;
+  return (
+    <section className="panel">
+      <h2>Co-Mestres</h2>
+      <p className="section-note">Podem administrar VTT (cenas/tokens/névoa/combate), revelar handouts e conduzir sessões. Nunca podem excluir a campanha nem transferir a posse.</p>
+      <ul className="clean-list">
+        {resource.data.items.map((coGm) => (
+          <li key={coGm.userId}>
+            <span>{coGm.displayName}</span>
+            {isOwner && (
+              <button className="ghost-button" onClick={() => void revoke(coGm.userId)}>
+                <Trash2 size={15} />
+                Remover
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
