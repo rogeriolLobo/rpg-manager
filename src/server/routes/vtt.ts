@@ -116,7 +116,10 @@ export async function buildGmLiveScenePayload(db: D1Database, campaignId: string
 // jogadores, updates medidos em segundos) e evita o cliente nunca saber se o broadcast
 // realmente foi disparado. Se o Durable Object estiver indisponível, o polling de fallback
 // (VttLivePage) eventualmente converge sozinho.
-async function notifyRoom(env: Env, campaignId: string, reason: VttRealtimeStateReason): Promise<void> {
+// Exportado para adventures.ts poder notificar a(s) Campaign(s) que usam uma Adventure quando
+// um handout é revelado/ocultado (F-009 da correção de finalização) — mesma função, nunca uma
+// reimplementação paralela do broadcast.
+export async function notifyRoom(env: Env, campaignId: string, reason: VttRealtimeStateReason): Promise<void> {
   try {
     const stub = env.VTT_ROOMS.get(env.VTT_ROOMS.idFromName(campaignId));
     await stub.fetch('https://vtt-room.internal/broadcast', { method: 'POST', body: JSON.stringify({ reason }) });

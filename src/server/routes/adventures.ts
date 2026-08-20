@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono';
 import { adventureEncounterInputSchema, adventureHandoutInputSchema, adventureSceneEntityInputSchema, adventureSceneInputSchema, type AdventureHandoutInput } from '../../shared/validation/schemas';
 import { ownedEntity, type AuthorizedEntityRow } from '../content/authorization';
 import { ApiError, nowIso, readJson } from '../http';
+import { notifyRoom } from './vtt';
 import type { AppVariables, Env } from '../types';
 
 // F-025 (BATCH13): Adventures aprofundadas — acts/scenes/encounters/handouts,
@@ -146,8 +147,20 @@ adventureRoutes.post('/:adventureId/handouts', async (c) => {
   const id = crypto.randomUUID(), now = nowIso();
   await c.env.DB.prepare('INSERT INTO adventure_handouts (id,adventure_entity_id,scene_id,external_resource_id,title,content,revealed_at,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
     .bind(id, adventureId, input.sceneId ?? null, input.externalResourceId ?? null, input.title, input.content, input.revealed ? now : null, input.sortOrder, now, now).run();
+  if (input.revealed) await notifyHandoutRevealChange(c, adventureId, 'HANDOUT_REVEALED');
   return c.json({ id }, 201);
 });
+
+// Seção 9 da correção de finalização (Handout reveal via realtime): sempre que revealed_at
+// muda de estado (nunca revelado -> revelado, ou revelado -> oculto), notifica toda Campaign
+// que atualmente usa esta Adventure (campaigns.adventure_entity_id) — mesma Adventure pode
+// servir múltiplas mesas (CLAUDE.md §26), então notifica TODAS, nunca só uma suposta "atual".
+// Best-effort (mesmo princípio de notifyRoom: nunca derruba a resposta HTTP), depois da escrita
+// em D1 já ter sido commitada.
+async function notifyHandoutRevealChange(c: AppContext, adventureEntityId: string, reason: 'HANDOUT_REVEALED' | 'HANDOUT_HIDDEN'): Promise<void> {
+  const campaigns = await c.env.DB.prepare('SELECT id FROM campaigns WHERE adventure_entity_id=?').bind(adventureEntityId).all<{ id: string }>();
+  await Promise.all(campaigns.results.map((row) => notifyRoom(c.env, row.id, reason)));
+}
 
 adventureRoutes.patch('/:adventureId/handouts/:handoutId', async (c) => {
   const adventureId = c.req.param('adventureId'); const adventure = await ownedAdventure(c, adventureId);
@@ -157,8 +170,12 @@ adventureRoutes.patch('/:adventureId/handouts/:handoutId', async (c) => {
   const input = await readJson(c, adventureHandoutInputSchema);
   await validHandoutRefs(c, adventure.world_id, input, adventureId);
   const now = nowIso();
+  const newRevealedAt = input.revealed ? (current.revealed_at ?? now) : null;
   await c.env.DB.prepare('UPDATE adventure_handouts SET scene_id=?,external_resource_id=?,title=?,content=?,revealed_at=?,sort_order=?,updated_at=? WHERE id=?')
-    .bind(input.sceneId ?? null, input.externalResourceId ?? null, input.title, input.content, input.revealed ? (current.revealed_at ?? now) : null, input.sortOrder, now, handoutId).run();
+    .bind(input.sceneId ?? null, input.externalResourceId ?? null, input.title, input.content, newRevealedAt, input.sortOrder, now, handoutId).run();
+  const wasRevealed = current.revealed_at !== null;
+  const isRevealed = newRevealedAt !== null;
+  if (wasRevealed !== isRevealed) await notifyHandoutRevealChange(c, adventureId, isRevealed ? 'HANDOUT_REVEALED' : 'HANDOUT_HIDDEN');
   return c.json({ success: true });
 });
 
@@ -166,5 +183,9 @@ adventureRoutes.delete('/:adventureId/handouts/:handoutId', async (c) => {
   const adventureId = c.req.param('adventureId'); await ownedAdventure(c, adventureId);
   const result = await c.env.DB.prepare('DELETE FROM adventure_handouts WHERE id=? AND adventure_entity_id=?').bind(c.req.param('handoutId'), adventureId).run();
   if (!result.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Handout não encontrado.');
+  // Excluir um handout revelado também precisa sumir da visão do jogador sem esperar o próximo
+  // poll — nunca sabemos aqui se estava revelado sem uma query a mais, então notifica sempre
+  // (over-notificar é inofensivo: o client só refaz a busca, nenhum conteúdo é enviado no evento).
+  await notifyHandoutRevealChange(c, adventureId, 'HANDOUT_HIDDEN');
   return c.body(null, 204);
 });

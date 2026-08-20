@@ -9,7 +9,7 @@
 // frontend animar/destacar por tipo de evento) sem o custo de correção de diffs parciais.
 
 export const VTT_REALTIME_STATE_REASONS = [
-  'SNAPSHOT', 'SCENE_CHANGED', 'TOKEN_MOVED', 'FOG_CHANGED', 'COMBAT_UPDATED', 'HANDOUT_REVEALED',
+  'SNAPSHOT', 'SCENE_CHANGED', 'TOKEN_MOVED', 'FOG_CHANGED', 'COMBAT_UPDATED', 'HANDOUT_REVEALED', 'HANDOUT_HIDDEN',
 ] as const;
 export type VttRealtimeStateReason = typeof VTT_REALTIME_STATE_REASONS[number];
 

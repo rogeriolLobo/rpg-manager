@@ -1,4 +1,5 @@
 import { CalendarDays, Shield, Swords } from 'lucide-react';
+import { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
@@ -37,9 +38,29 @@ export function PlayerCampaignsPage(){
 interface PlayerCampaignHome { id:string; name:string; status:string; rpgTitle:string; gameMaster:string; nextSessionDate:string|null; characterName:string; characterEntityId:string|null; hasActiveScene:boolean }
 interface PlayerHandout { id:string; title:string; content:string; externalResourceTitle:string|null }
 
+// Seção 9 da correção de finalização (Handout reveal via realtime): o GM revela/oculta um
+// handout via PATCH /adventures/.../handouts/:id, que já notifica o Durable Object da(s)
+// Campaign(s) que usam a Adventure (ver adventures.ts). Esta página ainda não abre o WebSocket
+// (isso vive hoje só no VttLivePage) — poll leve, pausado quando a aba não está em foco, mesmo
+// princípio Zero-Cost já validado/documentado para o realtime de VTT (F-031: polling é uma
+// estratégia realtime aceita, não um fallback de segunda classe). Suficiente para o jogador ver
+// um handout revelado sem precisar recarregar a página manualmente.
+const PLAYER_HOME_POLL_INTERVAL_MS = 8000;
+
 export function PlayerCampaignHomePage(){
   const {id}=useParams();
   const home=useResource<{item:PlayerCampaignHome;handouts:PlayerHandout[]}>(id?`/campaigns/${id}/player-home`:null);
+  useEffect(()=>{
+    if(!id)return;
+    let timer:ReturnType<typeof setInterval>|null=null;
+    const start=()=>{if(!timer)timer=setInterval(()=>home.reload(),PLAYER_HOME_POLL_INTERVAL_MS);};
+    const stop=()=>{if(timer){clearInterval(timer);timer=null;}};
+    const onVisibility=()=>{if(document.visibilityState==='visible')start();else stop();};
+    if(document.visibilityState==='visible')start();
+    document.addEventListener('visibilitychange',onVisibility);
+    return ()=>{stop();document.removeEventListener('visibilitychange',onVisibility);};
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload já é estável o bastante para este poll (mesmo padrão já usado em VttLivePage)
+  },[id]);
   const characterId=home.status==='success'?home.data.item.characterEntityId:null;
   // GET /vault/:id já aplica a mesma barreira de visibility PLAYERS/CAMPAIGN via
   // campaign_entities (authorizedEntity, reaproveitado) — nenhuma autorização nova aqui.
