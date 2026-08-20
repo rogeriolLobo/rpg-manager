@@ -79,6 +79,36 @@ describe('F-015: Backup/Restore completo', () => {
     expect(backup.data.entityRevisions.length).toBeGreaterThan(0);
   });
 
+  it('F-015 Seção 24 — fechamento semântico: preview avisa explicitamente que Revision History (ARCHIVAL_HISTORY) e Notifications (EPHEMERAL_USER_ACTIVITY) nunca são restauradas operacionalmente', async () => {
+    const owner = await register('backup-semantic-closure-owner');
+    const other = await register('backup-semantic-closure-other');
+    // Gera pelo menos uma entity_revision real (CREATE de World) para o dono do backup.
+    await createWorld(owner, 'Mundo com Histórico');
+    // Gera pelo menos uma notification real para o dono do backup: pedido de amizade recebido.
+    const friendRequest = await request('/social/requests', 'POST', { targetUserId: owner.userId }, other);
+    expect(friendRequest.status).toBe(201);
+
+    const backup = await exportBackup(owner);
+    expect(backup.data.entityRevisions.length).toBeGreaterThan(0);
+    expect(backup.data.notifications.length).toBeGreaterThan(0);
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { jobId: string; warnings: Array<{ domain: string; category?: string; message: string }> };
+    const revisionWarning = previewBody.warnings.find((warning) => warning.domain === 'entityRevisions');
+    const notificationWarning = previewBody.warnings.find((warning) => warning.domain === 'notifications');
+    expect(revisionWarning?.category).toBe('ARCHIVAL_HISTORY');
+    expect(notificationWarning?.category).toBe('EPHEMERAL_USER_ACTIVITY');
+
+    // Nunca reinjetadas como estado operacional: o restore não tem sequer uma chave 'entityRevisions'
+    // ou 'notifications' no seu contador de restaurados — decisão deliberada, não lacuna silenciosa.
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored.entityRevisions).toBeUndefined();
+    expect(confirmBody.restored.notifications).toBeUndefined();
+  });
+
   it('round-trip completo: World + hierarquia de Location + Creature com ficha + Journal com pastas aninhadas', async () => {
     const owner = await register('backup-roundtrip');
     const worldId = await createWorld(owner, 'Mundo Original');
@@ -95,10 +125,14 @@ describe('F-015: Backup/Restore completo', () => {
 
     const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
     expect(preview.status).toBe(200);
-    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number>; warnings: unknown[]; canConfirm: boolean };
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number>; warnings: Array<{ domain: string; category?: string }>; canConfirm: boolean };
     expect(previewBody.canConfirm).toBe(true);
     expect(previewBody.summary).toMatchObject({ worlds: 1, creatureStatTemplates: 1, entities: 3, journalFolders: 2, journalPages: 1 });
-    expect(previewBody.warnings).toHaveLength(0);
+    // Nenhum aviso de PERDA de dado (SKIP/CONFLICT/EXTERNAL_DEPENDENCY/MISSING_ASSET) — o único
+    // aviso esperado é o fechamento semântico da Seção 24 (ARCHIVAL_HISTORY), sempre presente
+    // quando o backup contém entity_revisions, o que este cenário sempre gera.
+    expect(previewBody.warnings.filter((warning) => warning.category !== 'ARCHIVAL_HISTORY' && warning.category !== 'EPHEMERAL_USER_ACTIVITY')).toHaveLength(0);
+    expect(previewBody.warnings.find((warning) => warning.domain === 'entityRevisions')?.category).toBe('ARCHIVAL_HISTORY');
 
     const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
     expect(confirm.status).toBe(200);

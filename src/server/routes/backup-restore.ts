@@ -212,7 +212,7 @@ const restorePlanSchema = z.strictObject({
   userBlocks: z.array(z.strictObject({ blockerUserId: z.string(), blockedUserId: z.string() })),
   socialInvites: z.array(z.strictObject({ inviterUserId: z.string(), inviteeUserId: z.string(), targetType: z.enum(['GROUP', 'CAMPAIGN']), oldTargetId: z.string(), role: z.enum(['PLAYER', 'GM']) })),
   rpgSocialInterests: z.array(z.strictObject({ oldRpgId: z.string() })),
-  warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
+  warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET', 'ARCHIVAL_HISTORY', 'EPHEMERAL_USER_ACTIVITY']).optional() })),
 });
 
 async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise<RestorePlan> {
@@ -869,6 +869,25 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     if (!libraryOldIds.has(oldRpgId)) continue;
     rpgSocialInterests.push({ oldRpgId });
   }
+
+  // ---- Fechamento semântico F-015 Seção 24: Revision History e Notifications são exportados
+  // no backup (GET /export), mas NUNCA reinjetados como estado operacional pelo restore — isto é
+  // uma decisão de produto explícita, não uma lacuna de implementação, e o preview precisa dizer
+  // isso claramente ao usuário (nunca apenas silenciar os dois domínios).
+  //
+  // REVISION HISTORY (entity_revisions) -> ARCHIVAL_HISTORY: restaurar essas linhas remapeando
+  // resource_id para o novo ambiente produziria uma timeline FALSA (ex.: uma revisão "editado em
+  // 2025-03-01" carimbada num recurso que, no ambiente novo, acabou de ser criado agora) — pior
+  // que não ter histórico nenhum. O histórico do ambiente ORIGINAL fica preservado no arquivo de
+  // backup (puramente arquival), mas cada recurso restaurado ganha sua própria revisão CREATE
+  // nova e honesta no ambiente novo (ver recordRevisionStatement nas rotas de create/update).
+  //
+  // NOTIFICATIONS -> EPHEMERAL_USER_ACTIVITY: toda notificação restaurada apontaria para IDs
+  // antigos (remetente, recurso referenciado) que o restore sempre substitui por IDs novos —
+  // recriar a notificação geraria um link quebrado/enganoso ("ver convite" apontando para nada).
+  // Notificação é atividade efêmera do usuário, não estado de domínio; nunca é recriada.
+  if (rowsOf(data, 'entityRevisions').length > 0) warnings.push({ domain: 'entityRevisions', oldId: '*', message: 'Histórico de revisões (Revision History) não é reinjetado como histórico operacional — cada recurso restaurado recebe uma nova revisão de criação no ambiente atual. O histórico original permanece preservado apenas dentro deste arquivo de backup.', category: 'ARCHIVAL_HISTORY' });
+  if (rowsOf(data, 'notifications').length > 0) warnings.push({ domain: 'notifications', oldId: '*', message: 'Notificações não são restauradas — referenciam IDs do ambiente original que o restore sempre substitui, e recriá-las geraria notificações quebradas. Notificação é considerada atividade efêmera do usuário, não estado de domínio.', category: 'EPHEMERAL_USER_ACTIVITY' });
 
   return {
     worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,

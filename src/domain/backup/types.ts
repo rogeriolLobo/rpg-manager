@@ -21,15 +21,26 @@ export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
 // Files/Handouts: metadata restaurada junto com os bytes reais via o BUNDLE separado
 // (GET/POST /api/v1/files/backup — ver src/server/routes/files.ts, BATCH21/Seção 8 do pedido
 // de finalização) — nunca embutido no JSON principal (bytes não cabem no armazenamento do job
-// de preview/confirm em D1). Revision History continua coberta pelo EXPORT mas sem restore
-// automatizado (repor o histórico exigiria uma linha do tempo artificial "no meio" do
-// histórico real do dono; toda entidade/World/página restaurada já ganha uma revisão CREATE
-// inicial própria, com paridade total de comportamento a partir do dia da restauração).
+// de preview/confirm em D1). Revision History e Notifications continuam cobertas pelo EXPORT
+// (fonte arquival completa) mas NUNCA são reinjetadas como estado operacional pelo restore —
+// fechamento semântico formal, Seção 24 do pedido de finalização:
+//
+// - Revision History (entity_revisions) -> categoria ARCHIVAL_HISTORY: repor o histórico
+//   remapeando resource_id produziria uma linha do tempo FALSA (uma revisão antiga carimbada
+//   num recurso que acabou de nascer no ambiente novo). Toda entidade/World/página restaurada
+//   já ganha sua própria revisão CREATE honesta a partir do dia da restauração; o histórico do
+//   ambiente original permanece só dentro do arquivo de backup (puramente arquival).
+// - Notifications -> categoria EPHEMERAL_USER_ACTIVITY: o payload de toda notificação referencia
+//   IDs do ambiente original que o restore sempre substitui — recriá-la geraria uma notificação
+//   quebrada (link para um recurso que não existe sob o novo ID). Notificação é atividade
+//   efêmera do usuário, não estado de domínio, e nunca é recriada pelo restore.
 export interface BackupRestoreWarning {
   domain: string; oldId: string; message: string;
   // Categoria explícita do achado (Seção 6 do pedido de finalização) — quando ausente, o
   // achado é um SKIP simples (campo/relação descartada, resto do registro é restaurado).
-  category?: 'SKIP' | 'CONFLICT' | 'EXTERNAL_DEPENDENCY' | 'MISSING_ASSET';
+  // ARCHIVAL_HISTORY/EPHEMERAL_USER_ACTIVITY (Seção 24): domínio inteiro é intencionalmente
+  // nunca restaurado operacionalmente, por decisão semântica documentada acima — não uma lacuna.
+  category?: 'SKIP' | 'CONFLICT' | 'EXTERNAL_DEPENDENCY' | 'MISSING_ASSET' | 'ARCHIVAL_HISTORY' | 'EPHEMERAL_USER_ACTIVITY';
 }
 
 export interface BackupRestorePreviewSummary {

@@ -19,7 +19,15 @@ em CI, não relatórios anteriores.
 
 ## 1. O que foi entregue nesta rodada (BATCH20-22)
 
-### F-015 — Backup/Restore completo — `IN_PROGRESS` (era `DONE`, reclassificado)
+### F-015 — Backup/Restore completo — `DONE`
+
+Fechamento semântico final (Seção 24 do pedido de finalização) concluído
+nesta rodada: Revision History e Notifications, os dois únicos domínios
+que ainda estavam com decisão de restore implícita/não classificada
+formalmente, agora têm categoria explícita (`ARCHIVAL_HISTORY` /
+`EPHEMERAL_USER_ACTIVITY`) surfaced no preview, com teste dedicado. Todo
+o restante do escopo v1 do restore automatizado já estava `DONE` de
+rodadas anteriores (tabela abaixo).
 
 O restore automatizado (`POST /import/backup/preview` + `/confirm`) foi
 expandido de 6 domínios (Worlds/Creature Stat Templates/Vault/Journal/
@@ -41,8 +49,8 @@ world_entity_links) para cobrir também:
 | Social (friendships/blocks/invites) | `DONE` | regra própria: só restaura quando quem restaura é uma das partes reais |
 | Social Library Interest | `DONE` | achado real: nunca esteve no export; corrigido (export+restore juntos) |
 | Assets (bytes reais, não só metadata) | `DONE` | bundle separado `GET/POST /api/v1/files/backup` |
-| Revision History (entity_revisions) | `NOT_STARTED` (restore) | export completo; restaurar o histórico como uma timeline artificial não foi julgado de valor real — toda entidade restaurada já ganha uma revisão CREATE própria |
-| Notifications | `NOT_STARTED` (restore, decisão) | payload_json referencia IDs sempre regenerados no restore — restaurar geraria notificações "quebradas". Decisão documentada, não lacuna. |
+| Revision History (entity_revisions) | `DONE` (decisão semântica formal — `ARCHIVAL_HISTORY`) | Export completo; restore NUNCA reinjeta como histórico operacional (produziria uma timeline falsa). Preview emite aviso explícito com `category:'ARCHIVAL_HISTORY'` sempre que o backup contém `entity_revisions` — testado em `tests/integration/backup-restore.test.ts` ("F-015 Seção 24"). |
+| Notifications | `DONE` (decisão semântica formal — `EPHEMERAL_USER_ACTIVITY`) | payload_json referencia IDs sempre regenerados no restore — restaurar geraria notificações quebradas. Preview emite aviso explícito com `category:'EPHEMERAL_USER_ACTIVITY'` sempre que o backup contém `notifications`. Mesmo teste acima cobre os dois. |
 
 **Preview categorizado (Seção 6 do pedido):** `BackupRestoreWarning.category`
 (`SKIP`/`CONFLICT`/`EXTERNAL_DEPENDENCY`/`MISSING_ASSET`) implementado e
@@ -73,9 +81,33 @@ Configurações → "Arquivos anexados".
 `PATCH/POST/DELETE /adventures/:adventureId/handouts` notifica a(s)
 Campaign(s) que usam a Adventure via o Durable Object já usado pelo
 realtime de VTT (F-031) — eventos `HANDOUT_REVEALED`/`HANDOUT_HIDDEN`,
-nunca o conteúdo do handout. Player Campaign Home ganhou poll leve (8s)
-para refletir sem reload manual. Testado com WebSocket real (mesmo padrão
-de `vtt-realtime.test.ts`).
+nunca o conteúdo do handout. Testado com WebSocket real (mesmo padrão de
+`vtt-realtime.test.ts`).
+
+**Seções 7-9 do pedido de finalização (WebSocket-first, sem duplicar
+sockets, cleanup) — fechadas nesta rodada:**
+
+- Novo hook compartilhado `src/client/api/campaign-realtime.ts`
+  (`useCampaignRealtime`) — extrai connect/reconnect com backoff/
+  ping-keepalive/RESYNC/sequence-guard/cleanup do que antes só existia
+  duplicado dentro de `VttLivePage`. Usado por `VttLivePage`,
+  `PlayerCampaignHomePage` e `VttPage` (console do GM).
+- `PlayerCampaignHomePage`: WebSocket é o canal PRIMÁRIO agora — ao
+  receber `HANDOUT_REVEALED`/`HANDOUT_HIDDEN` a UI atualiza
+  imediatamente; o poll de 8s virou fallback puro, só ativo quando
+  `!wsConnected` (nunca mais o caminho normal).
+- Achado real corrigido nesta rodada: `VttPage` (console do GM) tinha
+  ZERO assinatura de realtime — construída sob premissa explícita de
+  único GM ("já vê suas próprias mudanças via estado local"), premissa
+  que ficou falsa com o Multi-GM (Owner não via as mudanças ao vivo de
+  um Co-GM sem recarregar a página manualmente, e vice-versa). Agora usa
+  o mesmo `useCampaignRealtime`: qualquer `STATE` recarrega a lista de
+  cenas e o detalhe da cena expandida.
+- Cleanup do socket (unmount/reconnect sem acumular listeners) é
+  garantido pelo próprio `useEffect` de retorno do hook (mesmo padrão já
+  provado em `VttLivePage`); teste de integração DEDICADO provando
+  ausência de acúmulo de listeners ainda não foi escrito (pendência
+  genuína, Seção 9).
 
 ---
 
@@ -90,7 +122,7 @@ de `vtt-realtime.test.ts`).
 | Social E2E completo (jornada com 2 contas) | 15 | `PARTIAL` | Restore de Social testado; a jornada completa (pedido→aceite→biblioteca compartilhada→convite→aceite→notificação→bloqueio→remoção) não foi executada como E2E de UI nesta rodada. |
 | Character Sheet E2E completo | 16 | `NOT_STARTED` (nesta rodada) | Restore de Sheets testado via integration; fluxo completo com PDF fixture não foi executado. |
 | Adventure full flow E2E | 17 | `PARTIAL` | Restore testado via integration; fluxo completo via UI real (criar→revelar→Player recebe) não foi executado como E2E. |
-| VTT full session multi-contexto (GM-A/GM-B/Player/Outsider) | 18 | `NOT_STARTED` | Multi-GM não existe ainda; teste de 2 GMs reais depende dele. |
+| VTT full session multi-contexto (GM-A/GM-B/Player/Outsider) | 18 | `PARTIAL` | Multi-GM já existe (F-036); `tests/integration/multi-gm.test.ts` já cobre 2 GMs reais + Player + Outsider em realtime (WebSocket real via Durable Object) no nível de integração/HTTP. Falta a versão Playwright E2E com 4 browser contexts reais de UI (fixture/mapa/tokens/fog/combate/handout/reconnect ponta a ponta). |
 | Load test formal Zero-Cost | 19 | `DONE` | `tests/integration/vtt-load-test.test.ts` — 3 cenários reais (1 GM+4P, 1 GM+8P, 2 GMs+8P) contra o Worker local, contagens reais e determinísticas de HTTP/D1 writes/DO notifications/WS messages. CPU/memória não são instrumentáveis deste harness (limitação honesta, documentada — não medição fabricada). Projeção de capacidade conservadora em `docs/architecture/VTT_LOAD_TEST.md`. |
 | Proteção de Free-tier (rate limits) | 20 | `DONE` | `VTT_ACTION_RATE_LIMITER` (90/60s, toda ação de VTT) + `VTT_CONNECT_RATE_LIMITER` (20/60s, reconnect burst) + máximo de 20 conexões WebSocket simultâneas por sala (Durable Object). Testado em `tests/integration/vtt-rate-limits.test.ts` (os 429 disparam de verdade, não é só configuração sem aplicação). |
 | Busca de "parciais escondidos" (TODO/FIXME/etc.) | 22 | `DONE` | Varredura real em `src/` (regex TODO/FIXME/HACK/TEMP/PARTIAL/NOT_STARTED/coming soon/placeholder/stub, case-insensitive) — zero achados de categoria C (funcionalidade planejada incompleta). Todos os matches são categoria A: `placeholder` de formulário HTML, `Partial<T>` do TypeScript, `NOT_STARTED` como valor de enum legítimo (`ReadingStatus`), a palavra portuguesa "todo/toda" (= "every/all") capturada por coincidência léxica. `docs/audit/*` e `docs/product/RPG_MANAGER_1_0_SCOPE.md` têm `OUT_OF_SCOPE_1_0` — historicamente precisos (marcam a fronteira real da versão 1.0, hoje superada por F-020+; são registros datados, não afirmações de estado atual, então não são OBSOLETE_DOC). |
