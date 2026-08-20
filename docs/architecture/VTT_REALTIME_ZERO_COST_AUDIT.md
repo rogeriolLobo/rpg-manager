@@ -183,6 +183,38 @@ mesmo sandbox (WebSocket abre, `HELLO`/`STATE`/`COMBAT_UPDATED` chegam,
 UI atualiza sem reload) — a variável foi sempre tempo de espera, nunca
 comportamento incorreto.
 
+## Evidência real de conta (2026-08-20)
+
+`wrangler deploy` (produção real, não `--dry-run`) resolveu o binding
+`env.VTT_ROOMS (VttRoomDO) Durable Object` sem qualquer erro, sem
+prompt de billing, sem exigir cartão ou upgrade de plano — a conta
+Cloudflare real deste projeto aceitou a classe de Durable Object
+SQLite-backed no Workers Free, confirmando na prática (não só na
+documentação) a premissa corrigida desta auditoria. Deploy completo:
+Worker Version ID `e792a8b9-ca6c-4246-ac7e-0ec4b3751360`,
+`/api/v1/version` confirma `commit:"ebfc528"` em produção.
+
+O handshake de WebSocket autenticado completo contra produção
+(registrar conta → criar campanha/cena → conectar `wss://` →
+confirmar `HELLO`/`STATE`) não pôde ser automatizado nesta sessão: o
+registro de conta em produção é protegido por Turnstile, e por
+`CLAUDE.md` §39 este projeto não tenta bypass/evasão de CAPTCHA.
+**MANUAL_SMOKE_REQUIRED** — passos mínimos para quem tiver acesso
+humano ao formulário de registro:
+
+1. Registrar uma conta em https://rpg-manager.editorahuginnemuninn.workers.dev/register.
+2. Criar um RPG, uma Campanha, uma Cena em `/app/campaigns/:id/vtt`, ativá-la.
+3. Abrir `/app/campaigns/:id/vtt/live` (visão do jogador) — confirmar
+   que o badge "● Tempo real" aparece (prova que o WebSocket conectou
+   ao Durable Object real) e que mover um token/iniciar combate no
+   console do GM aparece na visão do jogador sem reload manual.
+
+Isso é o único passo de verificação que depende de interação humana —
+tudo o que podia ser comprovado sem CAPTCHA já foi (deploy real da
+conta aceitando o binding, CI verde com E2E completo num runner
+dedicado, 21 testes de integração cobrindo os mesmos cenários contra
+o runtime real de Durable Object do `vitest-pool-workers`).
+
 ## Conclusão
 
 F-031 = Durable Object (`VttRoomDO`, SQLite-backed, Free plan) +
