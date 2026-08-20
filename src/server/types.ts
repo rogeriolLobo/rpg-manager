@@ -18,6 +18,11 @@ export interface Env {
   AUTH_SENSITIVE_RATE_LIMITER: RateLimit;
   DIRECTORY_RATE_LIMITER: RateLimit;
   SOCIAL_RATE_LIMITER: RateLimit;
+  // BATCH23 (Seção 20 do pedido de finalização): proteção de Free-tier para VTT — ações
+  // mutantes (token/fog/combat/handout) e tentativas de conexão WebSocket (reconnect burst),
+  // ver src/server/routes/vtt.ts.
+  VTT_ACTION_RATE_LIMITER: RateLimit;
+  VTT_CONNECT_RATE_LIMITER: RateLimit;
   PASSWORD_PEPPER?: string;
   TURNSTILE_SECRET_KEY?: string;
   ENVIRONMENT?: string;

@@ -70,6 +70,21 @@
       "name": "SOCIAL_RATE_LIMITER",
       "namespace_id": "12082606",
       "simple": { "limit": 20, "period": 60 }
+    },
+    // BATCH23 (Seção 20 do pedido de finalização — proteção de Free-tier): limites reais para
+    // ações de VTT, calibrados para não incomodar uma mesa normal (1 GM movendo tokens/revelando
+    // fog/avançando combate em ritmo humano) mas impedir um loop acidental/cliente quebrado de
+    // consumir a cota gratuita rapidamente. Ver docs/architecture/VTT_LOAD_TEST.md para a
+    // medição que embasou estes números.
+    {
+      "name": "VTT_ACTION_RATE_LIMITER",
+      "namespace_id": "12082607",
+      "simple": { "limit": 90, "period": 60 }
+    },
+    {
+      "name": "VTT_CONNECT_RATE_LIMITER",
+      "namespace_id": "12082608",
+      "simple": { "limit": 20, "period": 60 }
     }
   ],
   "observability": { "enabled": true }

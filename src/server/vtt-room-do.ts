@@ -33,6 +33,12 @@ export class VttRoomDO extends DurableObject<Env> {
     // encaminhar aqui — isto só garante que o próprio Durable Object nunca aceita uma conexão
     // sem os três metadados que o resto da classe assume que sempre existem.
     if ((role !== 'GM' && role !== 'PLAYER') || !userId || !campaignId) return new Response('Missing connection metadata', { status: 400 });
+    // BATCH23 (Seção 20 do pedido de finalização — "max connections por room"): generoso o
+    // bastante para os cenários reais medidos (2 GMs + 8 Players = 10, mais reconexões/abas
+    // extras), mas impede uma sala de crescer sem limite (ex.: um bug de reconexão em loop no
+    // client acumulando conexões — mesmo tipo de incidente já corrigido nos testes E2E deste
+    // projeto, ver docs/architecture/VTT_LOAD_TEST.md).
+    if (this.ctx.getWebSockets().length >= 20) return new Response('Sala cheia — limite de conexões simultâneas atingido.', { status: 429 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [`role:${role}`, `user:${userId}`, `campaign:${campaignId}`]);

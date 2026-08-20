@@ -48,8 +48,19 @@ function tokenFogCell(scene: SceneRow, token: { x: number; y: number }): { col: 
 function presentToken(row: TokenRow) { return { id: row.id, sceneId: row.scene_id, entityId: row.entity_id, entityName: row.entity_name ?? null, entityType: row.entity_type ?? null, label: row.label, x: row.x, y: row.y, visibleToPlayers: Boolean(row.visible_to_players), createdAt: row.created_at, updatedAt: row.updated_at }; }
 function presentPlayerToken(row: TokenRow) { return { id: row.id, label: row.label, x: row.x, y: row.y }; }
 
+// BATCH23 (Seção 20-21 do pedido de finalização — proteção de Free-tier): limite real por
+// conta autenticada, aplicado a toda rota de GM (scenes/tokens/fog/combat, leitura e escrita)
+// via ownedCampaignId/ownedScene — nunca espalhado rota a rota. 90/60s é generoso o bastante
+// para uma mesa normal (mesmo o GM navegando rápido entre telas) mas barra um loop
+// acidental/cliente quebrado de consumir a cota gratuita do Workers Free rapidamente. 429
+// nunca vaza detalhe interno — mensagem clara, o client já sabe tratar erro genérico.
+async function checkVttActionRateLimit(c: AppContext): Promise<void> {
+  const result = await c.env.VTT_ACTION_RATE_LIMITER.limit({ key: c.get('user').id });
+  if (!result.success) throw new ApiError(429, 'RATE_LIMITED', 'Muitas ações na Mesa Virtual em pouco tempo. Aguarde um instante.');
+}
 async function ownedCampaignId(c: AppContext, id: string): Promise<string> {
   await authorizeCampaignManagement(c, id); // Owner OU Co-GM — ver comentário no topo do arquivo
+  await checkVttActionRateLimit(c);
   return id;
 }
 async function ownedScene(c: AppContext, campaignId: string, sceneId: string): Promise<SceneRow> {
@@ -430,6 +441,13 @@ vttRoutes.get('/:campaignId/realtime', async (c) => {
   const campaignId = c.req.param('campaignId');
   const role = await authorizeLiveAccess(c, campaignId);
   if (c.req.header('Upgrade') !== 'websocket') throw new ApiError(400, 'UPGRADE_REQUIRED', 'Esta rota exige upgrade de WebSocket.');
+  // BATCH23 (Seção 20 do pedido de finalização): proteção contra reconnect burst — 20
+  // tentativas de conexão/60s por conta é generoso para qualquer rede instável real (o hook
+  // client já espera WS_RECONNECT_DELAY_MS=5s entre tentativas), mas barra um loop de
+  // reconexão descontrolado. Verificado ANTES do upgrade — nunca chega a acordar o Durable
+  // Object para uma tentativa já reprovada.
+  const connectLimit = await c.env.VTT_CONNECT_RATE_LIMITER.limit({ key: c.get('user').id });
+  if (!connectLimit.success) throw new ApiError(429, 'RATE_LIMITED', 'Muitas tentativas de conexão em pouco tempo. Aguarde um instante.');
   const stub = c.env.VTT_ROOMS.get(c.env.VTT_ROOMS.idFromName(campaignId));
   // Encaminha a requisição de upgrade preservando a MESMA URL (`new Request(outraUrl, req)`
   // travava o handshake num navegador real — DevTools nunca reportava erro, o WebSocket
