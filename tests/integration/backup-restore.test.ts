@@ -424,4 +424,42 @@ describe('F-015: Backup/Restore completo', () => {
     const confirmBody = await confirm.json() as { restored: { groupMembers: number } };
     expect(confirmBody.restored.groupMembers).toBe(1);
   });
+
+  it('round-trip: Sheet Template (de World) + Character Sheet — valores revalidados contra o modelo restaurado', async () => {
+    const owner = await register('backup-sheets-roundtrip');
+    const worldId = await createWorld(owner, 'Mundo da Ficha');
+    const templateResponse = await request('/sheets/templates', 'POST', { name: 'Modelo de Herói', description: '', worldId, gameSystemId: null, fields: [{ key: 'forca', label: 'Força', type: 'NUMBER', required: true }, { key: 'nome', label: 'Nome', type: 'TEXT', required: false }], pdfUrl: null, pdfMapping: {} }, owner);
+    expect(templateResponse.status).toBe(201);
+    const characterId = await createEntity(owner, { entityType: 'CHARACTER', name: 'Herói', worldId });
+    const putResponse = await request(`/sheets/entities/${characterId}`, 'PUT', { templateId: ((await templateResponse.json()) as { id: string }).id, values: { forca: 15, nome: 'Aldric' } }, owner);
+    expect(putResponse.status).toBe(200);
+
+    const backup = await exportBackup(owner);
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    const previewBody = await preview.json() as { jobId: string; summary: { sheetTemplates: number; characterSheets: number } };
+    expect(previewBody.summary).toMatchObject({ sheetTemplates: 1, characterSheets: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    const confirmBody = await confirm.json() as { restored: { sheetTemplates: number; characterSheets: number } };
+    expect(confirmBody.restored).toMatchObject({ sheetTemplates: 1, characterSheets: 1 });
+
+    const worlds = await request('/worlds?pageSize=50', 'GET', undefined, owner);
+    const worldItems = ((await worlds.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredWorldId = worldItems.find((item) => item.name === 'Mundo da Ficha' && item.id !== worldId)!.id;
+    const restoredEntities = await request(`/vault?worldId=${restoredWorldId}&pageSize=50`, 'GET', undefined, owner);
+    const restoredCharacterId = ((await restoredEntities.json()) as { items: Array<{ id: string }> }).items[0].id;
+
+    const sheetDetail = await request(`/sheets/entities/${restoredCharacterId}`, 'GET', undefined, owner);
+    const sheetBody = await sheetDetail.json() as { item: { templateId: string; values: Record<string, unknown> } | null };
+    expect(sheetBody.item).toBeTruthy();
+    expect(sheetBody.item!.templateId).not.toBe('');
+    expect(sheetBody.item!.values).toMatchObject({ forca: 15, nome: 'Aldric' });
+
+    const templates = await request('/sheets/templates', 'GET', undefined, owner);
+    const templateItems = ((await templates.json()) as { items: Array<{ id: string; name: string; worldId: string | null }> }).items;
+    expect(templateItems.filter((item) => item.name === 'Modelo de Herói')).toHaveLength(2);
+    const restoredTemplate = templateItems.find((item) => item.name === 'Modelo de Herói' && item.worldId === restoredWorldId)!;
+    expect(restoredTemplate).toBeTruthy();
+    expect(sheetBody.item!.templateId).toBe(restoredTemplate.id); // vínculo remapeado, nunca o modelo original
+  });
 });

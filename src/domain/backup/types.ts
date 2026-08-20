@@ -40,4 +40,6 @@ export interface BackupRestorePreviewSummary {
   campaigns: number;
   campaignMembers: number;
   campaignSessions: number;
+  sheetTemplates: number;
+  characterSheets: number;
 }

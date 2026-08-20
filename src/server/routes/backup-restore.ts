@@ -35,13 +35,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
-  campaignInputSchema, creatureStatTemplateInputSchema, journalFolderInputSchema, journalPageInputSchema,
-  memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema,
+  campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, journalFolderInputSchema, journalPageInputSchema,
+  memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema,
   vaultEntityInputSchema, worldInputSchema,
-  type CampaignInput, type CreatureStatTemplateInput, type JournalPageInput, type RpgInput, type VaultEntityInput, type WorldInput,
+  type CampaignInput, type CreatureStatTemplateInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
 import { SUPPORTED_BACKUP_SCHEMA_VERSION, type BackupRestoreWarning } from '../../domain/backup/types';
+import { validateSheet } from '../../domain/sheets';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import { hashSecret } from '../security/crypto';
 import { recordRevisionStatement } from '../content/revisions';
@@ -78,7 +79,7 @@ interface WorldEntityLinkPlanItem { oldWorldId: string; oldEntityId: string }
 // deliberadamente deixava esses domínios export-only (ver histórico do comentário no topo do
 // arquivo). Reclassificado: agora fazem parte do restore automatizado, na ordem de dependência
 // Library -> Groups/GroupMembers -> Campaigns -> CampaignMembers -> Sessions/Attendance.
-interface LibraryPlanItem { oldId: string; oldPlayGroupId: string | null; input: RpgInput }
+interface LibraryPlanItem { oldId: string; oldPlayGroupId: string | null; oldGameSystemId: string | null; input: RpgInput }
 interface GroupPlanItem { oldId: string; input: { name: string; notes: string } }
 interface GroupMemberPlanItem { oldId: string; oldGroupId: string; oldUserId: string | null; input: { playerName: string; notes: string; active: boolean; isGameMaster: boolean } }
 interface CampaignPlanItem { oldId: string; oldRpgId: string; oldPlayGroupId: string | null; oldAdventureEntityId: string | null; input: CampaignInput }
@@ -90,11 +91,16 @@ interface CampaignSessionPlanItem {
   oldId: string; oldCampaignId: string; sessionNumber: number; oldAttendeeMemberIds: string[];
   input: { title: string; playedAt: string; summary: string; gmNotes: string; nextHooks: string };
 }
+// F-020/F-021/F-023: Sheet Templates + Character Sheets — mesmo padrão dos demais domínios
+// (worldId/gameSystemId resolvidos por oldId contra os maps construídos NA MESMA operação).
+interface SheetTemplatePlanItem { oldId: string; oldWorldId: string | null; oldGameSystemId: string | null; input: SheetTemplateInput }
+interface CharacterSheetPlanItem { oldEntityId: string; oldTemplateId: string; values: Record<string, string | number | boolean> }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
   journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
   library: LibraryPlanItem[]; groups: GroupPlanItem[]; groupMembers: GroupMemberPlanItem[];
   campaigns: CampaignPlanItem[]; campaignMembers: CampaignMemberPlanItem[]; campaignSessions: CampaignSessionPlanItem[];
+  sheetTemplates: SheetTemplatePlanItem[]; characterSheets: CharacterSheetPlanItem[];
   warnings: BackupRestoreWarning[];
 }
 const restorePlanSchema = z.strictObject({
@@ -104,7 +110,7 @@ const restorePlanSchema = z.strictObject({
   journalFolders: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldParentFolderId: z.string().nullable(), input: journalFolderInputSchema })),
   journalPages: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldFolderId: z.string().nullable(), input: journalPageInputSchema })),
   worldEntityLinks: z.array(z.strictObject({ oldWorldId: z.string(), oldEntityId: z.string() })),
-  library: z.array(z.strictObject({ oldId: z.string(), oldPlayGroupId: z.string().nullable(), input: rpgInputSchema })),
+  library: z.array(z.strictObject({ oldId: z.string(), oldPlayGroupId: z.string().nullable(), oldGameSystemId: z.string().nullable(), input: rpgInputSchema })),
   groups: z.array(z.strictObject({ oldId: z.string(), input: playGroupInputSchema })),
   groupMembers: z.array(z.strictObject({ oldId: z.string(), oldGroupId: z.string(), oldUserId: z.string().nullable(), input: playGroupMemberCreateSchema.omit({ userId: true }) })),
   campaigns: z.array(z.strictObject({ oldId: z.string(), oldRpgId: z.string(), oldPlayGroupId: z.string().nullable(), oldAdventureEntityId: z.string().nullable(), input: campaignInputSchema })),
@@ -113,6 +119,8 @@ const restorePlanSchema = z.strictObject({
   // em campaign_members que o restore precisa preservar; por isso estendido aqui.
   campaignMembers: z.array(z.strictObject({ oldId: z.string(), oldCampaignId: z.string(), oldGroupMemberId: z.string().nullable(), oldUserId: z.string().nullable(), input: memberInputSchema.extend({ isGameMaster: z.boolean() }) })),
   campaignSessions: z.array(z.strictObject({ oldId: z.string(), oldCampaignId: z.string(), sessionNumber: z.number().int().positive(), oldAttendeeMemberIds: z.array(z.string()), input: sessionInputSchema.omit({ attendeeMemberIds: true }) })),
+  sheetTemplates: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string().nullable(), oldGameSystemId: z.string().nullable(), input: sheetTemplateInputSchema })),
+  characterSheets: z.array(z.strictObject({ oldEntityId: z.string(), oldTemplateId: z.string(), values: characterSheetInputSchema.shape.values })),
   warnings: z.array(z.strictObject({ domain: z.string(), oldId: z.string(), message: z.string(), category: z.enum(['SKIP', 'CONFLICT', 'EXTERNAL_DEPENDENCY', 'MISSING_ASSET']).optional() })),
 });
 
@@ -254,6 +262,41 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     worldEntityLinks.push({ oldWorldId, oldEntityId });
   }
 
+  // ---- Sheet Templates (F-020/F-021/F-023) — worldId/gameSystemId só preservados quando o
+  // alvo também está sendo restaurado NA MESMA operação (mesma invariante do arquivo). ----
+  const rawSheetTemplates = rowsOf(data, 'sheetTemplates');
+  if (rawSheetTemplates.length > 300) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais Modelos de Ficha do que a v1 do restore suporta (300 por operação).');
+  const sheetTemplates: SheetTemplatePlanItem[] = [];
+  for (const row of rawSheetTemplates) {
+    const oldId = str(row, 'id');
+    const oldWorldId = strOrNull(row, 'world_id');
+    if (oldWorldId && !worldOldIds.has(oldWorldId)) warnings.push({ domain: 'sheetTemplates', oldId, message: 'World original não pôde ser restaurado — modelo será restaurado sem World.', category: 'SKIP' });
+    const oldGameSystemId = strOrNull(row, 'game_system_id');
+    let fields: unknown; let pdfMapping: unknown;
+    try { fields = JSON.parse(str(row, 'field_definitions') || '[]'); } catch { warnings.push({ domain: 'sheetTemplates', oldId, message: 'Definição de campos corrompida — modelo não será restaurado.', category: 'SKIP' }); continue; }
+    try { pdfMapping = JSON.parse(str(row, 'pdf_mapping_json') || '{}'); } catch { pdfMapping = {}; }
+    const candidate = { name: str(row, 'name'), description: str(row, 'description'), worldId: null, gameSystemId: null, fields, pdfUrl: strOrNull(row, 'pdf_url'), pdfMapping };
+    const parsed = sheetTemplateInputSchema.safeParse(candidate);
+    if (!parsed.success) { warnings.push({ domain: 'sheetTemplates', oldId, message: 'Modelo de ficha com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
+    sheetTemplates.push({ oldId, oldWorldId: oldWorldId && worldOldIds.has(oldWorldId) ? oldWorldId : null, oldGameSystemId, input: parsed.data });
+  }
+  const sheetTemplateOldIds = new Set(sheetTemplates.map((item) => item.oldId));
+
+  // ---- Character Sheets — depende de uma entidade E de um modelo restaurados nesta mesma
+  // operação; sem os dois, a ficha inteira é descartada (a linha vive PK=entity_id). ----
+  const rawCharacterSheets = rowsOf(data, 'characterSheets');
+  const characterSheets: CharacterSheetPlanItem[] = [];
+  for (const row of rawCharacterSheets) {
+    const oldEntityId = str(row, 'entity_id'); const oldTemplateId = str(row, 'template_id');
+    if (!entityOldIds.has(oldEntityId)) { warnings.push({ domain: 'characterSheets', oldId: oldEntityId, message: 'Entidade original não pôde ser restaurada — ficha não será restaurada.', category: 'SKIP' }); continue; }
+    if (!sheetTemplateOldIds.has(oldTemplateId)) { warnings.push({ domain: 'characterSheets', oldId: oldEntityId, message: 'Modelo de ficha original não pôde ser restaurado — ficha não será restaurada.', category: 'SKIP' }); continue; }
+    let values: unknown;
+    try { values = JSON.parse(str(row, 'values_json') || '{}'); } catch { warnings.push({ domain: 'characterSheets', oldId: oldEntityId, message: 'Valores da ficha corrompidos — ficha não será restaurada.', category: 'SKIP' }); continue; }
+    const parsed = characterSheetInputSchema.shape.values.safeParse(values);
+    if (!parsed.success) { warnings.push({ domain: 'characterSheets', oldId: oldEntityId, message: 'Valores da ficha com dados inválidos após validação — ficha não será restaurada.', category: 'SKIP' }); continue; }
+    characterSheets.push({ oldEntityId, oldTemplateId, values: parsed.data });
+  }
+
   // ---- Groups (precisa vir antes de Library/Campaigns: ambos podem referenciar um Group) ----
   const rawGroups = rowsOf(data, 'groups');
   if (rawGroups.length > 200) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais Grupos do que a v1 do restore suporta (200 por operação).');
@@ -339,7 +382,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
       if (retry.success) { warnings.push({ domain: 'library', oldId, message: 'Capa/ISBN originais não passaram na validação atual — RPG restaurado sem esses dados.', category: 'SKIP' }); parsed = retry; }
     }
     if (!parsed.success) { warnings.push({ domain: 'library', oldId, message: 'RPG com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
-    library.push({ oldId, oldPlayGroupId: oldPlayGroupId && groupOldIds.has(oldPlayGroupId) ? oldPlayGroupId : null, input: parsed.data });
+    library.push({ oldId, oldPlayGroupId: oldPlayGroupId && groupOldIds.has(oldPlayGroupId) ? oldPlayGroupId : null, oldGameSystemId: publication ? strOrNull(publication, 'game_system_id') : null, input: parsed.data });
   }
   const libraryOldIds = new Set(library.map((item) => item.oldId));
 
@@ -427,7 +470,8 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
 
   return {
     worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,
-    library, groups, groupMembers, campaigns, campaignMembers, campaignSessions, warnings,
+    library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
+    sheetTemplates, characterSheets, warnings,
   };
 }
 
@@ -442,7 +486,8 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   const user = c.get('user');
   const plan = await buildRestorePlan(c.env, user.id, rootRow);
   const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.worldEntityLinks.length
-    + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length;
+    + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
+    + plan.sheetTemplates.length + plan.characterSheets.length;
   const payload = JSON.stringify(plan);
   const payloadHash = await hashSecret(`FULL_BACKUP:${payload}`, c.env.PASSWORD_PEPPER);
   const existing = await c.env.DB.prepare('SELECT id FROM backup_restore_jobs WHERE user_id=? AND payload_hash=? AND confirmed_at IS NULL AND expires_at>?').bind(user.id, payloadHash, nowIso()).first<{ id: string }>();
@@ -456,6 +501,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
     summary: {
       worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length, worldEntityLinks: plan.worldEntityLinks.length,
       library: plan.library.length, groups: plan.groups.length, groupMembers: plan.groupMembers.length, campaigns: plan.campaigns.length, campaignMembers: plan.campaignMembers.length, campaignSessions: plan.campaignSessions.length,
+      sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
     },
     warnings: plan.warnings,
     canConfirm: rowCount > 0,
@@ -529,14 +575,19 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     }
   }
   const rpgIdMap = new Map<string, string>();
+  // Sheet Templates podem apontar para o Game System de uma Publication restaurada nesta mesma
+  // operação (F-023) — mapeado aqui (oldGameSystemId -> newGameSystemId, criado OU reaproveitado
+  // por identidade de ISBN, tanto faz — é a mesma identidade do lado de fora).
+  const gameSystemIdMap = new Map<string, string>();
   for (const item of plan.library) {
     const newEntryId = crypto.randomUUID();
     const resolvedPlayGroupId = item.oldPlayGroupId ? groupIdMap.get(item.oldPlayGroupId) ?? null : null;
     const title = claimTitle(item.input.title);
     try {
-      const { statements: createStatements } = await buildCreateLibraryEntryStatements(c.env.DB, { entryId: newEntryId, userId: user.id, input: { ...item.input, title, playGroupId: resolvedPlayGroupId }, now });
+      const { statements: createStatements, ids } = await buildCreateLibraryEntryStatements(c.env.DB, { entryId: newEntryId, userId: user.id, input: { ...item.input, title, playGroupId: resolvedPlayGroupId }, now });
       statements.push(...createStatements);
       rpgIdMap.set(item.oldId, newEntryId);
+      if (item.oldGameSystemId) gameSystemIdMap.set(item.oldGameSystemId, ids.gameSystemId);
     } catch (error) {
       if (error instanceof ApiError && (error.code === 'ALREADY_IN_LIBRARY' || error.code === 'ARCHIVED_IN_LIBRARY')) {
         confirmWarnings.push({ domain: 'library', oldId: item.oldId, message: 'Este título (mesmo ISBN) já está na sua biblioteca — não foi duplicado.', category: 'CONFLICT' });
@@ -615,6 +666,33 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     if (!newWorldId || !newEntityId) continue;
     statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO world_entity_links (world_id,entity_id,created_at) VALUES (?,?,?)').bind(newWorldId, newEntityId, now));
     worldEntityLinksCreated += 1;
+  }
+
+  // ---- Sheet Templates — sempre criado na versão 1 (mesma regra do create normal); worldId/
+  // gameSystemId resolvidos contra worldIdMap/gameSystemIdMap (Library, construído acima). ----
+  const sheetTemplateIdMap = new Map<string, string>();
+  for (const item of plan.sheetTemplates) {
+    const newId = crypto.randomUUID();
+    const resolvedWorldId = item.oldWorldId ? worldIdMap.get(item.oldWorldId) ?? null : null;
+    const resolvedGameSystemId = item.oldGameSystemId ? gameSystemIdMap.get(item.oldGameSystemId) ?? null : null;
+    statements.push(c.env.DB.prepare('INSERT INTO sheet_templates (id,owner_user_id,world_id,game_system_id,name,description,version,field_definitions,pdf_url,pdf_mapping_json,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?,?)')
+      .bind(newId, user.id, resolvedWorldId, resolvedGameSystemId, item.input.name, item.input.description, JSON.stringify(item.input.fields), item.input.pdfUrl, JSON.stringify(item.input.pdfMapping), now, now));
+    sheetTemplateIdMap.set(item.oldId, newId);
+  }
+
+  // ---- Character Sheets — revalidada contra o modelo JÁ restaurado (validateSheet, mesma
+  // função pura usada por PUT /sheets/entities/:id), nunca confia cegamente no values_json
+  // exportado. Sem entidade/modelo restaurados, a ficha é descartada (já filtrado no plano). ----
+  let characterSheetsCreated = 0;
+  for (const item of plan.characterSheets) {
+    const newEntityId = entityIdMap.get(item.oldEntityId); const newTemplateId = sheetTemplateIdMap.get(item.oldTemplateId);
+    if (!newEntityId || !newTemplateId) continue;
+    const templateInput = plan.sheetTemplates.find((template) => template.oldId === item.oldTemplateId)!.input;
+    const result = validateSheet({ id: newTemplateId, name: templateInput.name, version: 1, fields: templateInput.fields }, item.values);
+    if (!result.valid) { confirmWarnings.push({ domain: 'characterSheets', oldId: item.oldEntityId, message: 'Valores da ficha não correspondem mais ao modelo restaurado — ficha não foi restaurada.', category: 'SKIP' }); continue; }
+    statements.push(c.env.DB.prepare('INSERT INTO character_sheets (entity_id,template_id,template_version,values_json,created_at,updated_at) VALUES (?,?,1,?,?,?)')
+      .bind(newEntityId, newTemplateId, JSON.stringify(item.values), now, now));
+    characterSheetsCreated += 1;
   }
 
   // ---- Journal folders (2ª passagem para parent_folder_id, mesmo padrão) ----
@@ -696,6 +774,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     restored: {
       worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated, worldEntityLinks: worldEntityLinksCreated,
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
+      sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
     },
     warnings: confirmWarnings,
   });
