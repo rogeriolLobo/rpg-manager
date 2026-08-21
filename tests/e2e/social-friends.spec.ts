@@ -26,42 +26,47 @@ test("busca → pedido de amizade → aceitar → amigos nos dois lados → noti
   await register(page, aliceEmail, `Alice Social ${suffix}`);
 
   const bobContext = await browser.newContext();
-  const bobPage = await bobContext.newPage();
-  await register(bobPage, bobEmail, `Bob Social ${suffix}`);
+  // Auditoria final (2026-08-21): try/finally — se qualquer expect() abaixo lançasse, o
+  // context extra ficaria aberto pelo resto da fila do worker (workers:1, mesmo padrão de
+  // vazamento já corrigido em vtt-live.spec.ts/vtt-realtime.spec.ts/player-view.spec.ts).
+  try {
+    const bobPage = await bobContext.newPage();
+    await register(bobPage, bobEmail, `Bob Social ${suffix}`);
 
-  await openNav(page);
-  await page.getByRole("link", { name: "Amigos" }).click();
-  await expect(page.getByRole("heading", { name: "Amigos", exact: true })).toBeVisible();
-  await page.getByLabel(/Buscar pessoas/u).fill(bobEmail);
-  await page.getByRole("button", { name: "Buscar" }).click();
-  await expect(page.getByText(`Bob Social ${suffix}`)).toBeVisible();
-  await page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
-  await expect(page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByText("Pedido enviado")).toBeVisible();
+    await openNav(page);
+    await page.getByRole("link", { name: "Amigos" }).click();
+    await expect(page.getByRole("heading", { name: "Amigos", exact: true })).toBeVisible();
+    await page.getByLabel(/Buscar pessoas/u).fill(bobEmail);
+    await page.getByRole("button", { name: "Buscar" }).click();
+    await expect(page.getByText(`Bob Social ${suffix}`)).toBeVisible();
+    await page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
+    await expect(page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByText("Pedido enviado")).toBeVisible();
 
-  await openNav(bobPage);
-  await bobPage.getByRole("link", { name: "Amigos" }).click();
-  await expect(bobPage.getByRole("heading", { name: "Pedidos recebidos" })).toBeVisible();
-  await expect(bobPage.getByText(`Alice Social ${suffix}`)).toBeVisible();
-  await bobPage.getByRole("listitem").filter({ hasText: `Alice Social ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
-  await expect(bobPage.getByRole("heading", { name: /Amigos \(1\)/u })).toBeVisible();
+    await openNav(bobPage);
+    await bobPage.getByRole("link", { name: "Amigos" }).click();
+    await expect(bobPage.getByRole("heading", { name: "Pedidos recebidos" })).toBeVisible();
+    await expect(bobPage.getByText(`Alice Social ${suffix}`)).toBeVisible();
+    await bobPage.getByRole("listitem").filter({ hasText: `Alice Social ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await expect(bobPage.getByRole("heading", { name: /Amigos \(1\)/u })).toBeVisible();
 
-  await page.reload();
-  await expect(page.getByRole("heading", { name: /Amigos \(1\)/u })).toBeVisible();
-  await expect(page.getByText(`Bob Social ${suffix}`)).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: /Amigos \(1\)/u })).toBeVisible();
+    await expect(page.getByText(`Bob Social ${suffix}`)).toBeVisible();
 
-  // Notificação de aceite chegou para alice (quem pediu) — reabre o menu mobile, que fecha
-  // de novo a cada reload de página inteira.
-  await openNav(page);
-  await expect(page.getByRole("button", { name: "Notificações (1 não lida)" })).toBeVisible();
-  await page.getByRole("button", { name: /Notificações/u }).click();
-  await expect(page.getByText("Pedido de amizade aceito")).toBeVisible();
-  await closeNav(page);
+    // Notificação de aceite chegou para alice (quem pediu) — reabre o menu mobile, que fecha
+    // de novo a cada reload de página inteira.
+    await openNav(page);
+    await expect(page.getByRole("button", { name: "Notificações (1 não lida)" })).toBeVisible();
+    await page.getByRole("button", { name: /Notificações/u }).click();
+    await expect(page.getByText("Pedido de amizade aceito")).toBeVisible();
+    await closeNav(page);
 
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByRole("button", { name: "Remover" }).click();
-  await expect(page.getByRole("heading", { name: /Amigos \(0\)/u })).toBeVisible();
-
-  await bobContext.close();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("listitem").filter({ hasText: `Bob Social ${suffix}` }).getByRole("button", { name: "Remover" }).click();
+    await expect(page.getByRole("heading", { name: /Amigos \(0\)/u })).toBeVisible();
+  } finally {
+    await bobContext.close();
+  }
 });
 
 test("bloquear impede novo pedido; desbloquear libera de novo", async ({ page, browser }) => {
@@ -69,20 +74,22 @@ test("bloquear impede novo pedido; desbloquear libera de novo", async ({ page, b
   const suffix = Date.now();
   await register(page, `e2e-social-block-a-${suffix}@example.com`, `Bloqueador ${suffix}`);
   const otherContext = await browser.newContext();
-  const otherPage = await otherContext.newPage();
-  const targetEmail = `e2e-social-block-b-${suffix}@example.com`;
-  await register(otherPage, targetEmail, `Bloqueado ${suffix}`);
+  try {
+    const otherPage = await otherContext.newPage();
+    const targetEmail = `e2e-social-block-b-${suffix}@example.com`;
+    await register(otherPage, targetEmail, `Bloqueado ${suffix}`);
 
-  await openNav(page);
-  await page.getByRole("link", { name: "Amigos" }).click();
-  await page.getByLabel(/Buscar pessoas/u).fill(targetEmail);
-  await page.getByRole("button", { name: "Buscar" }).click();
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("listitem").filter({ hasText: `Bloqueado ${suffix}` }).getByRole("button", { name: "Bloquear" }).click();
-  await expect(page.getByRole("heading", { name: /Bloqueados \(1\)/u })).toBeVisible();
+    await openNav(page);
+    await page.getByRole("link", { name: "Amigos" }).click();
+    await page.getByLabel(/Buscar pessoas/u).fill(targetEmail);
+    await page.getByRole("button", { name: "Buscar" }).click();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("listitem").filter({ hasText: `Bloqueado ${suffix}` }).getByRole("button", { name: "Bloquear" }).click();
+    await expect(page.getByRole("heading", { name: /Bloqueados \(1\)/u })).toBeVisible();
 
-  await page.getByRole("button", { name: "Desbloquear" }).click();
-  await expect(page.getByText(/Bloqueados \(/u)).toHaveCount(0);
-
-  await otherContext.close();
+    await page.getByRole("button", { name: "Desbloquear" }).click();
+    await expect(page.getByText(/Bloqueados \(/u)).toHaveCount(0);
+  } finally {
+    await otherContext.close();
+  }
 });

@@ -43,12 +43,15 @@ test("404 por autorização (World privado de outra conta) mostra o mesmo estado
   const worldId = new URL(page.url()).pathname.split("/").pop();
 
   const outsiderContext = await browser.newContext();
-  const outsiderPage = await outsiderContext.newPage();
-  await register(outsiderPage, `e2e-error-outsider-${Date.now()}@example.com`);
-  await outsiderPage.goto(`/app/worlds/${worldId}/cartography`);
-  await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible();
-  await expect(outsiderPage.getByText("Carregando")).toHaveCount(0);
-  await outsiderContext.close();
+  try {
+    const outsiderPage = await outsiderContext.newPage();
+    await register(outsiderPage, `e2e-error-outsider-${Date.now()}@example.com`);
+    await outsiderPage.goto(`/app/worlds/${worldId}/cartography`);
+    await expect(outsiderPage.getByRole("heading", { name: "Não encontrado" })).toBeVisible();
+    await expect(outsiderPage.getByText("Carregando")).toHaveCount(0);
+  } finally {
+    await outsiderContext.close();
+  }
 });
 
 test("sessão expirada durante navegação SPA (sem reload) redireciona para o login em vez de travar", async ({ page, context }) => {
