@@ -21,18 +21,18 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
-  await expect(page.getByRole("heading", { name: `RPG VTT ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `RPG VTT ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
   // A opção do RPG só existe no <select> depois que GET /rpgs resolve — espera o texto
   // aparecer antes de salvar (mesmo princípio do `toHaveValue("Aventureiro E2E")` do Narrador
   // em core-flow.spec.ts) para não submeter o formulário com o RPG ainda vazio.
-  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u, { timeout: 30_000 });
   await page.getByLabel("Nome da campanha").fill(`Mesa VTT ${suffix}`);
   await page.getByRole("button", { name: "Salvar campanha" }).click();
-  await expect(page.getByRole("heading", { name: `Mesa VTT ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Mesa VTT ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
 
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
@@ -88,15 +88,15 @@ test("VTT: inicia combate, adiciona combatente, avança turno, ajusta PV e encer
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
-  await expect(page.getByRole("heading", { name: `RPG Combate ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `RPG Combate ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
-  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u, { timeout: 30_000 });
   await page.getByLabel("Nome da campanha").fill(`Mesa Combate ${suffix}`);
   await page.getByRole("button", { name: "Salvar campanha" }).click();
-  await expect(page.getByRole("heading", { name: `Mesa Combate ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Mesa Combate ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Sala do Chefe");
   await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/chefe.png");

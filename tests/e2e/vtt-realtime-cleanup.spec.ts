@@ -84,7 +84,7 @@ test("VTT realtime cleanup (Seção 9): sair da página fecha o WebSocket; volta
   expect(openedSockets).toHaveLength(0);
 
   // ---- 1ª montagem (SPA): abre exatamente 1 WebSocket real de VTT. ----
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
   await expect(page.getByText("Cena Cleanup E2E")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/● Tempo real/u)).toBeVisible({ timeout: 15_000 });
   expect(openedSockets).toHaveLength(1);
@@ -102,7 +102,7 @@ test("VTT realtime cleanup (Seção 9): sair da página fecha o WebSocket; volta
   // ---- Remount (SPA): voltar à mesma página abre só UM socket novo — nunca reaproveita nem
   // acumula o antigo, e nunca abre mais de uma conexão para a mesma remontagem
   // (StrictMode-safe). ----
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
   await expect(page.getByText("Cena Cleanup E2E")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/● Tempo real/u)).toBeVisible({ timeout: 15_000 });
   expect(openedSockets).toHaveLength(2);
