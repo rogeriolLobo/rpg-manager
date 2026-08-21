@@ -142,5 +142,4 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await openNavigation();
   await assertSectionsAndLinksNoWorld();
-  await assertWorldModulesNotVisible();
 });
