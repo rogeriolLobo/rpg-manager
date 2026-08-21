@@ -124,9 +124,6 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
   await expect(activeWorldNav.getByRole('link', { name: 'Bestiário', exact: true })).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Portal do jogador', exact: true })).toBeVisible();
 
-  // Deactivate world via dropdown
-  await page.getByLabel('Selecionar contexto ativo').selectOption('');
-
   // ── 3: Deep links ──
   await page.goto('/app/campaigns');
   await expect(page.getByRole('heading', { name: 'Planejador de mesas' })).toBeVisible({ timeout: 30_000 });
