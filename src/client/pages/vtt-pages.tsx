@@ -1,5 +1,5 @@
 import { BookOpen, ChevronDown, ChevronUp, Map, Plus, Swords, Trash2 } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { VttPlayerScenePayload } from '../../domain/vtt-realtime';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
@@ -42,6 +42,8 @@ export function VttPage(){
   const [sceneDetail,setSceneDetail]=useState<Record<string,{item:SceneDetail;tokens:Token[];fog:FogCell[];combatants:Combatant[]}>>({});
   const [tokenForms,setTokenForms]=useState<Record<string,typeof emptyToken>>({});
   const [combatantForms,setCombatantForms]=useState<Record<string,typeof emptyCombatant>>({});
+  const sceneFormRef=useRef<HTMLFormElement>(null);
+  const sceneTitleRef=useRef<HTMLInputElement>(null);
   const [error,setError]=useState('');
   // F-034 (GM View integrada): liga a preparação da Adventure (F-025) e os anexos/handouts
   // (F-028) na mesma tela do VTT, reduzindo a navegação entre telas durante a mesa — nenhuma
@@ -61,6 +63,9 @@ export function VttPage(){
   // ativada, token movido, fog revelada, combate avançado) recarrega a lista de cenas e, se
   // houver uma cena expandida na tela, o detalhe dela também.
   const {connected:wsConnected}=useCampaignRealtime(campaignId,()=>{
+    // O snapshot HTTP inicial já representa o estado atual. Ignorar o primeiro STATE enquanto
+    // ele ainda carrega evita invalidar a resposta em voo e disparar leituras D1 redundantes.
+    if(scenesResource.status!=='success')return;
     scenesResource.reload();
     if(expandedSceneId)void loadSceneDetail(expandedSceneId);
   });
@@ -95,8 +100,10 @@ export function VttPage(){
   };
   const createScene=async(event:FormEvent)=>{event.preventDefault();setError('');
     try{
-      await postJson(`/vtt/${campaignId}/scenes`,{title:sceneForm.title,mapId:sceneForm.mapId||null,imageUrl:sceneForm.mapId?'':sceneForm.imageUrl,notes:sceneForm.notes,fogEnabled:sceneForm.fogEnabled,gridCols:Number(sceneForm.gridCols||20),gridRows:Number(sceneForm.gridRows||20)});
-      setSceneForm(emptyScene);scenesResource.reload();
+      const input={title:sceneForm.title,mapId:sceneForm.mapId||null,imageUrl:sceneForm.mapId?'':sceneForm.imageUrl,notes:sceneForm.notes,fogEnabled:sceneForm.fogEnabled,gridCols:Number(sceneForm.gridCols||20),gridRows:Number(sceneForm.gridRows||20)};
+      const created=await postJson<{id:string}>(`/vtt/${campaignId}/scenes`,input);
+      scenesResource.mutate((current)=>({items:[{id:created.id,...input,isActive:false,combatActive:false,combatRound:0},...current.items]}));
+      setSceneForm(emptyScene);
     }catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível criar a cena.');}
   };
   const removeScene=async(scene:Scene)=>{if(!confirm(`Excluir a cena "${scene.title}" e todos os tokens dentro dela?`))return;setError('');
@@ -104,11 +111,11 @@ export function VttPage(){
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível excluir a cena.');}
   };
   const activateScene=async(sceneId:string)=>{setError('');
-    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/activate`,{});scenesResource.reload();}
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/activate`,{});scenesResource.mutate((current)=>({items:current.items.map((scene)=>({...scene,isActive:scene.id===sceneId}))}));}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível ativar a cena.');}
   };
   const deactivateScene=async(sceneId:string)=>{setError('');
-    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/deactivate`,{});scenesResource.reload();}
+    try{await postJson(`/vtt/${campaignId}/scenes/${sceneId}/deactivate`,{});scenesResource.mutate((current)=>({items:current.items.map((scene)=>scene.id===sceneId?{...scene,isActive:false}:scene)}));}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível encerrar a cena.');}
   };
   const createToken=async(sceneId:string,event:FormEvent)=>{event.preventDefault();setError('');
@@ -164,6 +171,10 @@ export function VttPage(){
   };
 
   const liveUrl=`${location.origin}/app/campaigns/${campaignId}/vtt/live`;
+  const focusSceneForm=()=>{
+    sceneFormRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+    window.setTimeout(()=>sceneTitleRef.current?.focus(),250);
+  };
   return <div className="page">
     <PageHeader eyebrow="Mesa Virtual" title="VTT — cenas e tokens" description="Prepare cenas com mapa e tokens, e controle o que cada jogador enxerga." action={<Link className="ghost-button link-button" to={`/app/campaigns/${campaignId}`}>Voltar à campanha</Link>}/>
     <p className="badge" style={{display:'inline-flex',alignItems:'center',gap:'0.35rem'}} title={wsConnected?'Mudanças de outro Co-Mestre aparecem automaticamente.':'Recarregue a página para ver mudanças feitas por outro Co-Mestre.'}>{wsConnected?'● Tempo real':'○ Sem tempo real'}</p>
@@ -192,7 +203,7 @@ export function VttPage(){
 
     <section className="panel">
       <h2><Map size={20}/>Cenas</h2>
-      {scenes.length===0&&<p>Nenhuma cena criada ainda.</p>}
+      {scenes.length===0&&<div className="empty-state vtt-empty-state"><Map/><h3>Prepare sua primeira cena</h3><p>Crie a cena inicial, adicione mapa e tokens e comece a preparar a mesa.</p><button type="button" className="secondary-button" onClick={focusSceneForm}>Criar primeira cena</button></div>}
       <ul className="clean-list adventure-scene-list">
         {scenes.map((scene)=><li key={scene.id} className="adventure-scene">
           <div className="section-heading">
@@ -282,9 +293,9 @@ export function VttPage(){
           </div>}
         </li>)}
       </ul>
-      <form className="panel template-form" onSubmit={createScene}>
+      <form className="panel template-form" id="vtt-scene-form" ref={sceneFormRef} onSubmit={createScene}>
         <h3>Nova cena</h3>
-        <label>Título<input required maxLength={160} value={sceneForm.title} onChange={(event)=>setSceneForm({...sceneForm,title:event.target.value})}/></label>
+        <label>Título<input ref={sceneTitleRef} required maxLength={160} value={sceneForm.title} onChange={(event)=>setSceneForm({...sceneForm,title:event.target.value})}/></label>
         <label>World (para usar um mapa da Cartografia, opcional)<select value={sceneForm.worldId} onChange={(event)=>setSceneForm({...sceneForm,worldId:event.target.value,mapId:''})}><option value="">Nenhum</option>{worldOptions.map((world)=><option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
         {sceneForm.worldId&&<label>Mapa<select value={sceneForm.mapId} onChange={(event)=>setSceneForm({...sceneForm,mapId:event.target.value})}><option value="">Nenhum (usar URL de imagem abaixo)</option>{mapOptions.map((mapOption)=><option key={mapOption.id} value={mapOption.id}>{mapOption.title}</option>)}</select></label>}
         {!sceneForm.mapId&&<label>URL da imagem de fundo<input maxLength={2000} placeholder="https://..." value={sceneForm.imageUrl} onChange={(event)=>setSceneForm({...sceneForm,imageUrl:event.target.value})}/></label>}
@@ -292,7 +303,7 @@ export function VttPage(){
         <label className="checkbox-row"><input type="checkbox" checked={sceneForm.fogEnabled} onChange={(event)=>setSceneForm({...sceneForm,fogEnabled:event.target.checked})}/>Névoa da guerra (F-030) — a cena começa totalmente encoberta para os jogadores</label>
         {sceneForm.fogEnabled&&<><label>Colunas da grade<input type="number" min={1} max={100} value={sceneForm.gridCols} onChange={(event)=>setSceneForm({...sceneForm,gridCols:event.target.value})}/></label>
         <label>Linhas da grade<input type="number" min={1} max={100} value={sceneForm.gridRows} onChange={(event)=>setSceneForm({...sceneForm,gridRows:event.target.value})}/></label></>}
-        <button className="primary-button">Criar cena</button>
+        <button className="primary-button">{scenes.length===0?'Criar primeira cena':'Criar cena'}</button>
       </form>
     </section>
   </div>;

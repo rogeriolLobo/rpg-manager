@@ -1,4 +1,4 @@
-import { Archive, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, Settings, Shield, Swords, UsersRound, UserRound, Users, X } from 'lucide-react';
+import { Archive, BookMarked, BookOpen, CalendarDays, Castle, Dices, Gauge, GitFork, Globe2, Link2, LogOut, Map, Menu, NotebookPen, PawPrint, ScrollText, Settings, Shield, Swords, UsersRound, UserRound, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context';
@@ -9,17 +9,19 @@ import { NotificationsButton } from '../pages/social-pages';
 export function AppShell() {
   const [open, setOpen] = useState(false); const { user, logout } = useAuth(); const navigate = useNavigate();
   const { worlds, activeWorld, loading, setActiveWorldId } = useActiveWorld();
-  const globalLinks = [
+  const contentLinks = [
     ['/app/library', BookOpen, 'Biblioteca'],
     ['/app/vault', Archive, 'Vault'],
+    ['/app/compendium', BookMarked, 'Compêndio'],
+    ['/app/sheets', ScrollText, 'Fichas'],
+  ] as const;
+  const tableLinks = [
+    ['/app/campaigns', Castle, 'Campanhas'],
+    ['/app/my-tables', Swords, 'Minhas Mesas'],
     ['/app/groups', UsersRound, 'Grupos'],
     ['/app/friends', Users, 'Amigos'],
-    ['/app/campaigns', Castle, 'Campanhas'],
-    // F-033 (Player View integrada): descoberta de campanhas onde o usuário é jogador, sem
-    // depender de link enviado pelo GM — link global sempre visível (CLAUDE.md §3).
-    ['/app/my-tables', Swords, 'Minhas Mesas'],
-    ['/app/worlds', Globe2, 'Mundos'],
   ] as const;
+  const worldDirectoryLinks = [['/app/worlds', Globe2, 'Mundos']] as const;
   const worldLinks = activeWorld ? [
     [`/app/worlds/${activeWorld.id}`, Gauge, 'Visão do World'],
     [`/app/worlds/${activeWorld.id}/wiki`, BookOpen, 'Wiki'],
@@ -31,9 +33,8 @@ export function AppShell() {
     [`/app/worlds/${activeWorld.id}/bestiary`, PawPrint, 'Bestiário'],
     [`/app/worlds/${activeWorld.id}/portal`, UserRound, 'Portal do jogador'],
   ] as const : [];
-  const accountLinks = [
-    ['/app/gm-tools', Dices, 'Ferramentas do Mestre'], ['/app/settings', Settings, 'Configurações'], ['/app/security', Shield, 'Segurança'], ['/app/profile', UserRound, 'Perfil'],
-  ] as const;
+  const toolLinks = [['/app/gm-tools', Dices, 'Ferramentas do Mestre']] as const;
+  const systemLinks = [['/app/settings', Settings, 'Configurações'], ['/app/security', Shield, 'Segurança'], ['/app/profile', UserRound, 'Perfil']] as const;
   const changeWorld = async (worldId: string) => {
     const selected = worldId || null; await setActiveWorldId(selected); if (selected) navigate(`/app/worlds/${selected}`);
   };
@@ -53,13 +54,15 @@ export function AppShell() {
         <div className="sidebar-toolbar"><CommandPalette onNavigate={() => setOpen(false)}/></div>
       </div>
       <div className="sidebar-scroll">
-        <nav aria-label="Navegação principal"><NavLink to="/app" end onClick={() => setOpen(false)}><Gauge size={19}/>Visão geral</NavLink></nav>
-        <nav className="nav-section" aria-label="Navegação geral"><span className="nav-section-label">Geral</span>{nav(globalLinks)}</nav>
-        {worldLinks.length > 0 && <nav className="nav-section" aria-label={`Seção de ${activeWorld!.name}`}><span className="nav-section-label">{activeWorld!.name}</span>{nav(worldLinks)}</nav>}
-        <nav className="nav-section" aria-label="Conta"><span className="nav-section-label">Sistema</span>{nav(accountLinks)}</nav>
+        <nav aria-label="Visão geral"><span className="nav-section-label">Visão geral</span><NavLink to="/app" end onClick={() => setOpen(false)}><Gauge size={19}/>Painel</NavLink></nav>
+        <nav className="nav-section" aria-label="Biblioteca e conteúdo"><span className="nav-section-label">Biblioteca e conteúdo</span>{nav(contentLinks)}</nav>
+        <nav className="nav-section" aria-label="Mesas"><span className="nav-section-label">Mesas</span>{nav(tableLinks)}</nav>
+        <nav className="nav-section" aria-label="Mundos"><span className="nav-section-label">Mundos</span>{nav(worldDirectoryLinks)}</nav>
+        {worldLinks.length > 0 && <nav className="nav-section" aria-label={`World ativo: ${activeWorld!.name}`}><span className="nav-section-label">World ativo · {activeWorld!.name}</span>{nav(worldLinks)}</nav>}
+        <nav className="nav-section" aria-label="Ferramentas"><span className="nav-section-label">Ferramentas</span>{nav(toolLinks)}</nav>
+        <nav className="nav-section" aria-label="Sistema"><span className="nav-section-label">Sistema</span>{nav(systemLinks)}</nav>
       </div>
       <div className="sidebar-footer"><span>{user?.displayName}</span><small>{user?.email}</small><button className="ghost-button" onClick={() => void logout()}><LogOut size={17}/>Sair</button></div>
     </aside>
     <main className="main-content"><Outlet/></main></div>;
 }
-

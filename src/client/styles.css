@@ -308,6 +308,40 @@ h2 {
   gap: 1.2rem;
   margin: 1.2rem 0;
 }
+.quick-access {
+  margin-bottom: 1.2rem;
+}
+.quick-access-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+}
+.quick-access-grid a {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface);
+  color: var(--text-heading);
+  text-decoration: none;
+}
+.quick-access-grid a:hover {
+  border-color: var(--brand-primary);
+  background: var(--surface-hover);
+}
+.quick-access-grid a > span {
+  display: grid;
+  min-width: 0;
+}
+.quick-access-grid small {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .section-note {
   color: var(--text-muted);
   font-size: 0.85rem;
@@ -890,16 +924,39 @@ legend {
   gap: 1.1rem;
 }
 .campaign-card {
+  display: grid;
+  grid-template-rows: 1fr auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 1rem;
-  padding: 1.25rem;
+  overflow: hidden;
   box-shadow: var(--shadow);
   color: inherit;
+  transition: transform 0.2s, border-color 0.2s;
 }
 .campaign-card:hover {
   transform: translateY(-3px);
+  border-color: var(--border-strong);
+}
+.campaign-card-main {
+  display: block;
+  padding: 1.25rem;
+  color: inherit;
   text-decoration: none;
+}
+.campaign-card-main:hover {
+  text-decoration: none;
+}
+.campaign-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  padding: 0.85rem 1.25rem 1.1rem;
+  border-top: 1px solid var(--border);
+  background: var(--background-subtle);
+}
+.campaign-card-actions > * {
+  flex: 1;
 }
 .campaign-card .badge {
   float: right;
@@ -942,6 +999,35 @@ legend {
 }
 .campaign-summary strong {
   font: 600 1.1rem Georgia, "Times New Roman", serif;
+}
+.campaign-hub {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.campaign-hub-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 0;
+}
+.campaign-hub-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+.campaign-hub-card p {
+  flex: 1;
+  color: var(--text-muted);
+}
+.campaign-hub-featured {
+  border-color: var(--brand-primary);
+  background: var(--surface-selected);
+}
+.vtt-empty-state {
+  margin-bottom: 1rem;
 }
 .inline-form {
   display: flex;
@@ -1259,7 +1345,8 @@ legend {
   }
   .dashboard-grid,
   .settings-grid,
-  .detail-grid {
+  .detail-grid,
+  .campaign-hub {
     /* minmax(0, 1fr), não "1fr": um track "1fr" sozinho ainda usa min-width:auto (o
        min-content do item) como piso — uma tabela larga (ex.: "O que jogar agora?" no
        Dashboard) força esse piso além da viewport mobile, criando overflow horizontal na
@@ -1332,6 +1419,9 @@ legend {
   }
   .campaign-summary {
     grid-template-columns: 1fr 1fr;
+  }
+  .campaign-card-actions {
+    flex-direction: column;
   }
   .detail-info dl {
     grid-template-columns: 1fr;

@@ -1,5 +1,10 @@
 # RPG Manager — Master Backlog
 
+> **Nota de superfície (2026-08-21):** os estados históricos `DONE` abaixo provam entrega funcional,
+> não descoberta na interface. A revisão transversal de navegação, Campaign Hub, Mesa do Mestre,
+> empty states, Ctrl+K e evidência E2E está registrada em
+> `docs/product/PRODUCT_SURFACE_AUDIT.md` e só termina após produção.
+
 Metodologia: uma funcionalidade por vez, `AUDIT → PLAN → IMPLEMENT →
 TEST → FIX → TEST AGAIN → CI → DEPLOY → PRODUCTION SMOKE → DOCUMENT →
 DONE`. `DONE` exige validação de produção — nunca só código/testes/build.

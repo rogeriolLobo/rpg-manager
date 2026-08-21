@@ -622,7 +622,8 @@ export function RpgFormPage() {
 }
 function RpgFormFields({ id }: { id?: string }) {
   const navigate = useNavigate();
-  const [metadata, setMetadata] = useState<Metadata>();
+  const metadataResource = useResource<Metadata>("/rpgs/metadata");
+  const metadata = metadataResource.status === "success" ? metadataResource.data : undefined;
   const [form, setForm] = useState<Record<string, string | boolean>>(initial);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -648,7 +649,6 @@ function RpgFormFields({ id }: { id?: string }) {
     // O guard `active` evita que uma resposta lenta ainda em voo sobrescreva os dados corretos
     // caso o componente seja desmontado (troca de RPG) antes dela chegar.
     let active = true;
-    void api<Metadata>("/rpgs/metadata").then((data) => { if (active) setMetadata(data); });
     if (id)
       void api<{ item: Rpg }>(`/rpgs/${id}`).then(({ item }) => {
         if (!active) return;

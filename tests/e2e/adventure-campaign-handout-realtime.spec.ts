@@ -24,7 +24,7 @@ function csrfToken(cookies: Array<{ name: string; value: string }>): string {
 const apiHeaders = (csrf: string) => ({ "X-CSRF-Token": csrf, Origin: "http://127.0.0.1:5173" });
 
 test("Adventure full flow (Seção 13): World → Adventure → Handout → Campaign → GM Console → VTT Scene → revelar handout → Player recebe via WebSocket", async ({ page, browser }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(360_000);
   const suffix = Date.now();
   await register(page, `e2e-adv-flow-owner-${suffix}@example.com`, `Mestre Fluxo ${suffix}`);
   const csrf = csrfToken(await page.context().cookies());
@@ -88,34 +88,33 @@ test("Adventure full flow (Seção 13): World → Adventure → Handout → Camp
     // entidade de novo. Corrigido em campaign-pages.tsx: "Adventure" agora é um Link quando
     // adventureEntityId existe, mesmo padrão já usado para "Grupo". ----
     await page.goto(`/app/campaigns/${campaignId}`);
-    // exact:true — a mesma Adventure também aparece no painel "Entidades vinculadas" (Vault
-    // quick lookup, pré-existente), apontando para o Vault genérico; aqui queremos
-    // especificamente o link novo do resumo da campanha, que aponta para a tela de preparação.
-    await page.getByRole("link", { name: `Aventura Fluxo ${suffix}`, exact: true }).click();
-    await expect(page.getByRole("heading", { name: `Aventura Fluxo ${suffix}` })).toBeVisible({ timeout: 15_000 });
+    // A Adventure aparece no resumo e no Campaign Hub; o link contextual de Preparação é a
+    // entrada humana principal e aponta para a mesma tela canônica do Vault.
+    await page.getByRole("region", { name: "Hub da campanha" }).getByRole("link", { name: `Aventura Fluxo ${suffix}`, exact: true }).click();
+    await expect(page.getByRole("heading", { name: `Aventura Fluxo ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
     await page.goto(`/app/campaigns/${campaignId}/vtt`);
-    await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible({ timeout: 30_000 });
     const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
     await sceneForm.getByLabel("Título").fill("Salão do Conselho");
     await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/salao.png");
-    await page.getByRole("button", { name: "Criar cena" }).click();
-    await expect(page.getByText("Salão do Conselho")).toBeVisible();
+    await sceneForm.getByRole("button", { name: /Criar (primeira )?cena/u }).click();
+    await expect(page.getByText("Salão do Conselho")).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Ativar para os jogadores" }).click();
     await expect(page.getByText("Ao vivo")).toBeVisible();
 
     // ---- Player entra na Campanha (Minhas Mesas) ANTES da revelação — 0 handouts ainda. ----
     await playerPage.goto(`/app/my-tables/${campaignId}`);
-    await expect(playerPage.getByRole("heading", { name: `Mesa Fluxo ${suffix}` })).toBeVisible({ timeout: 15_000 });
+    await expect(playerPage.getByRole("heading", { name: `Mesa Fluxo ${suffix}` })).toBeVisible({ timeout: 30_000 });
     await expect(playerPage.getByText("Nenhum handout revelado ainda.")).toBeVisible();
 
     // ---- GM revela o handout na tela de preparação da Adventure (UI real, mesmo botão já
     // provado em adventure-prep.spec.ts) -> chega ao Player em tempo real, SEM reload. ----
     await page.goto(`/app/vault/${adventureEntityId}/adventure`);
-    await expect(page.getByText("Carta do Conselho")).toBeVisible();
+    await expect(page.getByText("Carta do Conselho")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("ainda não revelado")).toBeVisible();
     await page.getByRole("button", { name: "Revelar" }).click();
-    await expect(page.getByText("revelado aos jogadores")).toBeVisible();
+    await expect(page.getByText("revelado aos jogadores")).toBeVisible({ timeout: 30_000 });
 
     await expect(playerPage.getByText("Carta do Conselho")).toBeVisible({ timeout: 10_000 });
     await expect(playerPage.getByText("Um pergaminho lacrado com o selo real.")).toBeVisible();

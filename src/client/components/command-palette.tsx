@@ -1,4 +1,4 @@
-import { BookOpen, Castle, FileText, Globe2, Search, UsersRound } from 'lucide-react';
+import { Archive, BookMarked, BookOpen, CalendarDays, Castle, Dices, FileText, GitFork, Globe2, Link2, Map, NotebookPen, PawPrint, ScrollText, Search, Settings, Swords, Users, UsersRound } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -48,11 +48,25 @@ export function CommandPalette({ onNavigate }: { onNavigate?: () => void }) {
   }, [activeWorld, query, searchEverywhere]);
   const commands = useMemo(() => [
     { label: 'Abrir Biblioteca', path: '/app/library', Icon: BookOpen },
+    { label: 'Abrir Vault', path: '/app/vault', Icon: Archive },
+    { label: 'Abrir Compêndio', path: '/app/compendium', Icon: BookMarked },
+    { label: 'Abrir Fichas', path: '/app/sheets', Icon: ScrollText },
     { label: 'Abrir Worlds', path: '/app/worlds', Icon: Globe2 },
     { label: 'Abrir Grupos', path: '/app/groups', Icon: UsersRound },
+    { label: 'Abrir Amigos', path: '/app/friends', Icon: Users },
     { label: 'Abrir Campanhas', path: '/app/campaigns', Icon: Castle },
+    { label: 'Abrir Minhas Mesas', path: '/app/my-tables', Icon: Swords },
+    { label: 'Abrir Ferramentas do Mestre', path: '/app/gm-tools', Icon: Dices },
+    { label: 'Abrir Configurações', path: '/app/settings', Icon: Settings },
     ...(activeWorld ? [
+      { label: `Visão do World · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}`, Icon: Globe2 },
       { label: `Wiki · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/wiki`, Icon: BookOpen },
+      ...(activeWorld.isOwner ? [{ label: `Diário · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/journal`, Icon: NotebookPen }] : []),
+      { label: `Recursos externos · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/resources`, Icon: Link2 },
+      { label: `Cartografia · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/cartography`, Icon: Map },
+      { label: `Relações · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/relations`, Icon: GitFork },
+      { label: `Timeline · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/timeline`, Icon: CalendarDays },
+      { label: `Bestiário · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/bestiary`, Icon: PawPrint },
       { label: `Portal · ${activeWorld.name}`, path: `/app/worlds/${activeWorld.id}/portal`, Icon: FileText },
     ] : []),
   ], [activeWorld]);

@@ -1,4 +1,4 @@
-import { CalendarPlus, Plus, Save, Trash2, UserPlus } from "lucide-react";
+import { BookOpen, CalendarPlus, History, Map, Plus, Save, ScrollText, Swords, Trash2, UserPlus, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Link,
@@ -14,6 +14,7 @@ import {
   Badge,
   Empty,
   formatDate,
+  Loading,
   PageHeader,
 } from "./dashboard-page";
 import { displayLabel } from "../labels";
@@ -111,19 +112,16 @@ export function CampaignsPage() {
       ) : (
         <div className="campaign-grid">
           {items.map((item) => (
-            <Link
-              className="campaign-card"
-              to={`/app/campaigns/${item.id}`}
-              key={item.id}
-            >
-              <div>
+            <article className="campaign-card" key={item.id}>
+              <Link className="campaign-card-main" to={`/app/campaigns/${item.id}`}>
+                <div>
                 <Badge>{item.status}</Badge>
                 {item.sessionMode === "ONE_SHOT" && <Badge>{item.sessionMode}</Badge>}
                 <span className="eyebrow">{item.rpgTitle}{item.rpgArchived && " · RPG arquivado"}</span>
                 <h2>{item.name}</h2>
                 <p>{item.nextAction}</p>
-              </div>
-              <dl>
+                </div>
+                <dl>
                 <div>
                   <dt>Etapa</dt>
                   <dd>{item.stage}</dd>
@@ -142,8 +140,13 @@ export function CampaignsPage() {
                     {item.progress === null ? "Sem meta" : `${item.progress}%`}
                   </dd>
                 </div>
-              </dl>
-            </Link>
+                </dl>
+              </Link>
+              <div className="campaign-card-actions">
+                <Link className="ghost-button link-button" to={`/app/campaigns/${item.id}`}>Abrir campanha</Link>
+                <Link className="secondary-button link-button" to={`/app/campaigns/${item.id}/vtt`}><Swords size={16}/>Mesa do Mestre</Link>
+              </div>
+            </article>
           ))}
         </div>
       )}
@@ -176,13 +179,16 @@ export function CampaignFormPage() {
   const [groups, setGroups] = useState<PlayGroup[]>([]);
   const [adventures, setAdventures] = useState<AdventureOption[]>([]);
   const worldId = search.get('worldId');
+  const requestedAdventureId = search.get('adventureId');
   const [form, setForm] = useState<Record<string, string>>({
     ...blank,
     rpgId: search.get("rpgId") ?? "",
     playGroupId: search.get("playGroupId") ?? "",
+    adventureEntityId: requestedAdventureId ?? "",
     sessionMode: search.get("sessionMode") === "ONE_SHOT" ? "ONE_SHOT" : blank.sessionMode,
   });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(Boolean(id));
   // RPG-1.0-BATCH7: guard `active` evita que a resposta descartável do efeito duplicado pelo
   // React StrictMode (dev only) sobrescreva `form` depois que o usuário já começou a editar
   // (mesmo achado real de VaultFormPage/WorldFormPage, via E2E).
@@ -204,7 +210,7 @@ export function CampaignFormPage() {
           nextSessionDate: item.nextSessionDate ?? "",
           sessionGoal: item.sessionGoal?.toString() ?? "",
           playGroupId: item.playGroupId ?? "",
-          adventureEntityId: item.adventureEntityId ?? "",
+          adventureEntityId: requestedAdventureId ?? item.adventureEntityId ?? "",
           legacyMembersText: item.legacyMembersText,
           legacyCharactersText: item.legacyCharactersText,
           notes: item.notes,
@@ -217,9 +223,10 @@ export function CampaignFormPage() {
             if (active) setRpgs((current) => (current.some((existing) => existing.id === rpg.id) ? current : [...current, rpg]));
           }).catch(()=>{});
         }
-      }).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar esta campanha.');});
+      }).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar esta campanha.');})
+        .finally(()=>{if(active)setLoading(false);});
     return () => { active = false; };
-  }, [id,worldId]);
+  }, [id,requestedAdventureId,worldId]);
   const update = (key: string, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
   const submit = async (event: FormEvent) => {
@@ -243,6 +250,7 @@ export function CampaignFormPage() {
       setError(reason instanceof Error ? reason.message : "Falha inesperada.");
     }
   };
+  if (loading) return <Loading/>;
   return (
     <div className="page narrow">
       <PageHeader
@@ -364,7 +372,7 @@ export function CampaignFormPage() {
             {groups.map((group)=><option value={group.id} key={group.id}>{group.name}</option>)}
           </select>
         </label>
-        <label>
+        <label id="campaign-adventure">
           Adventure principal
           <select value={form.adventureEntityId} onChange={(e) => update("adventureEntityId", e.target.value)}>
             <option value="">Nenhuma</option>
@@ -427,14 +435,28 @@ export function CampaignDetailPage() {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await postJson(`/campaigns/${id}/members`, {
-      playerName: form.get("playerName"),
-      characterName: form.get("characterName"),
+    const playerName = String(form.get("playerName") ?? "");
+    const characterName = String(form.get("characterName") ?? "");
+    const result = await postJson<{ id: string }>(`/campaigns/${id}/members`, {
+      playerName,
+      characterName,
       notes: "",
       active: true,
     });
     formElement.reset();
-    await load();
+    resource.mutate((current) => ({
+      ...current,
+      members: [...current.members, {
+        id: result.id,
+        playerName,
+        characterName,
+        characterEntityId: null,
+        notes: "",
+        active: 1,
+        linkedUserId: null,
+        isGameMaster: 0,
+      }],
+    }));
   };
   const remove = async () => {
     if (
@@ -453,19 +475,20 @@ export function CampaignDetailPage() {
         action={
           <div className="button-row">
             <Link
-              className="secondary-button link-button"
+              className="ghost-button link-button"
               to={`/app/campaigns/${id}/edit`}
             >
               Editar
             </Link>
             <Link
-              className="ghost-button link-button"
+              className="primary-button link-button"
               to={`/app/campaigns/${id}/vtt`}
             >
-              Mesa Virtual
+              <Swords size={17} />
+              Mesa do Mestre
             </Link>
             <Link
-              className="primary-button link-button"
+              className="secondary-button link-button"
               to={`/app/campaigns/${id}/sessions/new`}
             >
               <CalendarPlus size={17} />
@@ -499,8 +522,36 @@ export function CampaignDetailPage() {
           </article>
         ))}
       </section>
+      <section className="campaign-hub" aria-label="Hub da campanha">
+        <article className="panel campaign-hub-card">
+          <span className="eyebrow">Preparação</span>
+          <h2><BookOpen size={20}/>Adventure e conteúdo</h2>
+          {data.item.adventureEntityId
+            ? <p>Adventure principal: <Link to={`/app/vault/${data.item.adventureEntityId}/adventure`}>{data.item.adventureName}</Link>.</p>
+            : <><p>Nenhuma Adventure vinculada.</p><div className="button-row"><Link className="primary-button link-button" to={`/app/vault/new?type=ADVENTURE&campaignId=${id}`}>Criar Adventure</Link><Link className="secondary-button link-button" to={`/app/campaigns/${id}/edit#campaign-adventure`}>Vincular existente</Link></div></>}
+          <a href="#campaign-content">Ver conteúdo relacionado e handouts</a>
+        </article>
+        <article className="panel campaign-hub-card campaign-hub-featured">
+          <span className="eyebrow">Mesa</span>
+          <h2><Swords size={20}/>Mesa do Mestre</h2>
+          <p>VTT · cenas · tokens · fog · combate e iniciativa.</p>
+          <div className="button-row"><Link className="primary-button link-button" to={`/app/campaigns/${id}/vtt`}>Abrir Mesa do Mestre</Link><Link className="secondary-button link-button" to={`/app/campaigns/${id}/sessions/new`}>Registrar sessão</Link></div>
+        </article>
+        <article className="panel campaign-hub-card">
+          <span className="eyebrow">Jogadores</span>
+          <h2><Users size={20}/>Grupo e personagens</h2>
+          <p>Membros, Co-Mestres, personagens vinculados e suas fichas.</p>
+          <div className="button-row"><a className="secondary-button link-button" href="#campaign-players">Ver jogadores</a><Link className="ghost-button link-button" to="/app/sheets"><ScrollText size={16}/>Fichas</Link></div>
+        </article>
+        <article className="panel campaign-hub-card">
+          <span className="eyebrow">Histórico e planejamento</span>
+          <h2><History size={20}/>Sessões e notas</h2>
+          <p>Datas, frequência, progresso, notas e o histórico da campanha.</p>
+          <div className="button-row"><a className="secondary-button link-button" href="#campaign-history">Ver histórico</a><a className="ghost-button link-button" href="#campaign-planning">Planejamento</a></div>
+        </article>
+      </section>
       <div className="dashboard-grid">
-        <section className="panel">
+        <section className="panel" id="campaign-players">
           <h2>Jogadores e personagens</h2>
           <form className="inline-form" onSubmit={addMember}>
             <input
@@ -537,7 +588,7 @@ export function CampaignDetailPage() {
         </section>
         <InviteFriendPanel targetType="CAMPAIGN" targetId={id!}/>
         <CoGmPanel campaignId={id!} isOwner={data.item.isOwner}/>
-        <section className="panel">
+        <section className="panel" id="campaign-planning">
           <h2>Planejamento</h2>
           <dl className="stacked-dl">
             <div>
@@ -562,11 +613,11 @@ export function CampaignDetailPage() {
           </p>
         </section>
       </div>
-      <section className="panel campaign-links">
-        <div className="section-heading"><div><h2>Entidades do Vault</h2><p className="section-note">Referências e conteúdo ativo vinculados a esta campanha.</p></div><Link to="/app/vault">Abrir Vault</Link></div>
+      <section className="panel campaign-links" id="campaign-content">
+        <div className="section-heading"><div><h2><Map size={20}/>Conteúdo relacionado</h2><p className="section-note">Adventure, handouts, mapas e referências continuam nos seus módulos de origem; este hub apenas oferece os caminhos.</p></div><Link to="/app/vault">Abrir Vault</Link></div>
         {data.entities.length?<div className="entity-list">{data.entities.map((entity)=><Link key={entity.id} to={`/app/vault/${entity.id}`}><span className="entity-type">{displayLabel(entity.entityType)}</span><div><strong>{entity.name}</strong><p>{entity.summary||`${displayLabel(entity.usageType)} · ${displayLabel(entity.visibility)}`}</p></div></Link>)}</div>:<p>Nenhuma entidade vinculada.</p>}
       </section>
-      <section className="panel">
+      <section className="panel" id="campaign-history">
         <div className="section-heading">
           <h2>Histórico de sessões</h2>
           <Link to={`/app/campaigns/${id}/sessions/new`}>Registrar sessão</Link>
@@ -644,6 +695,7 @@ function CampaignMemberEditor({campaignId,member,onUpdated,characterOptions}:{ca
   return <div className="campaign-member-editor"><label>{member.isGameMaster?'Narrador':'Jogador'}{member.linkedUserId&&<small>Conta cadastrada</small>}<input aria-label={`Jogador ${member.playerName}`} value={form.playerName} disabled={Boolean(member.linkedUserId)} onChange={(event)=>setForm({...form,playerName:event.target.value})}/></label><input aria-label={`Personagem de ${member.playerName}`} placeholder="Personagem" value={form.characterName} onChange={(event)=>setForm({...form,characterName:event.target.value})}/>
     {/* F-033: liga um Vault CHARACTER (ficha/dados estruturados) ao membro — vira "Meu Personagem" na visão do jogador; texto livre acima continua existindo à parte (compatibilidade). */}
     <select aria-label={`Personagem do Vault vinculado a ${member.playerName}`} value={form.characterEntityId} onChange={(event)=>setForm({...form,characterEntityId:event.target.value})}><option value="">Sem ficha vinculada</option>{characterOptions.map((option)=><option key={option.id} value={option.id}>{option.name}</option>)}</select>
+    {form.characterEntityId&&<Link className="ghost-button link-button" to={`/app/vault/${form.characterEntityId}`}>Abrir personagem e ficha</Link>}
     <input aria-label={`Notas de ${member.playerName}`} placeholder="Notas" value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/><label className="checkbox"><input type="checkbox" checked={form.active} onChange={(event)=>setForm({...form,active:event.target.checked})}/>Ativo</label><button type="button" className="icon-button" aria-label={`Salvar ${member.playerName}`} onClick={()=>void save()}><Save/></button><button type="button" className="icon-button" aria-label={`Excluir ${member.playerName}`} onClick={async()=>{if(confirm('Excluir este membro?')){await deleteApi(`/campaigns/${campaignId}/members/${member.id}`);await onUpdated();}}}><Trash2/></button>{error&&<p className="form-error">{error}</p>}</div>;
 }
 

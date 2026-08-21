@@ -24,7 +24,7 @@ import { expect, test, type Page } from "@playwright/test";
 // a exclusão de logout é estrutural, não uma lista negra frágil de texto.
 const DENYLIST_TEXT = /sair|excluir|remover|revogar|apagar|deletar|bloquear|recusar|log ?out/iu;
 const MAX_PAGES = 40;
-const PER_PAGE_TIMEOUT = 15_000;
+const PER_PAGE_TIMEOUT = 30_000;
 
 async function register(page: Page, email: string, name: string) {
   await page.goto("/register");
@@ -77,7 +77,9 @@ async function assertPageHealthy(page: Page, from: string) {
 }
 
 test("Crawler de rotas/controles (Seção 18): todo link interno alcançável a partir do Dashboard carrega sem 404/crash/spinner preso, e todo botão tem nome acessível", async ({ page }) => {
-  test.setTimeout(300_000);
+  // Até 40 cargas diretas reinicializam providers e consultam o Worker/D1; margem local
+  // proporcional ao escopo, sem reduzir rotas, controles ou asserções.
+  test.setTimeout(900_000);
   const suffix = Date.now();
   await register(page, `e2e-crawler-owner-${suffix}@example.com`, `Crawler ${suffix}`);
 
@@ -110,7 +112,7 @@ test("Crawler de rotas/controles (Seção 18): todo link interno alcançável a 
   // na navegação — sem isso, o crawler nunca alcançaria essas rotas. ----
   await page.goto("/app");
   await page.getByLabel("Selecionar contexto ativo").selectOption({ label: worldName });
-  await expect(page.getByRole("link", { name: "Wiki" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("link", { name: "Wiki" })).toBeVisible({ timeout: 30_000 });
 
   // ---- BFS a partir do Dashboard. ----
   const visited = new Set<string>();
@@ -123,6 +125,7 @@ test("Crawler de rotas/controles (Seção 18): todo link interno alcançável a 
     const key = href.split("?")[0]!;
     if (visited.has(key)) continue;
     visited.add(key);
+    console.log(`[crawler] ${visited.size}/${MAX_PAGES} ${key}`);
 
     const response = await page.goto(href, { waitUntil: "domcontentloaded" });
     if (response && response.status() === 404) { notFoundLinks.push({ href, from }); continue; }

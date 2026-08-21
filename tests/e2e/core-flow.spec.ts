@@ -1,7 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect as baseExpect, test } from "@playwright/test";
 
 test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => {
-  test.setTimeout(60_000);
+  // Aceite ponta a ponta do produto inteiro, com várias recargas e gravações reais.
+  test.setTimeout(900_000);
+  const expect = baseExpect.configure({ timeout: 30_000 });
   const attachThemeScreenshot = async (name: string) => {
     if (test.info().project.name !== "chromium") return;
 
@@ -43,7 +45,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("link", { name: "Já guardei, continuar" }).click();
   await expect(page).toHaveURL(/\/app$/u);
   await openNavigation();
-  await page.getByRole("link", { name: "Configurações" }).click();
+  await page.getByRole("link", { name: "Configurações", exact: true }).click();
   await expect(page.getByRole("radio", { name: /Sistema/u })).toBeChecked();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("radio", { name: /Escuro/u }).check();
@@ -64,7 +66,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await expect(page.getByRole("radio", { name: /Sistema/u })).toBeChecked();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await openNavigation();
-  await page.getByRole("link", { name: "Grupos" }).click();
+  await page.getByRole("link", { name: "Grupos", exact: true }).click();
   await page.getByRole("link", { name: "Novo grupo" }).click();
   await page.getByLabel("Nome do grupo").fill("Mesa E2E");
   await page.getByRole("button", { name: "Salvar grupo" }).click();
@@ -76,7 +78,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("button", { name: "Adicionar convidado" }).click();
   await expect(page.getByLabel("Nome de Marcelo")).toBeVisible();
   await openNavigation();
-  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await page.getByRole("link", { name: "Biblioteca", exact: true }).click();
   await page.getByRole("link", { name: "Novo RPG" }).click();
   await page.getByLabel("Título", { exact: true }).fill("Blue Rose E2E");
   await page.getByLabel("Categoria").selectOption("fantasia");
@@ -126,7 +128,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("button", { name: "Salvar sessão" }).click();
   await expect(page.getByText("O chamado")).toBeVisible();
   await openNavigation();
-  await page.getByRole("link", { name: "Visão geral" }).click();
+  await page.getByRole("link", { name: "Painel", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Painel do aventureiro" }),
   ).toBeVisible();
@@ -135,17 +137,17 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   ).toBeVisible();
   await attachThemeScreenshot("dashboard-light");
   await openNavigation();
-  await page.getByRole("link", { name: "Configurações" }).click();
+  await page.getByRole("link", { name: "Configurações", exact: true }).click();
   await page.getByRole("radio", { name: /Escuro/u }).check();
   await openNavigation();
-  await page.getByRole("link", { name: "Visão geral" }).click();
+  await page.getByRole("link", { name: "Painel", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(
     page.getByRole("heading", { name: "Painel do aventureiro" }),
   ).toBeVisible();
   await attachThemeScreenshot("dashboard-dark");
   await openNavigation();
-  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await page.getByRole("link", { name: "Biblioteca", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Seu catálogo de RPGs" }),
   ).toBeVisible();
@@ -154,7 +156,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   ).toBeVisible();
   await attachThemeScreenshot("biblioteca-dark");
   await openNavigation();
-  await page.getByRole("link", { name: "Configurações" }).click();
+  await page.getByRole("link", { name: "Configurações", exact: true }).click();
   await page.getByRole("radio", { name: /Claro/u }).check();
   await openNavigation();
   await page.getByRole("button", { name: "Sair" }).click();

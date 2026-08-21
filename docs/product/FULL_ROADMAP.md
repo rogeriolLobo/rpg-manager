@@ -1,5 +1,10 @@
 # RPG Manager — Roadmap Completo Planejado
 
+> **Nota de superfície (2026-08-21):** `PLANNED_ROADMAP_COMPLETE` descreve entrega técnica do
+> roadmap, não garante que uma pessoa encontre as funcionalidades pela interface. Para o inventário
+> de rotas, entradas humanas e prova de descoberta, prevalece
+> `docs/product/PRODUCT_SURFACE_AUDIT.md`.
+
 Auditoria de todo o roadmap real (não inventado) a partir de:
 `docs/product/MASTER_BACKLOG.md`, `docs/product/RPG_MANAGER_FINAL_STATUS.md`,
 `docs/audit/RPG_MANAGER_1_0_MATRIX.md`, `docs/audit/WORLDCRAFT_GAP_MATRIX.md`,

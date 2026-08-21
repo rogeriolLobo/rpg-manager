@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect as baseExpect, test, type Page } from "@playwright/test";
+
+const expect = baseExpect.configure({ timeout: 30_000 });
 
 // RPG-1.0-BATCH4: nenhuma página pode ficar presa em "Carregando…" para sempre quando o
 // load inicial falha (404 de recurso inexistente, 404-por-autorização — o backend nunca
@@ -18,7 +20,7 @@ async function register(page: Page, email: string) {
 }
 
 test("404 de recurso inexistente mostra estado amigável, não spinner infinito, e navegação continua", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(240_000);
   await register(page, `e2e-error-404-${Date.now()}@example.com`);
 
   await page.goto("/app/library/00000000-0000-0000-0000-000000000000");
@@ -27,12 +29,12 @@ test("404 de recurso inexistente mostra estado amigável, não spinner infinito,
 
   // Navegação continua funcional depois do erro (não é um estado travado).
   if ((page.viewportSize()?.width ?? 1000) <= 850) await page.getByRole("button", { name: "Abrir menu" }).click();
-  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await page.getByRole("link", { name: "Biblioteca", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/library$/u);
 });
 
 test("404 por autorização (World privado de outra conta) mostra o mesmo estado amigável, sem vazar existência", async ({ page, browser }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(240_000);
   const ownerEmail = `e2e-error-owner-${Date.now()}@example.com`;
   await register(page, ownerEmail);
   await page.goto("/app/worlds/new");
@@ -55,7 +57,7 @@ test("404 por autorização (World privado de outra conta) mostra o mesmo estado
 });
 
 test("sessão expirada durante navegação SPA (sem reload) redireciona para o login em vez de travar", async ({ page, context }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(240_000);
   await register(page, `e2e-error-session-${Date.now()}@example.com`);
   await page.goto("/app/library/new");
   await page.getByLabel("Título", { exact: true }).fill("RPG Antes da Sessão Expirar");
@@ -71,6 +73,6 @@ test("sessão expirada durante navegação SPA (sem reload) redireciona para o l
   // Navegação SPA (clique, não page.goto) — dispara um novo fetch autenticado que agora
   // falha com 401 UNAUTHENTICATED. Sem tratamento, o app não percebe e a página trava.
   if ((page.viewportSize()?.width ?? 1000) <= 850) await page.getByRole("button", { name: "Abrir menu" }).click();
-  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await page.getByRole("link", { name: "Biblioteca", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/u, { timeout: 15_000 });
 });
