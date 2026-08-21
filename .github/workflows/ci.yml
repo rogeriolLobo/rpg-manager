@@ -33,6 +33,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run lint
@@ -69,6 +72,9 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
