@@ -32,10 +32,7 @@ jobs:
     container: mcr.microsoft.com/playwright:v1.62.1-noble
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
-        with:
-          cache: 'npm'
+      - uses: actions/checkout@v4
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run lint
@@ -71,10 +68,7 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
-        with:
-          cache: 'npm'
+      - uses: actions/checkout@v4
       - run: npm ci
       - run: cp .dev.vars.example .dev.vars
       - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3

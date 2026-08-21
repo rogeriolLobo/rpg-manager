@@ -6,6 +6,8 @@ import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 
 function commitHash() {
+  const envSha = process.env.GITHUB_SHA || process.env.CF_PAGES_COMMIT_SHA || process.env.COMMIT_REF;
+  if (envSha) return envSha.slice(0, 7);
   try {
     return execSync('git rev-parse --short HEAD').toString().trim();
   } catch {
