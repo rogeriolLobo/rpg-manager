@@ -24,13 +24,13 @@ IDs seguem a sequência já usada em `MASTER_BACKLOG.md` (F-001..F-015).
 | F-004 | GM Tools (dados, timer) | `DONE` (BATCH3) |
 | F-005 | Ideas / Quick Capture | `DONE` (BATCH2) |
 | F-006 a F-014 | (busca, invites, quests/handouts via Vault, compendium via Vault, split de domínio Library, capa+KV, Open Library, dedup ISBN, archive) | `DONE` |
-| F-015 | Backup/Restore JSON completo | `IN_PROGRESS` (BATCH20 — reclassificado de `DONE` para `IN_PROGRESS`: "Backup/Restore completo" só é aceito quando o restore cobre TODOS os domínios persistentes relevantes, não apenas o export) — export v9 completo; restore agora cobre Worlds/Creature Stat Templates/Vault/Journal/world_entity_links/**Library/Groups/GroupMembers/Campaigns/CampaignMembers/Sessions/Attendance/Sheet Templates/Character Sheets/Wiki (pastas/tags/aliases)/Relations/Cartografia (mapas/pins)/External Resources/Timeline (eras/calendário/datas de eventos)/Adventures estruturadas (scenes/encounters/scene entities/handouts)/VTT (scenes/tokens/fog/combatants — estado ao vivo sempre restaurado inativo)/Social (friendships/blocks/invites — só quando quem restaura é uma das partes reais, nunca forja grafo social alheio)/Social Library Interest** (BATCH20); Revision History e Files (bytes) continuam exportados (metadata) sem restore automatizado — ver `RestorePlan` em `backup-restore.ts` |
+| F-015 | Backup/Restore JSON completo | `DONE` (BATCH20-22, revalidado 2026-08-21) — export v9 completo; restore automatizado cobre Worlds/Creature Stat Templates/Vault/Journal/world_entity_links/Library/Groups/GroupMembers/Campaigns/CampaignMembers/Sessions/Attendance/Sheet Templates/Character Sheets/Wiki (pastas/tags/aliases)/Relations/Cartografia (mapas/pins)/External Resources/Timeline (eras/calendário/datas de eventos)/Adventures estruturadas (scenes/encounters/scene entities/handouts)/VTT (scenes/tokens/fog/combatants — estado ao vivo sempre restaurado inativo)/Social (friendships/blocks/invites — só quando quem restaura é uma das partes reais, nunca forja grafo social alheio)/Social Library Interest + Assets (bytes reais via bundle separado `GET/POST /api/v1/files/backup`, BATCH21). Revision History e Notifications ficam deliberadamente fora do restore operacional — decisão semântica formal (`ARCHIVAL_HISTORY`/`EPHEMERAL_USER_ACTIVITY`), export completo, preview sempre avisa, testado — ver `RestorePlan` em `backup-restore.ts` |
 
 ## Roadmap planejado ainda não iniciado
 
 | ID | FEATURE | STATUS_ATUAL | PLANEJADA? | DEPENDÊNCIAS | RISCO | MIGRATION? | BACKEND | FRONTEND | TESTES | STATUS |
 |---|---|---|---|---|---|---|---|---|---|---|
-| F-015 | Backup/Restore completo, versionado (`schemaVersion`) | `IN_PROGRESS` (BATCH20): export v9 cobre 100% dos domínios; restore agora cobre Worlds/Creature Stat Templates/Vault (+especializados)/Journal/world_entity_links (BATCH19) + Library/Groups/GroupMembers/Campaigns/CampaignMembers/Sessions/Attendance (BATCH20, com deduplicação de título/nome única ao vivo e preservação de referência a conta externa real quando ela ainda existe — nunca recriada) — Wiki/Relations/Cartografia/External Resources/Timeline/Revision History/Social/Sheets/Adventures estruturadas/Files/VTT exportados, restore automatizado pendente | Sim — `CLAUDE.md` §22 do pedido original de finalização | Nenhuma (todos os domínios já existem) | Médio — mitigado: restore sempre cria registros novos, nunca sobrescreve | Não (`backup_restore_jobs`, migration 0026, aditiva) | `DONE` | `DONE` | `DONE` (2 testes novos: round-trip completo Group→Campaign→Member→Session + EXTERNAL_DEPENDENCY) | `IN_PROGRESS` (restore dos domínios restantes segue como próximo incremento) |
+| F-015 | Backup/Restore completo, versionado (`schemaVersion`) | `DONE` (BATCH20-22, revalidado 2026-08-21): export v9 cobre 100% dos domínios; restore automatizado cobre Worlds/Creature Stat Templates/Vault (+especializados)/Journal/world_entity_links (BATCH19), Library/Groups/GroupMembers/Campaigns/CampaignMembers/Sessions/Attendance (BATCH20, deduplicação ao vivo, referência a conta externa real preservada, nunca recriada), Wiki/Relations/Cartografia/External Resources/Timeline/Adventures estruturadas/VTT/Social/Sheet Templates/Character Sheets (BATCH20b-g), Assets em bytes reais via bundle separado (BATCH21). Revision History/Notifications: decisão semântica formal de NÃO restaurar operacionalmente (`ARCHIVAL_HISTORY`/`EPHEMERAL_USER_ACTIVITY`), export completo + preview sempre avisa (BATCH22) | Sim — `CLAUDE.md` §22 do pedido original de finalização | Nenhuma (todos os domínios já existem) | Médio — mitigado: restore sempre cria registros novos, nunca sobrescreve | Não (`backup_restore_jobs`, migration 0026, aditiva) | `DONE` | `DONE` | `DONE` (8 arquivos de teste de round-trip, IDOR de restore entre contas, forjar grafo social bloqueado, ARCHIVAL_HISTORY/EPHEMERAL_USER_ACTIVITY testados) | `DONE` |
 | F-016 | Social — amizades (busca, pedido, aceitar, recusar, cancelar, remover, bloquear) | Implementado: `friend_requests`+`friendships`+`user_blocks` (migration 0027), busca reaproveita `GET /directory/users` existente (nunca expõe e-mail), pedido cruzado auto-aceita, bloquear remove amizade/pedido nos dois sentidos e impede novo pedido | Sim — `CLAUDE.md` §32 | F-015 (backup deve cobrir dados sociais desde o início — ver nota BATCH7 abaixo) | Alto — superfície de IDOR/privacidade nova, mitigada com testes dedicados | Sim — `friend_requests`,`friendships`,`user_blocks` (0027, aditiva) | `DONE` | `DONE` | `DONE` (6 integration + 2 E2E desktop/mobile) | `DONE` (BATCH7) |
 | F-017 | Social + Biblioteca (visão parcial da Library de amigos, RPGs em comum, interesse social ≠ campo pessoal "Quero jogar") | Implementado: opt-in explícito (`user_preferences.library_visible_to_friends`, desligado por padrão), `rpg_social_interest` separado de `wants_to_play` (nunca exposto), `GET /social/friends/:userId/library` nunca retorna notes/priority/playGroupNotes/playGroupId/gameMaster/plannedPlayDate | Sim — `CLAUDE.md` §32 | F-016 (`DONE`) | Alto — mitigado: opt-in por padrão desligado, campos privados nunca no SELECT, testado explicitamente (achado real corrigido durante a rodada: 0/1 do SQLite vs `boolean` no teste, não é bug de produto) | Sim — `user_preferences.library_visible_to_friends`,`rpg_social_interest` (migration 0028, aditiva) | `DONE` | `DONE` | `DONE` (3 integration + parte do E2E) | `DONE` (BATCH8) |
 | F-018 | Social + Grupos/Campanhas (convidar amigo, propostas de mesa, guests) | Implementado: `social_invites` (convite explícito, distinto do fluxo já existente de adicionar qualquer conta cadastrada direto), só amigo pode ser convidado, só dono do Grupo/Campanha convida, aceitar cria `play_group_members`/`campaign_members` vinculado (`user_id`) — remoção de membro (já existente) continua preservando histórico (sessions/attendance append-only, não alterado) | Sim — `CLAUDE.md` §32 | F-016 (`DONE`) | Médio — mitigado: convite nunca cria membro direto, só após aceite; papel GM continua exclusivo (mesma invariante do fluxo antigo) | Sim — `social_invites` (migration 0028, aditiva) | `DONE` | `DONE` | `DONE` (3 integration + parte do E2E) | `DONE` (BATCH8) |
@@ -101,13 +101,24 @@ a F-034 está `DONE`, F-015 foi revalidado cobrindo os domínios novos, e
 CI/deploy/produção convergem — ver `docs/product/RPG_MANAGER_COMPLETE_STATUS.md`
 para o relatório final.
 
-> **Nota (BATCH20-22):** declaração rejeitada pelo responsável do produto
-> logo em seguida — "revalidado cobrindo os domínios novos" não significava
-> restore automatizado real (só export). F-015 reclassificado para
-> `IN_PROGRESS` e expandido nesta rodada para cobrir automaticamente ~30
-> domínios persistentes (era 6). Ver `docs/product/PROJECT_COMPLETION_AUDIT.md`
-> para o estado atual e o que ainda falta antes de qualquer nova declaração
-> de conclusão.
+> **Nota (BATCH20-22, histórica):** declaração rejeitada pelo responsável
+> do produto logo em seguida — "revalidado cobrindo os domínios novos"
+> não significava restore automatizado real (só export). F-015
+> reclassificado para `IN_PROGRESS` e expandido naquela rodada para
+> cobrir automaticamente ~30 domínios persistentes (era 6).
+>
+> **Atualização (2026-08-21, auditoria final independente cross-machine,
+> PC de casa):** F-015 concluído de verdade nas rodadas seguintes
+> (BATCH20b-22, mesmo `origin/main`) — restore automatizado hoje cobre
+> todos os domínios persistentes planejados, incluindo Assets em bytes
+> reais (não só metadata). F-015 reclassificado de volta para `DONE`
+> (linhas acima). `docs/product/PROJECT_COMPLETION_AUDIT.md` também foi
+> atualizado e marca sua Seção 2 ("O que ainda falta") como
+> `HISTORICAL/SUPERSEDED` — reflete o estado em BATCH20-22, não o atual.
+> F-034/F-035/F-036 (GM View, Handout realtime, Multi-GM) também foram
+> implementados e confirmados nesta auditoria (ver linhas correspondentes
+> acima). Ver relatório final desta auditoria para a declaração de
+> conclusão vigente.
 
 **Causa raiz real do flake de `vault-worlds-flow.spec.ts` encontrada e
 corrigida (2026-08-20):** o CI artifact upload (item acima) permitiu

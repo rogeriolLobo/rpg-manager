@@ -1,16 +1,31 @@
-# RPG Manager — Auditoria de Completude do Projeto
+# RPG Manager — Auditoria de Completude do Projeto (HISTÓRICO — ver nota)
+
+> **Nota (2026-08-21, auditoria final independente cross-machine, PC de
+> casa):** este documento foi escrito em BATCH20-22, quando os itens da
+> seção "O que ainda falta" abaixo eram genuinamente pendentes. As
+> sessões seguintes (BATCH23, mesmo `origin/main`) implementaram TODOS
+> eles — confirmado por auditoria independente contra código/migrations/
+> testes reais, não só pelos commits: Multi-GM (F-036, `85257ea`),
+> Handout realtime (F-035, `863a185`/`cd5d0f9`), load test formal +
+> rate limits de VTT (`2320f08`), varredura de TODO/FIXME (`1657465`),
+> crawler de botões mortos (`6a24746`), responsivo/temas (`8d4d903`),
+> acessibilidade (`5c4b5af`), reauditoria de segurança
+> (`docs/audit/SECURITY_REAUDIT_BATCH23.md`), e as 4 suítes E2E
+> multi-contexto (One-Shot/Social/Adventure/VTT multi-GM). A Seção 2
+> abaixo (tabela "O que ainda falta") e a Seção 4 ("Próximos passos")
+> ficam preservadas como registro histórico do estado em BATCH20-22 —
+> **não refletem mais o estado atual**. Ver `docs/product/FULL_ROADMAP.md`
+> e `docs/product/MASTER_BACKLOG.md` para o status vigente, e o
+> relatório final desta auditoria (commit `889135b` em diante) para a
+> declaração de conclusão real.
 
 Documento criado em resposta ao pedido de finalização absoluta
 ("RPG MANAGER — FINALIZAÇÃO ABSOLUTA DO PROJETO"), que rejeitou a
 declaração anterior `PLANNED_ROADMAP_COMPLETE` e exigiu uma prova mais
 rigorosa antes de qualquer declaração de conclusão.
 
-**Este documento NÃO declara `RPG MANAGER — PROJECT_COMPLETE`.**
-
-Itens reais e substanciais do pedido de finalização continuam
-genuinamente pendentes (Seção "O que ainda falta" abaixo). Declarar
-conclusão agora seria a fabricação que o próprio pedido proíbe
-explicitamente (Seção 34/37 do pedido original).
+**Quando escrito, este documento NÃO declarava `RPG MANAGER —
+PROJECT_COMPLETE`** — ver nota acima para o que mudou desde então.
 
 Fonte da verdade: código real, migrations, testes executados localmente e
 em CI, não relatórios anteriores.
@@ -121,7 +136,7 @@ sockets, cleanup) — fechadas nesta rodada:**
 
 ---
 
-## 2. O que ainda falta (genuíno, não escondido)
+## 2. O que ainda faltava em BATCH20-22 [HISTORICAL/SUPERSEDED — ver nota no topo]
 
 | Item do pedido | Seção | Status | Observação |
 |---|---|---|---|
@@ -144,7 +159,7 @@ sockets, cleanup) — fechadas nesta rodada:**
 
 ---
 
-## 3. Por que a lista acima não foi fechada nesta rodada
+## 3. Por que a lista acima não foi fechada em BATCH20-22 [HISTORICAL]
 
 O pedido de finalização absoluta descreve, de forma realista, várias
 semanas de trabalho de engenharia (uma feature nova de arquitetura
@@ -167,7 +182,7 @@ e então avançar para a próxima feature nomeada mais concreta (Handout
 Realtime), em vez de tocar superficialmente em todos os 37 itens ao mesmo
 tempo.
 
-## 4. Próximos passos recomendados, em ordem de prioridade real
+## 4. Próximos passos recomendados em BATCH20-22 [HISTORICAL/SUPERSEDED — todos os 6 itens abaixo foram implementados nas sessões seguintes, ver nota no topo]
 
 1. Multi-GM (Seções 10-11) — desbloqueia o teste multi-contexto de VTT
    (Seção 18) e é a maior peça de arquitetura ainda pendente.

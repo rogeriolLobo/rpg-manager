@@ -720,7 +720,7 @@ completo (arquitetura, decisão snapshot-vs-diff, autorização, testes).
   recurso arquivado bloqueia restore) + `tests/e2e/revision-history.spec.ts`
   (fluxo completo Vault + World, desktop/mobile via projects do CI).
 
-## F-015 — Backup/Restore completo — `IN_PROGRESS` (RPG-1.0-BATCH6, revalidado BATCH19, expandido BATCH20)
+## F-015 — Backup/Restore completo — `DONE` (RPG-1.0-BATCH6, revalidado BATCH19, expandido BATCH20-22 — ver seção "BATCH20-23" mais abaixo neste arquivo para o fechamento completo)
 
 BATCH20 (pedido de finalização absoluta): reclassificado de `DONE` para
 `IN_PROGRESS` — "Backup/Restore completo" só é aceito quando o restore
@@ -1920,3 +1920,90 @@ Pedido explícito: transformar o máximo possível de
   continuam exigindo uma execução humana real em produção (Turnstile),
   mas agora com uma suíte E2E equivalente já provando o comportamento
   funcional correto localmente.
+
+## BATCH20-23 — F-015 expandido, F-035, F-036, hardening final — `DONE`
+
+Registro consolidado (este arquivo parou de ser atualizado entre
+BATCH19 e o commit `7da6d37` — código/testes/`FULL_ROADMAP.md` estavam
+corretos e à frente deste log; corrigido aqui na auditoria final
+independente de 2026-08-21). Detalhe completo de cada item nas linhas
+de `FULL_ROADMAP.md` (F-015/F-034/F-035/F-036) e em
+`docs/product/PROJECT_COMPLETION_AUDIT.md`.
+
+- **F-015 (BATCH20a-g)** — restore automatizado (`POST
+  /import/backup/preview`+`/confirm`) expandido de 6 domínios (Worlds/
+  Creature Stat Templates/Vault/Journal/world_entity_links) para
+  cobrir também Library, Groups/GroupMembers, Campaigns/
+  CampaignMembers/Sessions/Attendance, Sheet Templates/Character
+  Sheets, Wiki (pastas/tags/aliases), Relations, Cartografia,
+  External Resources, Timeline, Adventures estruturadas (scenes/
+  encounters/scene entities/handouts), VTT (scenes/tokens/fog/
+  combatants — estado ao vivo sempre restaurado inativo), Social
+  (friendships/blocks/invites — só quando quem restaura é uma das
+  partes reais) e Social Library Interest (achado real: nunca esteve
+  no export antes desta rodada). `schemaVersion` 8→9.
+- **F-015 Seção 8 (BATCH21)** — backup real de bytes de assets, não só
+  metadata: `GET/POST /api/v1/files/backup`, bundle separado do JSON
+  principal (bytes não cabem no armazenamento de job em D1), testado
+  com o asset original deletado antes do restore (prova de
+  autocontenção genuína) e bytes comparados byte a byte.
+- **F-015 Seção 24 (BATCH22)** — fechamento semântico formal: Revision
+  History (`entity_revisions`) e Notifications, os dois domínios que
+  ficavam com decisão de restore implícita, ganharam categoria
+  explícita no preview (`category:'ARCHIVAL_HISTORY'` /
+  `'EPHEMERAL_USER_ACTIVITY'`) — nunca reinjetados como histórico
+  operacional (produziria uma timeline falsa) nem como notificação
+  quebrada (payload referenciaria IDs que não existem mais).
+- **F-035 — Handout reveal via realtime (BATCH22-23)**: `PATCH/POST/
+  DELETE /adventures/:adventureId/handouts` notifica, pelo MESMO
+  Durable Object do realtime de VTT (F-031), toda Campaign que usa a
+  Adventure — eventos `HANDOUT_REVEALED`/`HANDOUT_HIDDEN`, nunca o
+  conteúdo do handout embutido no evento. Hook compartilhado novo
+  (`src/client/api/campaign-realtime.ts`, `useCampaignRealtime`) usado
+  por `VttLivePage`, `PlayerCampaignHomePage` e `VttPage` (console do
+  GM) — extrai connect/reconnect/backoff/ping/RESYNC/sequence-guard/
+  cleanup que antes só existia duplicado dentro de `VttLivePage`.
+  Achado real corrigido: `VttPage` não tinha nenhuma assinatura de
+  realtime (premissa de único GM que ficou falsa com Multi-GM) —
+  agora qualquer `STATE` recarrega cenas/combate na tela do mestre
+  também.
+- **F-036 — Multi-GM (BATCH23)**: `campaign_co_gms` (migration 0041,
+  aditiva — `campaigns.user_id` nunca muda, Owner continua único dono
+  real). Autorização centralizada em `src/server/content/
+  authorization.ts`: `authorizeCampaignManagement` (Owner∨Co-GM, usado
+  por VTT/handout-reveal/membros/sessões), `authorizeCampaignOwnership`
+  (Owner-only, excluir/editar configurações/vincular entidade de
+  referência/revogar Co-GM), `authorizeCampaignParticipation` (resolve
+  papel GM/PLAYER do realtime — Co-GM sempre `'GM'`). Convite
+  reaproveita o fluxo social já existente (papel "Narrador" em
+  `social_invites`). `GET /campaigns` passou a incluir campanhas
+  co-administradas, não só próprias. 6 testes de integração cobrindo a
+  matriz completa (Owner/Co-GM/Player/Outsider em VTT+handouts,
+  bloqueio de ação sensível, IDOR cross-campaign, descoberta na
+  listagem, realtime com 2 GMs simultâneos no mesmo Durable Object).
+- **Hardening final (BATCH23)**: load test formal de VTT
+  (`tests/integration/vtt-load-test.test.ts`, 3 cenários reais contra
+  o Worker local) + rate limiting (`VTT_ACTION_RATE_LIMITER` 90/60s,
+  `VTT_CONNECT_RATE_LIMITER` 20/60s, máximo 20 conexões WebSocket
+  simultâneas por sala) + crawler não-destrutivo de botões/rotas
+  mortas (`tests/e2e/dead-controls-crawler.spec.ts`) + suíte de
+  responsivo/temas (`tests/e2e/responsive-themes.spec.ts`, 5
+  breakpoints × 9 rotas, achado real corrigido: overflow horizontal em
+  390px na Mesa do Mestre) + acessibilidade via axe-core
+  (`tests/e2e/accessibility.spec.ts`, achado real corrigido: input
+  sem label no link ao vivo da Mesa Virtual) + reauditoria de
+  segurança completa (`docs/audit/SECURITY_REAUDIT_BATCH23.md`) +
+  varredura de TODO/FIXME/parciais escondidos (zero achados reais) +
+  fechamento real do flake de `vault-worlds-flow.spec.ts` (causa raiz:
+  contexts de browser extras nunca fechados vazando pelo resto da
+  fila do worker — corrigido com `close()`; auditoria final de
+  2026-08-21 endureceu ainda mais trocando por `try/finally` em todos
+  os 9 arquivos que usam `browser.newContext()`, já que `close()`
+  solto no fim do corpo do teste ainda vazava se um `expect()` no meio
+  lançasse).
+- **Auditoria final independente cross-machine (2026-08-21, PC de
+  casa)**: verificação factual de todas as declarações acima contra
+  código/migrations/testes reais (não só os commits/documentos) —
+  nenhuma contradição encontrada. Único gap real identificado e
+  corrigido nesta rodada: o `try/finally` de context cleanup acima.
+  Ver relatório final desta auditoria para a prova de release completa.
