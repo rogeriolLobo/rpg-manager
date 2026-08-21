@@ -22,26 +22,35 @@ type InternalResult<T> = { path: string; status: 'success'; data: T } | { path: 
 export function useResource<T>(path: string | null, fetcher: (path: string) => Promise<T> = (p) => api<T>(p)): ResourceState<T> & { reload: () => void; mutate: (updater: (data: T) => T) => void } {
   const [result, setResult] = useState<InternalResult<T> | null>(null);
   const requestId = useRef(0);
+  const pendingPath = useRef<string | null>(null);
   const fetcherRef = useRef(fetcher);
   // Mantém a closure mais recente do fetcher sem escrever no ref durante o render (só em
   // efeito, na ordem declarada — roda antes do efeito de carregamento abaixo).
   useEffect(() => { fetcherRef.current = fetcher; });
 
-  useEffect(() => {
-    if (path === null) return;
+  const load = useCallback((currentPath: string) => {
+    // O StrictMode executa setup→cleanup→setup dos efeitos no desenvolvimento. Reutilizar a
+    // requisição já em voo evita duas leituras idênticas no Worker/D1 e, principalmente, evita
+    // descartar a primeira resposta válida enquanto a duplicata ainda aguarda processamento.
+    if (pendingPath.current === currentPath) return;
     const id = (requestId.current += 1);
-    const currentPath = path;
+    pendingPath.current = currentPath;
     fetcherRef.current(currentPath).then((data) => {
       if (requestId.current === id) setResult({ path: currentPath, status: 'success', data });
     }).catch((error: unknown) => {
       if (requestId.current === id) setResult({ path: currentPath, status: 'error', error });
+    }).finally(() => {
+      if (requestId.current === id) pendingPath.current = null;
     });
-  }, [path]);
+  }, []);
+
+  useEffect(() => {
+    if (path === null) return;
+    load(path);
+  }, [load, path]);
 
   const reload = useCallback(() => {
     if (path === null) return;
-    const id = (requestId.current += 1);
-    const currentPath = path;
     // Não limpa `result` aqui: mantém os dados antigos visíveis até a nova resposta chegar
     // (stale-while-revalidate), em vez de forçar `status:'loading'` a cada reload. Um bug real
     // foi encontrado via E2E sem isso: cada `reload()` pós-mutação (ex.: adicionar membro)
@@ -49,12 +58,8 @@ export function useResource<T>(path: string | null, fetcher: (path: string) => P
     // tivesse acabado de digitar em outro formulário da mesma tela antes da resposta chegar.
     // Loading só deve aparecer na carga inicial ou quando `path` muda para outro recurso
     // (ver `state` derivado abaixo, que compara `result.path` com `path`).
-    fetcherRef.current(currentPath).then((data) => {
-      if (requestId.current === id) setResult({ path: currentPath, status: 'success', data });
-    }).catch((error: unknown) => {
-      if (requestId.current === id) setResult({ path: currentPath, status: 'error', error });
-    });
-  }, [path]);
+    load(path);
+  }, [load, path]);
 
   // Atualização local otimista pós-mutação (ex.: arquivar, trocar capa) sem round-trip de
   // rede — preserva o comportamento que as páginas já tinham com `setData((current) => ...)`.

@@ -1,12 +1,12 @@
 import { Download, NotebookPen, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ClientApiError, deleteApi, patchJson, postJson, putJson } from '../api/client';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import { SHEET_FIELD_TYPES, type PdfFieldMapping, type SheetFieldType } from '../../domain/sheets';
 import { detectAcroFormFields, fillSheetPdf, triggerPdfDownload } from '../pdf/sheet-pdf';
-import { Empty, Loading, PageHeader } from './dashboard-page';
+import { Loading, PageHeader } from './dashboard-page';
 
 // F-020 (BATCH9): Character Sheet Engine base — ver src/server/routes/sheets.ts. Modelos
 // (sheet_templates) são reutilizáveis entre Personagens/NPCs; a ficha em si
@@ -155,16 +155,17 @@ function toFormFields(template:SheetTemplateSummary):TemplateFormField[] {
 
 export function SheetTemplatesPage(){
   const resource=useResource<SheetTemplateSummary[]>('/sheets/templates',async()=>(await api<{items:SheetTemplateSummary[]}>('/sheets/templates')).items);
-  const [worlds,setWorlds]=useState<Array<{id:string;name:string}>>([]);
-  const [gameSystems,setGameSystems]=useState<Array<{id:string;name:string}>>([]);
+  const worldsResource=useResource<{worlds:Array<{id:string;name:string}>}>('/vault/metadata');
+  const gameSystemsResource=useResource<{items:Array<{id:string;name:string}>}>('/sheets/game-systems');
+  const worlds=worldsResource.status==='success'?worldsResource.data.worlds:[];
+  const gameSystems=gameSystemsResource.status==='success'?gameSystemsResource.data.items:[];
   const [form,setForm]=useState<TemplateFormState>(blankForm);
   const [editingId,setEditingId]=useState<string|null>(null);
   const [error,setError]=useState('');
   const [detectedFields,setDetectedFields]=useState<string[]>([]);
   const [detecting,setDetecting]=useState(false);
-  useEffect(()=>{void api<{worlds:Array<{id:string;name:string}>}>('/vault/metadata').then((result)=>setWorlds(result.worlds)).catch(()=>{});},[]);
-  useEffect(()=>{void api<{items:Array<{id:string;name:string}>}>('/sheets/game-systems').then((result)=>setGameSystems(result.items)).catch(()=>{});},[]);
-
+  const templateFormRef=useRef<HTMLFormElement>(null);
+  const templateNameRef=useRef<HTMLInputElement>(null);
   const updateField=(index:number,changes:Partial<TemplateFormField>)=>setForm((current)=>({...current,fields:current.fields.map((field,fieldIndex)=>fieldIndex===index?{...field,...changes}:field)}));
   const resetForm=()=>{setForm(blankForm);setEditingId(null);setDetectedFields([]);setError('');};
   const editTemplate=(template:SheetTemplateSummary)=>{
@@ -188,20 +189,31 @@ export function SheetTemplatesPage(){
       fields:form.fields.map((field)=>({key:field.key,label:field.label,type:field.type,required:field.required,...(field.type==='CHOICE'?{options:field.optionsText.split(',').map((option)=>option.trim()).filter(Boolean)}:{})})),
     };
     try{
-      if(editingId)await patchJson(`/sheets/templates/${editingId}`,payload);
-      else await postJson('/sheets/templates',payload);
-      resetForm();resource.reload();
+      const worldName=worlds.find((world)=>world.id===payload.worldId)?.name??null;
+      const gameSystemName=gameSystems.find((system)=>system.id===payload.gameSystemId)?.name??null;
+      if(editingId){
+        const result=await patchJson<{version:number}>(`/sheets/templates/${editingId}`,payload);
+        resource.mutate((templates)=>templates.map((template)=>template.id===editingId?{...template,...payload,worldName,gameSystemName,version:result.version}:template));
+      }else{
+        const result=await postJson<{id:string}>('/sheets/templates',payload);
+        resource.mutate((templates)=>[...templates,{id:result.id,...payload,worldName,gameSystemName,version:1}].sort((left,right)=>left.name.localeCompare(right.name,'pt-BR')));
+      }
+      resetForm();
     }catch(reason){setError(reason instanceof Error?reason.message:`Não foi possível ${editingId?'salvar':'criar'} o modelo.`);}
   };
   const remove=async(templateId:string)=>{setError('');
-    try{await deleteApi(`/sheets/templates/${templateId}`);if(editingId===templateId)resetForm();resource.reload();}
+    try{await deleteApi(`/sheets/templates/${templateId}`);if(editingId===templateId)resetForm();resource.mutate((templates)=>templates.filter((template)=>template.id!==templateId));}
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível excluir o modelo.');}
+  };
+  const focusTemplateForm=()=>{
+    templateFormRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+    window.setTimeout(()=>templateNameRef.current?.focus(),250);
   };
 
   if(resource.status!=='success')return <ResourceFallback state={resource} onRetry={resource.reload}/>;
   const templates=resource.data;
   return <div className="page">
-    <PageHeader eyebrow="Fichas" title="Modelos de ficha" description="Modelos neutros em relação a sistema — defina apenas os campos que a sua mesa usa. Um modelo sem World fica disponível para qualquer Personagem ou NPC do seu Vault."/>
+    <PageHeader eyebrow="Fichas" title="Modelos de ficha" description="Crie templates reutilizáveis para Personagens e NPCs, globais ou integrados ao Game System e ao World da sua mesa."/>
     <section className="bestiary-layout">
       <div>
         <section className="panel template-list">
@@ -212,12 +224,12 @@ export function SheetTemplatesPage(){
               <button type="button" className="ghost-button" onClick={()=>editTemplate(template)}>Editar</button>
               <button type="button" className="ghost-button" onClick={()=>void remove(template.id)}><Trash2 size={16}/>Excluir</button>
             </div>
-          </li>)}</ul>:<Empty title="Nenhum modelo criado" text="Crie o primeiro modelo de ficha para vincular a Personagens e NPCs." action="Ver Vault" to="/app/vault"/>}
+          </li>)}</ul>:<div className="empty-state"><NotebookPen/><h3>Nenhum modelo de ficha</h3><p>Crie o primeiro template para vincular a Personagens e NPCs do Vault.</p><button type="button" className="secondary-button" onClick={focusTemplateForm}>Criar primeiro modelo</button></div>}
         </section>
       </div>
-      <form className="panel template-form" onSubmit={submit}>
+      <form className="panel template-form" id="sheet-template-form" ref={templateFormRef} onSubmit={submit}>
         <h2>{editingId?'Editar modelo':'Novo modelo'}</h2>
-        <label>Nome<input required maxLength={120} value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})}/></label>
+        <label>Nome<input ref={templateNameRef} required maxLength={120} value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})}/></label>
         <label>Descrição<textarea rows={3} maxLength={2000} value={form.description} onChange={(event)=>setForm({...form,description:event.target.value})}/></label>
         <label>World (opcional)<select value={form.worldId} onChange={(event)=>setForm({...form,worldId:event.target.value,gameSystemId:event.target.value?'':form.gameSystemId})}><option value="">Global (qualquer World)</option>{worlds.map((world)=><option key={world.id} value={world.id}>{world.name}</option>)}</select></label>
         <label>Game System (opcional)<select value={form.gameSystemId} disabled={Boolean(form.worldId)} onChange={(event)=>setForm({...form,gameSystemId:event.target.value})}><option value="">Nenhum (usar World acima, se houver)</option>{gameSystems.map((system)=><option key={system.id} value={system.id}>{system.name}</option>)}</select>{gameSystems.length===0&&<small className="section-note">Nenhum Game System disponível ainda — cadastre um RPG na Biblioteca primeiro.</small>}</label>

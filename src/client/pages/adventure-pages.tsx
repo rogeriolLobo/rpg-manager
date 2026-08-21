@@ -81,7 +81,11 @@ export function AdventurePrepPage(){
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível criar o handout.');}
   };
   const toggleHandoutRevealed=async(handout:Handout)=>{setError('');
-    try{await patchJson(`/adventures/${id}/handouts/${handout.id}`,{title:handout.title,content:handout.content,sceneId:handout.sceneId,externalResourceId:handout.externalResourceId,revealed:!handout.revealed,sortOrder:handout.sortOrder});load();}
+    try{
+      const revealed=!handout.revealed;
+      await patchJson(`/adventures/${id}/handouts/${handout.id}`,{title:handout.title,content:handout.content,sceneId:handout.sceneId,externalResourceId:handout.externalResourceId,revealed,sortOrder:handout.sortOrder});
+      resource.mutate((current)=>({...current,handouts:current.handouts.map((currentHandout)=>currentHandout.id===handout.id?{...currentHandout,revealed}:currentHandout)}));
+    }
     catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível atualizar o handout.');}
   };
   const removeHandout=async(handoutId:string)=>{setError('');

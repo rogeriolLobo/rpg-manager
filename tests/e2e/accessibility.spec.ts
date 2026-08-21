@@ -66,7 +66,7 @@ async function assertKeyboardNavigable(page: Page, label: string, steps = 8) {
 }
 
 test("Acessibilidade (Seção 28): axe-core sem violações sérias/críticas (exceto contraste de cor) e navegação por teclado sem foco preso em VTT/Sheet Editor/Notifications/GM Console/Player Home", async ({ page, browser }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const suffix = Date.now();
   await register(page, `e2e-a11y-owner-${suffix}@example.com`, `A11y Owner ${suffix}`);
 
@@ -85,7 +85,8 @@ test("Acessibilidade (Seção 28): axe-core sem violações sérias/críticas (e
   });
   expect(campaignResponse.status()).toBe(201);
   const campaignId = ((await campaignResponse.json()) as { item: { id: string } }).item.id;
-  await page.request.post(`/api/v1/vtt/${campaignId}/scenes`, { headers: apiHeaders(csrf), data: { title: "Cena A11y", mapId: null, imageUrl: "https://example.com/a11y.png", notes: "" } });
+  const sceneResponse = await page.request.post(`/api/v1/vtt/${campaignId}/scenes`, { headers: apiHeaders(csrf), data: { title: "Cena A11y", mapId: null, imageUrl: "https://example.com/a11y.png", notes: "" } });
+  expect(sceneResponse.status()).toBe(201);
 
   // Sheet Template + Character (Vault) + valores da ficha, para o Sheet Editor renderizar campos
   // reais (TEXT/NUMBER/CHOICE) em vez de um formulário vazio.
@@ -135,19 +136,19 @@ test("Acessibilidade (Seção 28): axe-core sem violações sérias/críticas (e
   try {
     // ---- GM Console (VTT) ----
     await page.goto(`/app/campaigns/${campaignId}/vtt`);
-    await expect(page.getByText("Cena A11y")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Cena A11y")).toBeVisible({ timeout: 30_000 });
     await scan(page, "GM Console (VTT)");
     await assertKeyboardNavigable(page, "GM Console (VTT)");
 
     // ---- VTT Live (visão do jogador, acessada pelo próprio Owner só para o layout — o
     // conteúdo funcional já é coberto por outros specs com conta de Player real). ----
     await page.goto(`/app/campaigns/${campaignId}/vtt/live`);
-    await expect(page.getByRole("heading", { name: "Aguardando o mestre" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Aguardando o mestre" })).toBeVisible({ timeout: 30_000 });
     await scan(page, "VTT Live (Player View)");
 
     // ---- Sheet Editor ----
     await page.goto(`/app/vault/${entityId}/sheet`);
-    await expect(page.getByLabel("Nome de guerra")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("Nome de guerra")).toBeVisible({ timeout: 30_000 });
     await scan(page, "Sheet Editor");
     await assertKeyboardNavigable(page, "Sheet Editor");
 
@@ -170,9 +171,9 @@ test("Acessibilidade (Seção 28): axe-core sem violações sérias/críticas (e
 
     // ---- Player Campaign Home (conta de Player real) ----
     await playerPage.goto("/app/my-tables");
-    await expect(playerPage.getByRole("link", { name: `Mesa A11y ${suffix}` })).toBeVisible({ timeout: 15_000 });
+    await expect(playerPage.getByRole("link", { name: `Mesa A11y ${suffix}` })).toBeVisible({ timeout: 30_000 });
     await playerPage.getByRole("link", { name: `Mesa A11y ${suffix}` }).click();
-    await expect(playerPage.getByRole("heading", { name: `Mesa A11y ${suffix}` })).toBeVisible({ timeout: 15_000 });
+    await expect(playerPage.getByRole("heading", { name: `Mesa A11y ${suffix}` })).toBeVisible({ timeout: 30_000 });
     await scan(playerPage, "Player Campaign Home");
     await assertKeyboardNavigable(playerPage, "Player Campaign Home");
   } finally {

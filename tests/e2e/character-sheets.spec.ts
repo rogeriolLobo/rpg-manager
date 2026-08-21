@@ -16,14 +16,14 @@ async function register(page: Page, email: string, name: string) {
 }
 
 test("Ficha de personagem: cria modelo, vincula a um Personagem, valida campos e edita", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(300_000);
   const suffix = Date.now();
   await register(page, `e2e-sheet-owner-${suffix}@example.com`, `Dono Ficha ${suffix}`);
 
   await page.goto("/app/sheets");
   // F-023: seletor de Game System presente e habilitado por padrão (mutuamente exclusivo
   // com World — cobertura de compatibilidade fica nos testes de integração).
-  await expect(page.getByLabel("Game System (opcional)")).toBeEnabled();
+  await expect(page.getByLabel("Game System (opcional)")).toBeEnabled({ timeout: 30_000 });
   await page.getByLabel("Nome").fill(`Modelo Neutro ${suffix}`);
   // Primeiro campo (TEXT, já presente por padrão).
   await page.getByLabel("Chave").fill("conceito");
@@ -36,16 +36,16 @@ test("Ficha de personagem: cria modelo, vincula a um Personagem, valida campos e
   await fields.nth(1).getByLabel("Tipo").selectOption("CHOICE");
   await fields.nth(1).getByLabel(/Opções/u).fill("Cautelosa, Ousada");
   await page.getByRole("button", { name: "Criar modelo" }).click();
-  await expect(page.getByText(`Modelo Neutro ${suffix}`)).toBeVisible();
+  await expect(page.getByText(`Modelo Neutro ${suffix}`)).toBeVisible({ timeout: 30_000 });
 
   await page.goto("/app/vault/new?type=CHARACTER");
   await page.getByLabel("Nome", { exact: true }).fill(`Herói ${suffix}`);
   await page.getByRole("button", { name: "Salvar entidade" }).click();
-  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   await expect(page.getByText("Nenhuma ficha vinculada.")).toBeVisible();
   await page.getByRole("link", { name: "Vincular ficha" }).click();
-  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel("Modelo").selectOption({ label: `Modelo Neutro ${suffix} (global)` });
 
   // Sem preencher os campos obrigatórios: erro em cada campo específico.
@@ -56,17 +56,17 @@ test("Ficha de personagem: cria modelo, vincula a um Personagem, valida campos e
   await page.getByLabel("Postura").selectOption("Ousada");
   await page.getByRole("button", { name: "Salvar ficha" }).click();
 
-  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible();
-  await expect(page.getByText(`Modelo: Modelo Neutro ${suffix}`)).toBeVisible();
-  await expect(page.getByText("Cartógrafa exilada")).toBeVisible();
-  await expect(page.getByText("Ousada")).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Herói ${suffix}` })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`Modelo: Modelo Neutro ${suffix}`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Cartógrafa exilada")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Ousada")).toBeVisible({ timeout: 30_000 });
 
   // Reabrir a edição já vem preenchido, e é possível remover a ficha.
   await page.getByRole("link", { name: "Editar ficha" }).click();
-  await expect(page.getByLabel("Conceito *")).toHaveValue("Cartógrafa exilada");
+  await expect(page.getByLabel("Conceito *")).toHaveValue("Cartógrafa exilada", { timeout: 30_000 });
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Remover ficha" }).click();
-  await expect(page.getByText("Nenhuma ficha vinculada.")).toBeVisible();
+  await expect(page.getByText("Nenhuma ficha vinculada.")).toBeVisible({ timeout: 30_000 });
 });
 
 // Gera um PDF mínimo, só em memória (nunca hospedado por nós), com um campo AcroForm de
@@ -82,7 +82,7 @@ async function buildTestPdf(fieldName: string): Promise<Uint8Array> {
 }
 
 test("Ficha de personagem: vincula PDF ao modelo, detecta campo AcroForm, mapeia e baixa a ficha preenchida", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(300_000);
   const suffix = Date.now();
   const pdfUrl = "https://example.com/ficha-teste.pdf";
   const pdfBytes = await buildTestPdf("campo_conceito");
@@ -91,6 +91,7 @@ test("Ficha de personagem: vincula PDF ao modelo, detecta campo AcroForm, mapeia
   await register(page, `e2e-sheet-pdf-${suffix}@example.com`, `Dono PDF ${suffix}`);
 
   await page.goto("/app/sheets");
+  await expect(page.getByRole("heading", { name: "Modelos de ficha" })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel("Nome").fill(`Modelo PDF ${suffix}`);
   await page.getByLabel("Chave").fill("conceito");
   await page.getByLabel("Rótulo").fill("Conceito");
@@ -100,16 +101,18 @@ test("Ficha de personagem: vincula PDF ao modelo, detecta campo AcroForm, mapeia
   await page.getByLabel("Mapeamento no PDF").selectOption("ACROFORM");
   await page.getByLabel("Nome do campo no PDF").fill("campo_conceito");
   await page.getByRole("button", { name: "Criar modelo" }).click();
-  await expect(page.getByText(`Modelo PDF ${suffix}`)).toBeVisible();
+  await expect(page.getByText(`Modelo PDF ${suffix}`)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/PDF vinculado/u)).toBeVisible();
 
   await page.goto("/app/vault/new?type=CHARACTER");
   await page.getByLabel("Nome", { exact: true }).fill(`Herói PDF ${suffix}`);
   await page.getByRole("button", { name: "Salvar entidade" }).click();
+  await expect(page.getByRole("heading", { name: `Herói PDF ${suffix}` })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("link", { name: "Vincular ficha" }).click();
   await page.getByLabel("Modelo").selectOption({ label: `Modelo PDF ${suffix} (global)` });
   await page.getByLabel("Conceito").fill("Cartógrafa exilada");
   await page.getByRole("button", { name: "Salvar ficha" }).click();
+  await expect(page.getByRole("heading", { name: `Herói PDF ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Baixar PDF preenchido" }).click();

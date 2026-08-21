@@ -1,7 +1,8 @@
 import { BookMarked, PawPrint, Search, Sparkles } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { useResource } from '../api/use-resource';
 import { displayLabel } from '../labels';
 import { Empty, PageHeader } from './dashboard-page';
 import type { VaultEntity } from './vault-pages';
@@ -26,22 +27,18 @@ function CreatureStatBlock({entity}:{entity:VaultEntity}){
 }
 
 export function CompendiumPage(){
-  const [worlds,setWorlds]=useState<WorldOption[]>([]);
   const [worldId,setWorldId]=useState('');
   const [search,setSearch]=useState('');
-  const [items,setItems]=useState<Record<CompendiumType,VaultEntity[]>>({CREATURE:[],ITEM:[],LORE:[]});
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState('');
-
-  useEffect(()=>{void api<{worlds:WorldOption[]}>('/vault/metadata').then((result)=>setWorlds(result.worlds)).catch(()=>{});},[]);
-  useEffect(()=>{let active=true;
-    const query=`pageSize=100&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}${search?`&search=${encodeURIComponent(search)}`:''}`;
-    Promise.all(SECTIONS.map((section)=>api<{items:VaultEntity[]}>(`/vault?type=${section.type}&${query}`)))
-      .then((results)=>{if(!active)return;setItems({CREATURE:results[0].items,ITEM:results[1].items,LORE:results[2].items});})
-      .catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar o Compendium.');})
-      .finally(()=>{if(active)setLoading(false);});
-    return()=>{active=false;};
-  },[worldId,search]);
+  const worldsResource=useResource<{worlds:WorldOption[]}>('/vault/metadata');
+  const worlds=worldsResource.status==='success'?worldsResource.data.worlds:[];
+  const query=`pageSize=100&sort=name${worldId?`&worldId=${encodeURIComponent(worldId)}`:''}${search?`&search=${encodeURIComponent(search)}`:''}`;
+  const resource=useResource<Record<CompendiumType,VaultEntity[]>>(query,async(currentQuery)=>{
+    const results=await Promise.all(SECTIONS.map((section)=>api<{items:VaultEntity[]}>(`/vault?type=${section.type}&${currentQuery}`)));
+    return {CREATURE:results[0].items,ITEM:results[1].items,LORE:results[2].items};
+  });
+  const items=resource.status==='success'?resource.data:{CREATURE:[],ITEM:[],LORE:[]};
+  const loading=resource.status==='loading';
+  const error=resource.status==='error'?(resource.error instanceof Error?resource.error.message:'Não foi possível carregar o Compendium.') : '';
 
   const total=items.CREATURE.length+items.ITEM.length+items.LORE.length;
   return <div className="page">
@@ -51,7 +48,7 @@ export function CompendiumPage(){
       <select aria-label="World" value={worldId} onChange={(event)=>setWorldId(event.target.value)}><option value="">Todos os Worlds</option>{worlds.map((world)=><option key={world.id} value={world.id}>{world.name}</option>)}</select>
     </div>
     {error&&<p className="form-error">{error}</p>}
-    {!loading&&total===0&&<Empty title="Nada encontrado ainda" text="Cadastre Criaturas, Itens ou Lore no Vault para vê-los aqui." action="Ir para o Vault" to="/app/vault"/>}
+    {!loading&&total===0&&<Empty title="Nenhum conteúdo no Compêndio" text="Adicione Criaturas, Itens ou Lore ao Vault para montar sua consulta rápida." action="Adicionar conteúdo ao Vault" to="/app/vault/new"/>}
     {SECTIONS.map((section)=>{
       const sectionItems=items[section.type];
       if(!loading&&sectionItems.length===0)return null;

@@ -1,5 +1,11 @@
 # RPG Manager — Auditoria de Completude do Projeto (HISTÓRICO — ver nota)
 
+> **Correção de escopo (2026-08-21 — Product Surface):** a auditoria anterior comprovou
+> implementação técnica, mas não auditou sistematicamente descoberta humana das rotas. Portanto,
+> qualquer conclusão ampla deste documento fica superada para esse eixo. A fonte da verdade é
+> `docs/product/PRODUCT_SURFACE_AUDIT.md`; a conclusão de superfície exige também CI, deploy e
+> smoke de produção.
+
 > **Nota (2026-08-21, auditoria final independente cross-machine, PC de
 > casa):** este documento foi escrito em BATCH20-22, quando os itens da
 > seção "O que ainda falta" abaixo eram genuinamente pendentes. As

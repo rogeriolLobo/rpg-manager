@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 const worker = exports as unknown as { default: { fetch(input: string | Request, init?: RequestInit): Promise<Response> } };
 const origin = 'https://vtt-rate-limits.example.com';
 const password = 'esta e uma senha longa 2026';
+const rateLimitBurstTimeoutMs = 15_000;
 let requestSequence = 1;
 
 interface Account { userId: string; cookie: string; csrf: string }
@@ -43,16 +44,9 @@ async function createCampaign(owner: Account): Promise<string> {
   return (await campaignResponse.json() as { item: { id: string } }).item.id;
 }
 
-// Achado real desta rodada: a simulação LOCAL do binding RateLimit (miniflare/vitest-pool-workers)
-// é documentadamente aproximada, não uma reprodução exata do algoritmo de produção — sob rajadas
-// de requisições quase instantâneas (sem latência de rede real), ocasionalmente não dispara dentro
-// da janela esperada, mesmo com conta nova a cada teste (chave única, sem contaminação cruzada
-// real). O comportamento SERVIDOR-SIDE em si (checkVttActionRateLimit/VTT_CONNECT_RATE_LIMITER)
-// já está provado correto pelas dezenas de execuções verdes ao longo desta sessão — isto é
-// robustez de teste contra imprecisão conhecida da FERRAMENTA local, nunca uma tentativa de
-// esconder um bug real (ver CLAUDE.md Seção 11: retry limitado é aceitável como proteção contra
-// infraestrutura, não pode substituir correção de teste ruim — aqui não há teste ruim para
-// corrigir, só um simulador aproximado).
+// O binding RateLimit do Miniflare é aproximado. Cada rajada usa uma conta nova para isolar a
+// chave e mantém a asserção de 429; o timeout local cobre apenas o custo intencional de até 110
+// requisições sequenciais que atravessam autenticação, D1 e o binding no worker completo.
 async function runActionBurst(): Promise<boolean> {
   const owner = await register(`vtt-rl-action-${Date.now()}-${Math.random()}`);
   const campaignId = await createCampaign(owner);
@@ -86,7 +80,7 @@ describe('BATCH23 — proteção de Free-tier: rate limits reais de VTT', () => 
     if (!sawRateLimited) sawRateLimited = await runActionBurst();
     if (!sawRateLimited) sawRateLimited = await runActionBurst();
     expect(sawRateLimited).toBe(true);
-  });
+  }, rateLimitBurstTimeoutMs);
 
   it('VTT_CONNECT_RATE_LIMITER: tentativas de upgrade WebSocket acima do limite recebem 429, nunca abrem o socket', async () => {
     // O limite (wrangler.jsonc, VTT_CONNECT_RATE_LIMITER) é 20/60s.
@@ -94,5 +88,5 @@ describe('BATCH23 — proteção de Free-tier: rate limits reais de VTT', () => 
     if (!sawRateLimited) sawRateLimited = await runConnectBurst();
     if (!sawRateLimited) sawRateLimited = await runConnectBurst();
     expect(sawRateLimited).toBe(true);
-  });
+  }, rateLimitBurstTimeoutMs);
 });

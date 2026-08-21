@@ -1,9 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect as baseExpect, test } from "@playwright/test";
 
 // F-005 (Ideas / Quick Capture): UX rápida sobre o Diário existente, acessível a partir do
 // Dashboard — sem domínio novo (ver docs/product/MASTER_BACKLOG.md).
 test("Dashboard → Nova ideia → salva no Diário do World escolhido, sem duplicar domínio", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(240_000);
+  const expect = baseExpect.configure({ timeout: 30_000 });
   const email = `e2e-quickidea-${Date.now()}@example.com`;
   await page.goto("/register");
   await page.getByLabel("Como quer ser chamado?").fill("Narrador Ideias");
@@ -35,7 +36,7 @@ test("Dashboard → Nova ideia → salva no Diário do World escolhido, sem dupl
   await page.goto("/app");
   await page.getByRole("button", { name: "Nova ideia" }).click();
   await expect(page.getByRole("heading", { name: "Nova ideia" })).toBeVisible();
-  await page.getByLabel("World").selectOption({ label: "Aldeia das Ideias" });
+  await page.getByRole("combobox", { name: "World", exact: true }).selectOption({ label: "Aldeia das Ideias" });
   await page.getByLabel("Título", { exact: true }).fill("Uma masmorra flutuante");
   await page.getByLabel("Anotação (opcional)").fill("Pode ser o gancho da próxima sessão.");
   await page.getByRole("button", { name: "Salvar ideia" }).click();

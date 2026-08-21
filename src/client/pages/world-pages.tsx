@@ -35,7 +35,7 @@ export function WorldsPage(){
 }
 
 export function WorldFormPage(){
-  const {id}=useParams();const navigate=useNavigate();const {refreshWorlds,setActiveWorldId}=useActiveWorld();const [rpgs,setRpgs]=useState<Rpg[]>([]);const [form,setForm]=useState({name:'',description:'',defaultRpgId:'',visibility:'PRIVATE'});const [error,setError]=useState('');
+  const {id}=useParams();const navigate=useNavigate();const {refreshWorlds}=useActiveWorld();const [rpgs,setRpgs]=useState<Rpg[]>([]);const [form,setForm]=useState({name:'',description:'',defaultRpgId:'',visibility:'PRIVATE'});const [error,setError]=useState('');
   // RPG-1.0-BATCH5: mesmo achado do VaultFormPage — sem este gate, digitar antes do GET de
   // `/worlds/:id` resolver era apagado silenciosamente quando a resposta chegava.
   const [loading,setLoading]=useState(Boolean(id));
@@ -43,15 +43,25 @@ export function WorldFormPage(){
   // descartável do efeito duplicado pelo React StrictMode (dev only) sobrescreva `form` depois
   // que o usuário já começou a editar (achado real via E2E).
   useEffect(()=>{let active=true;void api<{items:Rpg[]}>('/rpgs?pageSize=100&sort=title').then((result)=>{if(active)setRpgs(result.items);}).catch(()=>{if(active)setRpgs([]);});if(id)void api<{item:World}>(`/worlds/${id}`).then(({item})=>{if(active)setForm({name:item.name,description:item.description,defaultRpgId:item.defaultRpgId??'',visibility:item.visibility});}).catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível carregar este World.');}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[id]);
-  const submit=async(event:FormEvent)=>{event.preventDefault();setError('');try{const payload={...form,defaultRpgId:form.defaultRpgId||null};if(id){await patchJson(`/worlds/${id}`,payload);await refreshWorlds();navigate(`/app/worlds/${id}`);}else{const result=await postJson<{item:World}>('/worlds',payload);await refreshWorlds();await setActiveWorldId(result.item.id);navigate(`/app/worlds/${result.item.id}`);}}catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível salvar o World.');}};
+  const submit=async(event:FormEvent)=>{event.preventDefault();setError('');try{const payload={...form,defaultRpgId:form.defaultRpgId||null};if(id){await patchJson(`/worlds/${id}`,payload);await refreshWorlds();navigate(`/app/worlds/${id}`);}else{const result=await postJson<{item:World}>('/worlds',payload);navigate(`/app/worlds/${result.item.id}`);}}catch(reason){setError(reason instanceof Error?reason.message:'Não foi possível salvar o World.');}};
   if(loading)return <Loading/>;
   return <div className="page narrow"><PageHeader eyebrow={id?'Editar World':'Novo World'} title="Construa um lugar para suas histórias" description="O World agrupa entidades do Vault sem prender seu conteúdo a uma única campanha."/><form className="panel form-grid" onSubmit={submit}><label className="span-2">Nome<input required maxLength={160} value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})}/></label><label>RPG padrão<select value={form.defaultRpgId} onChange={(event)=>setForm({...form,defaultRpgId:event.target.value})}><option value="">Nenhum</option>{rpgs.map((rpg)=><option key={rpg.id} value={rpg.id}>{rpg.title}</option>)}</select></label><label>Visibilidade<select value={form.visibility} onChange={(event)=>setForm({...form,visibility:event.target.value})}><option value="PRIVATE">Privado</option><option value="GROUP">Membros convidados</option></select></label><label className="span-2">Descrição<textarea rows={7} maxLength={10000} value={form.description} onChange={(event)=>setForm({...form,description:event.target.value})}/></label>{error&&<p className="form-error span-2">{error}</p>}<div className="form-actions span-2"><button type="button" className="ghost-button" onClick={()=>navigate(-1)}>Cancelar</button><button className="primary-button">Salvar World</button></div></form></div>;
 }
 
 export function WorldDetailPage(){
-  const {id}=useParams();const navigate=useNavigate();const {activeWorld,setActiveWorldId}=useActiveWorld();const [error,setError]=useState('');
+  const {id}=useParams();const navigate=useNavigate();const {worlds,activeWorld,refreshWorlds,setActiveWorldId}=useActiveWorld();const [error,setError]=useState('');
   const resource=useResource<{item:World;counts:Array<{entityType:string;count:number}>;recentEntities:RecentEntity[];members:WorldMember[]}>(id?`/worlds/${id}`:null);
-  useEffect(()=>{if(id&&activeWorld?.id!==id)void setActiveWorldId(id);},[activeWorld?.id,id,setActiveWorldId]);
+  useEffect(()=>{
+    if(!id||activeWorld?.id===id)return;
+    let active=true;
+    void (async()=>{
+      // A atualização publica a nova lista no próximo render. Retornar aqui evita
+      // gravar a mesma preferência duas vezes logo após criar/descobrir um World.
+      if(!worlds.some((world)=>world.id===id)){await refreshWorlds();return;}
+      if(active)await setActiveWorldId(id);
+    })().catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:'Não foi possível ativar este World.');});
+    return()=>{active=false;};
+  },[activeWorld?.id,id,refreshWorlds,setActiveWorldId,worlds]);
   const load=async()=>{resource.reload();};
   if(resource.status!=='success')return <ResourceFallback state={resource} onRetry={resource.reload}/>;
   const data=resource.data;const world=data.item;

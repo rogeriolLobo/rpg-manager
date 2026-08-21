@@ -29,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const authVersion = useRef(0);
+  const initialSessionStarted = useRef(false);
   const setUser = useCallback((nextUser: User | null) => {
     authVersion.current += 1;
     // Toda troca de identidade de sessão (login, registro, logout, expiração) invalida
@@ -50,6 +51,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   useEffect(() => {
+    // O StrictMode repete efeitos no mount em desenvolvimento. Uma segunda checagem de
+    // sessão não só duplica este GET: ao resolver com outro objeto User, ela reinicia também
+    // os providers de tema, World e notificações. A checagem inicial deve ocorrer uma vez;
+    // refresh/login continuam controlados pelos métodos explícitos acima.
+    if (initialSessionStarted.current) return;
+    initialSessionStarted.current = true;
     const requestVersion = authVersion.current;
     void api<{ user: User }>("/auth/session")
       .then((result) => {

@@ -1,5 +1,9 @@
 # RPG Manager — `PLANNED_ROADMAP_COMPLETE` (SUPERADO — ver nota abaixo)
 
+> **Nota de superfície (2026-08-21):** este marco histórico não avaliou se todas as funções eram
+> encontráveis por navegação humana. Para esse critério, use
+> `docs/product/PRODUCT_SURFACE_AUDIT.md`; nenhuma declaração de superfície decorre deste arquivo.
+
 > **Nota (BATCH20-22):** esta declaração foi rejeitada pelo responsável do
 > produto ("FINALIZAÇÃO ABSOLUTA DO PROJETO") por existirem funcionalidades
 > planejadas que continuavam parciais, principalmente F-015 (Backup/Restore
