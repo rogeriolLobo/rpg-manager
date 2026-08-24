@@ -51,7 +51,7 @@ test("VTT — GM View: preparação da Adventure aparece na tela, com link para 
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(page.getByRole("heading", { name: `Mesa GM View ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
+  await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
   await expect(page.getByText("Preparação da Adventure")).toBeVisible();
   await expect(page.getByText(`Aventura GM View ${suffix}`)).toBeVisible();

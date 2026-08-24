@@ -32,7 +32,7 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(page.getByRole("heading", { name: `Mesa VTT ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
+  await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
 
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
@@ -96,7 +96,7 @@ test("VTT: inicia combate, adiciona combatente, avança turno, ajusta PV e encer
   await page.getByRole("button", { name: "Salvar campanha" }).click();
   await expect(page.getByRole("heading", { name: `Mesa Combate ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa do Mestre" }).click();
+  await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Sala do Chefe");
   await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/chefe.png");
