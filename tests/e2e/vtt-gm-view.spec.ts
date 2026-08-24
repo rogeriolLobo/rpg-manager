@@ -24,7 +24,7 @@ test("VTT — GM View: preparação da Adventure aparece na tela, com link para 
   await page.getByRole("link", { name: "Preparar aventura" }).click();
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Cena 1");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await expect(page.getByText("Cena 1").first()).toBeVisible();
   const handoutForm = page.locator("form").filter({ hasText: "Novo handout" });
   await handoutForm.getByLabel("Título").fill("Bilhete do Barão");

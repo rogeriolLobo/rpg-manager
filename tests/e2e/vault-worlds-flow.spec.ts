@@ -40,7 +40,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await expect(page.getByRole('heading',{name:'Aldea'})).toBeVisible();
 
   await page.getByRole('link',{name:'Adicionar entidade'}).click();
-  await expect(page.getByLabel('World').locator('option:checked')).toHaveText('Aldea');
+  await expect(page.locator('form').getByLabel('World').locator('option:checked')).toHaveText('Aldea');
   const npcName=page.getByLabel('Nome');
   await npcName.pressSequentially('Lucien');
   await expect(npcName).toHaveValue('Lucien');
@@ -58,9 +58,9 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   // Espera GET /vault/metadata assentar (o select "World" só ganha opções reais depois dele —
   // ver VaultFormPage) ANTES de preencher Nome. Não é um sleep às cegas: é uma condição real
   // ligada à dependência assíncrona que motiva o achado documentado acima.
-  await expect(page.getByLabel('World').locator('option')).toHaveCount(2,{timeout:15_000});
+  await expect(page.locator('form').getByLabel('World').locator('option')).toHaveCount(2,{timeout:15_000});
   await page.getByLabel('Nome').fill('Taverna do Corvo');
-  await page.getByLabel('World').selectOption({label:'Aldea'});
+  await page.locator('form').getByLabel('World').selectOption({label:'Aldea'});
   await page.getByRole('button',{name:'Salvar entidade'}).click();
   await expect(page.getByRole('heading',{name:'Taverna do Corvo'})).toBeVisible();
 
@@ -70,7 +70,7 @@ test('fluxo V2/V2.1 de World, conhecimento, Vault, Adventure e campanha', async 
   await page.getByLabel('Nome').fill('A Noite do Corvo');
   await page.getByLabel('Tipo').selectOption('ADVENTURE');
   await expect(page.getByLabel('Formato')).toBeVisible();
-  await page.getByLabel('World').selectOption({label:'Aldea'});
+  await page.locator('form').getByLabel('World').selectOption({label:'Aldea'});
   await page.getByLabel('Formato').selectOption('ONE_SHOT');
   await page.getByLabel('Sessões recomendadas').fill('1');
   await page.getByLabel('Premissa').fill('O sino da taverna anuncia um presságio.');

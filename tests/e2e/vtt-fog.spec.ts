@@ -37,7 +37,7 @@ test("VTT: cria cena com névoa, revela uma célula e depois reencobre tudo", as
   await sceneForm.getByLabel(/Névoa da guerra/u).check();
   await sceneForm.getByLabel("Colunas da grade").fill("4");
   await sceneForm.getByLabel("Linhas da grade").fill("4");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await expect(page.getByText("Cripta Selada")).toBeVisible();
 
   await page.getByRole("button", { name: "Expandir cena" }).click();

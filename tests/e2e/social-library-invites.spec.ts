@@ -178,7 +178,7 @@ test("Convite de amigo para Campaign: aparece em Minhas Mesas; bloquear remove a
 
     // Aparece em Minhas Mesas — o jogador descobre a campanha sem link do mestre.
     await openNav(friendPage);
-    await friendPage.getByRole("link", { name: "Minhas Mesas" }).click();
+    await friendPage.locator(".sidebar").getByRole("link", { name: "Minhas Mesas", exact: true }).click();
     await expect(friendPage.getByRole("heading", { name: `Mesa Convite Campanha ${suffix}` })).toBeVisible();
 
     // Bloquear: amizade some, e o amigo bloqueado nem aparece mais no seletor de "Convidar amigo"

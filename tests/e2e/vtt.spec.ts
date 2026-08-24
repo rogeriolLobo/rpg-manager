@@ -38,7 +38,7 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Câmara do Dragão");
   await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/camara.png");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await expect(page.getByText("Câmara do Dragão")).toBeVisible();
 
   await page.getByRole("button", { name: "Expandir cena" }).click();
@@ -100,7 +100,7 @@ test("VTT: inicia combate, adiciona combatente, avança turno, ajusta PV e encer
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Sala do Chefe");
   await sceneForm.getByLabel("URL da imagem de fundo").fill("https://example.com/chefe.png");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await page.getByRole("button", { name: "Expandir cena" }).click();
 
   const startForm = page.locator("form.inline-form").filter({ hasText: "Iniciar combate" });
