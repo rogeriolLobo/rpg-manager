@@ -41,7 +41,7 @@ export function WorldCartographyPage() {
     <div className="page">
       <PageHeader eyebrow="Cartografia" title="Mapas do World" description="Imagens externas com pins — referência de localização, não uma mesa virtual."/>
       {maps.length === 0 ? (
-        <Empty title="Nenhum mapa ainda" text="Adicione a imagem de um mapa abaixo para começar a marcar pontos de interesse." action="Ver Diário" to={`/app/worlds/${id}/journal`}/>
+        <Empty title="Nenhum mapa ainda" text="Adicione a imagem de um mapa abaixo para começar a marcar pontos de interesse." action="Ver Diário" to={`/app/journal?worldId=${id}`}/>
       ) : (
         <div className="cartography-map-grid">
           {maps.map((map) => (

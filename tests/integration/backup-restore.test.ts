@@ -71,7 +71,7 @@ describe('F-015: Backup/Restore completo', () => {
     await request(`/journal/${worldId}/pages`, 'POST', { title: 'Página', content: 'conteúdo', folderId: null }, owner);
 
     const backup = await exportBackup(owner);
-    expect(backup.schemaVersion).toBe(9);
+    expect(backup.schemaVersion).toBe(10);
     expect(backup.data.creatureStatTemplates).toHaveLength(1);
     expect(backup.data.creatureDetails).toHaveLength(1);
     expect(backup.data.creatureStatBlocks).toHaveLength(1);
@@ -161,9 +161,11 @@ describe('F-015: Backup/Restore completo', () => {
 
     const journal = await request(`/journal/${restoredWorldId}`, 'GET', undefined, owner);
     const journalBody = await journal.json() as { folders: Array<{ id: string; name: string; parentFolderId: string | null }>; pages: Array<{ title: string; folderId: string | null }> };
-    expect(journalBody.folders).toHaveLength(2);
-    const restoredRoot = journalBody.folders.find((folder) => folder.name === 'Pasta Raiz')!;
-    const restoredSub = journalBody.folders.find((folder) => folder.name === 'Subpasta')!;
+    // Pastas agora são globais do usuário: a listagem contextual contém as duas originais e
+    // as duas restauradas. A página, por outro lado, é filtrada pelo link com o World restaurado.
+    expect(journalBody.folders).toHaveLength(4);
+    const restoredRoot = journalBody.folders.find((folder) => folder.name === 'Pasta Raiz' && folder.id !== rootFolderId)!;
+    const restoredSub = journalBody.folders.find((folder) => folder.name === 'Subpasta' && folder.parentFolderId === restoredRoot.id)!;
     expect(restoredSub.parentFolderId).toBe(restoredRoot.id);
     expect(journalBody.pages).toHaveLength(1);
     expect(journalBody.pages[0]).toMatchObject({ title: 'Segredos', folderId: restoredRoot.id });
@@ -174,6 +176,50 @@ describe('F-015: Backup/Restore completo', () => {
     const revisionsBody = await revisions.json() as { items: Array<{ action: string }> };
     expect(revisionsBody.items).toHaveLength(1);
     expect(revisionsBody.items[0].action).toBe('CREATE');
+  });
+
+  it('round-trip do Journal preserva páginas sem World, com um World e com dois Worlds', async () => {
+    const owner = await register('backup-journal-n-n');
+    const worldAId = await createWorld(owner, 'Journal World A');
+    const worldBId = await createWorld(owner, 'Journal World B');
+
+    const createPage = async (title: string) => {
+      const response = await request('/journal/pages', 'POST', { title, content: `Conteúdo ${title}`, folderId: null }, owner);
+      expect(response.status).toBe(201);
+      return ((await response.json()) as { item: { id: string } }).item.id;
+    };
+    const withoutWorldId = await createPage('Journal sem World');
+    const oneWorldId = await createPage('Journal com um World');
+    const twoWorldsId = await createPage('Journal com dois Worlds');
+    expect((await request(`/journal/pages/${oneWorldId}/worlds/${worldAId}`, 'POST', {}, owner)).status).toBe(204);
+    expect((await request(`/journal/pages/${twoWorldsId}/worlds/${worldAId}`, 'POST', {}, owner)).status).toBe(204);
+    expect((await request(`/journal/pages/${twoWorldsId}/worlds/${worldBId}`, 'POST', {}, owner)).status).toBe(204);
+
+    const backup = await exportBackup(owner);
+    expect(backup.data.journalPages).toHaveLength(3);
+    expect(backup.data.journalPageWorldLinks).toHaveLength(3);
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ journalPages: 3, journalPageWorldLinks: 3 });
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ journalPages: 3, journalPageWorldLinks: 3 });
+
+    const journal = await request('/journal', 'GET', undefined, owner);
+    const pages = ((await journal.json()) as { pages: Array<{ id: string; title: string; content: string; worldIds: string[] }> }).pages;
+    const restoredWithoutWorld = pages.filter((page) => page.title === 'Journal sem World' && page.id !== withoutWorldId);
+    expect(restoredWithoutWorld).toHaveLength(1);
+    expect(restoredWithoutWorld[0]).toMatchObject({ content: 'Conteúdo Journal sem World', worldIds: [] });
+    const restoredOneWorld = pages.find((page) => page.title === 'Journal com um World' && page.id !== oneWorldId)!;
+    expect(restoredOneWorld.worldIds).toHaveLength(1);
+    expect(restoredOneWorld.worldIds).not.toContain(worldAId);
+    const restoredTwoWorlds = pages.find((page) => page.title === 'Journal com dois Worlds' && page.id !== twoWorldsId)!;
+    expect(restoredTwoWorlds.worldIds).toHaveLength(2);
+    expect(restoredTwoWorlds.worldIds).not.toContain(worldAId);
+    expect(restoredTwoWorlds.worldIds).not.toContain(worldBId);
   });
 
   it('restaurar o backup de outra conta cria os dados sob a posse de quem restaura, nunca reatribui ao dono original (nunca um vetor de IDOR)', async () => {
@@ -242,8 +288,8 @@ describe('F-015: Backup/Restore completo', () => {
 
   // BATCH19: revalidação do F-015 cobrindo os domínios criados desde a v8 original (Social,
   // Sheets, world_entity_links, Adventures estruturadas, Files metadata, VTT) — ver
-  // src/domain/backup/types.ts para o raciocínio completo do escopo v9.
-  it('export v9 inclui todos os domínios criados desde a v8 (Social/Sheets/LINK/Adventures/Files/VTT)', async () => {
+  // src/domain/backup/types.ts para o raciocínio completo do escopo v10.
+  it('export v10 inclui todos os domínios criados desde a v8 (Social/Sheets/LINK/Adventures/Files/VTT)', async () => {
     const owner = await register('backup-export-v9');
     const friend = await register('backup-export-v9-friend');
 
@@ -284,7 +330,7 @@ describe('F-015: Backup/Restore completo', () => {
     await request(`/vtt/${campaignId}/scenes/${vttSceneId}/combat/start`, 'POST', { combatants: [{ tokenId: null, name: 'Combatente', initiative: 10, hpCurrent: null, hpMax: null, notes: '', visibleToPlayers: false }] }, owner);
 
     const backup = await exportBackup(owner);
-    expect(backup.schemaVersion).toBe(9);
+    expect(backup.schemaVersion).toBe(10);
     expect((backup.data.friendRequests as unknown[]).length).toBeGreaterThan(0);
     expect((backup.data.sheetTemplates as unknown[]).length).toBeGreaterThan(0);
     expect((backup.data.characterSheets as unknown[]).length).toBeGreaterThan(0);

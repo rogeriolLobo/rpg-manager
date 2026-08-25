@@ -57,16 +57,14 @@ function QuickIdeaButton() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!worldId) { setError('Escolha um World.'); return; }
     try {
-      const { item } = await postJson<{ item: { id: string } }>(`/journal/${worldId}/pages`, { folderId: null, title, content });
+      const { item } = await postJson<{ item: { id: string } }>('/journal/pages', { folderId: null, title, content });
+      if (worldId) await postJson<void>(`/journal/pages/${item.id}/worlds/${worldId}`, {});
       setSavedPageId(item.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível salvar a ideia.');
     }
   };
-
-  if (!ownedWorlds.length) return null;
   return <>
     <button type="button" className="secondary-button" onClick={openModal}><Lightbulb size={18}/>Nova ideia</button>
     {open && <div className="quick-idea-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
@@ -75,12 +73,13 @@ function QuickIdeaButton() {
         {savedPageId ? <>
           <p className="success-message">Ideia salva no Diário.</p>
           <div className="button-row">
-            <Link className="secondary-button link-button" to={`/app/worlds/${worldId}/journal`} onClick={() => setOpen(false)}>Ver no Diário</Link>
+            <Link className="secondary-button link-button" to={worldId ? `/app/journal?page=${savedPageId}&worldId=${worldId}` : `/app/journal?page=${savedPageId}`} onClick={() => setOpen(false)}>Ver no Diário</Link>
             <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Fechar</button>
           </div>
         </> : <form className="form-grid" onSubmit={(event) => void submit(event)}>
-          <label className="span-2">World
-            <select value={worldId} onChange={(event) => setWorldId(event.target.value)} required>
+          <label className="span-2">Vincular a um World (opcional)
+            <select value={worldId} onChange={(event) => setWorldId(event.target.value)}>
+              <option value="">Apenas privado no Diário</option>
               {ownedWorlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}
             </select>
           </label>

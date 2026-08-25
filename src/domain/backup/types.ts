@@ -7,7 +7,7 @@
 // de poder ser restaurado — não há shim de compatibilidade retroativa nesta v1
 // (decisão registrada, não omissão: um shim exigiria manter para sempre o
 // mapeamento de todo schema antigo, custo real sem usuário afetado hoje).
-export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
+export const SUPPORTED_BACKUP_SCHEMA_VERSION = 10;
 
 // Escopo de restore automatizado (ver docs/product/RPG_MANAGER_FINAL_STATUS.md, seção F-015;
 // BATCH20 — pedido de finalização absoluta, reclassificou F-015 de DONE para IN_PROGRESS até
@@ -49,6 +49,7 @@ export interface BackupRestorePreviewSummary {
   entities: number;
   journalFolders: number;
   journalPages: number;
+  journalPageWorldLinks: number;
   worldEntityLinks: number;
   library: number;
   groups: number;

@@ -106,6 +106,7 @@ app.route('/api/v1/vault',vaultRoutes);
 app.use('/api/v1/knowledge/*',requireAuth,requireCsrf);
 app.route('/api/v1/knowledge',knowledgeRoutes);
 app.use('/api/v1/journal/*',requireAuth,requireCsrf);
+app.use('/api/v1/journal',requireAuth,requireCsrf);
 app.route('/api/v1/journal',journalRoutes);
 app.use('/api/v1/world-invites/*',requireAuth,requireCsrf);
 app.route('/api/v1/world-invites',worldInviteRoutes);

@@ -274,10 +274,10 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
   // LIB-002: capa/ISBN vêm de `publications` (fonte de verdade), com fallback para o `r.isbn`
   // legado só onde a Publication não tem valor (linhas migradas com ISBN livre não classificável).
   const rows=await c.env.DB.prepare(`SELECT r.title,c.name category,s.name subgenre,r.reading_status,r.has_played,r.wants_to_play,r.priority,COALESCE(g.name,r.play_group_notes) play_group,r.planned_play_date,r.table_status,r.game_master,r.notes,p.cover_url cover_url,COALESCE(p.isbn,r.isbn) isbn,p.cover_source_url cover_source_url,p.cover_source_note cover_source_note FROM rpgs r LEFT JOIN publications p ON p.id=r.publication_id LEFT JOIN categories c ON c.id=r.category_id LEFT JOIN subgenres s ON s.id=r.subgenre_id LEFT JOIN play_groups g ON g.id=r.play_group_id WHERE r.user_id=? ORDER BY r.title`).bind(user.id).all();const headers=['title','category','subgenre','reading_status','has_played','wants_to_play','priority','play_group','planned_play_date','table_status','game_master','notes','cover_url','isbn','cover_source_url','cover_source_note'];const csv=[headers.join(','),...rows.results.map((row)=>headers.map((key)=>csvEscape(row[key])).join(','))].join('\n');return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="rpg-manager-catalogo.csv"'}});}
-  // F-015: v9 — cobertura completa de todo dado autoral do usuário (achado real da
+  // F-015: v10 — cobertura completa de todo dado autoral do usuário (achado real da
   // auditoria de integridade do BATCH5: v7 só tinha a linha-base de Worlds/Vault, sem
   // campos especializados/Journal/Wiki/Relations/Cartografia/External Resources/
-  // Timeline/Revisions; v9/BATCH19 fecha a mesma lacuna para os domínios criados desde
+  // Timeline/Revisions; v9/BATCH19 fechou a mesma lacuna para os domínios criados desde
   // então: Social, Sheets, world_entity_links, Adventures estruturadas, Files/Handouts
   // (só metadata — bytes vivem no KV, fora do escopo de um backup JSON, mesmo princípio
   // já aplicado a coverUrl/mídia externa) e VTT). Cada tabela nova é escopada por JOIN até
@@ -286,7 +286,7 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
   // ("Cobertura do backup completo") e docs/product/RPG_MANAGER_FINAL_STATUS.md (F-015).
   const [rpgs,campaigns,members,sessions,attendance,groups,groupMembers,preferences,worlds,worldMembers,entities,adventureDetails,campaignEntities,publications,gameSystems,publicationExternalIds,
     publicationAliases,loreDetails,characterDetails,npcDetails,creatureDetails,creatureStatBlocks,creatureStatTemplates,factionDetails,itemDetails,eventTemporalDetails,
-    journalFolders,journalPages,wikiFolders,wikiEntityMetadata,wikiEntityTags,wikiEntityAliases,worldTags,entityRelations,worldMaps,mapPins,externalResources,worldEras,worldCalendars,entityRevisions,
+    journalFolders,journalPages,journalPageWorldLinks,wikiFolders,wikiEntityMetadata,wikiEntityTags,wikiEntityAliases,worldTags,entityRelations,worldMaps,mapPins,externalResources,worldEras,worldCalendars,entityRevisions,
     friendRequests,friendships,userBlocks,socialInvites,notifications,sheetTemplates,characterSheets,worldEntityLinks,
     adventureScenes,adventureEncounters,adventureSceneEntities,adventureHandouts,fileAssets,
     vttScenes,vttTokens,vttFogCells,vttCombatants,rpgSocialInterests,
@@ -322,8 +322,9 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     c.env.DB.prepare('SELECT f.* FROM faction_details f JOIN vault_entities e ON e.id=f.entity_id WHERE e.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT i.* FROM item_details i JOIN vault_entities e ON e.id=i.entity_id WHERE e.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT ev.* FROM event_temporal_details ev JOIN vault_entities e ON e.id=ev.entity_id WHERE e.owner_user_id=?').bind(user.id),
-    c.env.DB.prepare('SELECT jf.* FROM journal_folders jf JOIN worlds w ON w.id=jf.world_id WHERE w.owner_user_id=?').bind(user.id),
-    c.env.DB.prepare('SELECT jp.* FROM journal_pages jp JOIN worlds w ON w.id=jp.world_id WHERE w.owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT * FROM journal_folders WHERE owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT * FROM journal_pages WHERE owner_user_id=?').bind(user.id),
+    c.env.DB.prepare('SELECT jl.* FROM journal_page_world_links jl JOIN journal_pages p ON p.id=jl.journal_page_id WHERE p.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT wf.* FROM wiki_folders wf JOIN worlds w ON w.id=wf.world_id WHERE w.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT wm.* FROM wiki_entity_metadata wm JOIN vault_entities e ON e.id=wm.entity_id WHERE e.owner_user_id=?').bind(user.id),
     c.env.DB.prepare('SELECT wt.* FROM wiki_entity_tags wt JOIN vault_entities e ON e.id=wt.entity_id WHERE e.owner_user_id=?').bind(user.id),
@@ -368,16 +369,16 @@ transferRoutes.get('/export',async(c)=>{const user=c.get('user');const format=c.
     c.env.DB.prepare('SELECT vc.* FROM vtt_combatants vc JOIN vtt_scenes vs ON vs.id=vc.scene_id JOIN campaigns c ON c.id=vs.campaign_id WHERE c.user_id=?').bind(user.id),
     // F-017 (BATCH20): rpg_social_interest nunca esteve no export — lacuna real corrigida
     // aqui (achado desta rodada, ver comentário em backup-restore.ts). Aditivo dentro do
-    // mesmo schemaVersion 9 (chave nova em `data`; restores antigos que não a leem continuam
-    // funcionando, e um backup v9 antigo sem esta chave continua restaurável — rowsOf() do
+    // mesmo schemaVersion 10 (chave nova em `data`; restores antigos que não a leem continuam
+    // funcionando, e um backup v10 antigo sem esta chave continua restaurável — rowsOf() do
     // restore trata a ausência como lista vazia).
     c.env.DB.prepare('SELECT si.* FROM rpg_social_interest si JOIN rpgs r ON r.id=si.rpg_id WHERE r.user_id=?').bind(user.id),
   ]);
-  return c.json({exportedAt:nowIso(),schemaVersion:9,user:{email:user.email,displayName:user.displayName},data:{
+  return c.json({exportedAt:nowIso(),schemaVersion:10,user:{email:user.email,displayName:user.displayName},data:{
     rpgs:rpgs.results,campaigns:campaigns.results,members:members.results,sessions:sessions.results,attendance:attendance.results,groups:groups.results,groupMembers:groupMembers.results,preferences:preferences.results,
     worlds:worlds.results,worldMembers:worldMembers.results,entities:entities.results,adventureDetails:adventureDetails.results,campaignEntities:campaignEntities.results,publications:publications.results,gameSystems:gameSystems.results,publicationExternalIds:publicationExternalIds.results,
     publicationAliases:publicationAliases.results,loreDetails:loreDetails.results,characterDetails:characterDetails.results,npcDetails:npcDetails.results,creatureDetails:creatureDetails.results,creatureStatBlocks:creatureStatBlocks.results,creatureStatTemplates:creatureStatTemplates.results,factionDetails:factionDetails.results,itemDetails:itemDetails.results,eventTemporalDetails:eventTemporalDetails.results,
-    journalFolders:journalFolders.results,journalPages:journalPages.results,wikiFolders:wikiFolders.results,wikiEntityMetadata:wikiEntityMetadata.results,wikiEntityTags:wikiEntityTags.results,wikiEntityAliases:wikiEntityAliases.results,worldTags:worldTags.results,entityRelations:entityRelations.results,worldMaps:worldMaps.results,mapPins:mapPins.results,externalResources:externalResources.results,worldEras:worldEras.results,worldCalendars:worldCalendars.results,entityRevisions:entityRevisions.results,
+    journalFolders:journalFolders.results,journalPages:journalPages.results,journalPageWorldLinks:journalPageWorldLinks.results,wikiFolders:wikiFolders.results,wikiEntityMetadata:wikiEntityMetadata.results,wikiEntityTags:wikiEntityTags.results,wikiEntityAliases:wikiEntityAliases.results,worldTags:worldTags.results,entityRelations:entityRelations.results,worldMaps:worldMaps.results,mapPins:mapPins.results,externalResources:externalResources.results,worldEras:worldEras.results,worldCalendars:worldCalendars.results,entityRevisions:entityRevisions.results,
     friendRequests:friendRequests.results,friendships:friendships.results,userBlocks:userBlocks.results,socialInvites:socialInvites.results,notifications:notifications.results,sheetTemplates:sheetTemplates.results,characterSheets:characterSheets.results,worldEntityLinks:worldEntityLinks.results,
     adventureScenes:adventureScenes.results,adventureEncounters:adventureEncounters.results,adventureSceneEntities:adventureSceneEntities.results,adventureHandouts:adventureHandouts.results,fileAssets:fileAssets.results,
     vttScenes:vttScenes.results,vttTokens:vttTokens.results,vttFogCells:vttFogCells.results,vttCombatants:vttCombatants.results,
