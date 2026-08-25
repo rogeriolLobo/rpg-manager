@@ -3,7 +3,7 @@ import type { Env } from '../types';
 interface TurnstileResponse { success: boolean }
 
 export async function verifyTurnstile(env: Env, token: string | undefined, remoteIp: string | undefined): Promise<boolean> {
-  if (env.ENVIRONMENT === 'test' && (env as unknown as Record<string, string>).E2E_BYPASS_RATE_LIMIT === '1') return true;
+  if (env.ENVIRONMENT === 'test' && env.E2E_BYPASS_RATE_LIMIT === '1') return true;
   if (!env.TURNSTILE_SECRET_KEY) return env.ENVIRONMENT !== 'production';
   if (!token) {
     console.log('[Turnstile] Failed: No token provided');
