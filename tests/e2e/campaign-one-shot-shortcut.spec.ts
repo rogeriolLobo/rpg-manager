@@ -60,7 +60,7 @@ test("Campanhas: atalho 'Nova mesa única' pré-seleciona o Formato One-Shot e a
   await expect(page.getByLabel("Personagem de Jogador Convidado")).toHaveValue("Aventureira Improvável");
 
   // ---- Session: registra a sessão única, com o jogador marcado como participante. ----
-  await page.getByRole("link", { name: "Registrar sessão" }).first().click();
+  await page.locator(".page-header").getByRole("link", { name: "Registrar sessão" }).click();
   await expect(page.getByRole("heading", { name: "Registrar sessão" })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel("Título").fill("Sessão única");
   await page.getByText("Jogador Convidado").click();

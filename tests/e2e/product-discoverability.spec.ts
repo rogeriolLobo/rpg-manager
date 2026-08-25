@@ -72,7 +72,7 @@ test("Product Surface: áreas globais, Campaign Hub e Mesa do Mestre são descob
   await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Prepare sua primeira cena" })).toBeVisible();
-  await page.getByRole("button", { name: "Criar primeira cena" }).first().click();
+  await page.locator(".empty-state").getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await expect(page.getByLabel("Título", { exact: true })).toBeFocused();
 });
 

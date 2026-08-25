@@ -65,7 +65,7 @@ test("VTT: cria cena, adiciona token, ativa para os jogadores e revela o token",
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Excluir cena Câmara do Dragão" }).click();
-  await expect(page.getByText("Nenhuma cena criada ainda.")).toBeVisible();
+  await expect(page.getByText("Prepare sua primeira cena")).toBeVisible();
 });
 
 // F-032 (BATCH17): iniciativa/combate system-neutral, sobre a fundação do F-029.
