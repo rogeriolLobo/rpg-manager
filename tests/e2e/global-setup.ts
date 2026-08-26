@@ -54,7 +54,7 @@ export default async function globalSetup(): Promise<void> {
   const email = `warmup-${Date.now()}@example.com`;
   try {
     const registered = await warmupStep(context, 'POST /auth/register', async () => {
-      const response = await context.post('/api/v1/auth/register', { data: { email, displayName: 'Warmup', password: 'uma senha longa só para aquecer o worker 2026' } });
+      const response = await context.post('/api/v1/auth/register', { data: { email, displayName: 'Warmup', password: 'uma senha longa só para aquecer o worker 2026', turnstileToken: '1x00000000000000000000AA' } });
       return { ok: response.ok(), status: response.status() };
     });
     if (!registered) return; // sem sessão, não dá pra continuar aquecendo os próximos passos.

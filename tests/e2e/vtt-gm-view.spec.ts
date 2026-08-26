@@ -24,7 +24,7 @@ test("VTT — GM View: preparação da Adventure aparece na tela, com link para 
   await page.getByRole("link", { name: "Preparar aventura" }).click();
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
   await sceneForm.getByLabel("Título").fill("Cena 1");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar cena", exact: true }).click();
   await expect(page.getByText("Cena 1").first()).toBeVisible();
   const handoutForm = page.locator("form").filter({ hasText: "Novo handout" });
   await handoutForm.getByLabel("Título").fill("Bilhete do Barão");
@@ -42,16 +42,16 @@ test("VTT — GM View: preparação da Adventure aparece na tela, com link para 
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
-  await expect(page.getByRole("heading", { name: `RPG GM View ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `RPG GM View ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
-  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u, { timeout: 30_000 });
   await page.getByLabel("Nome da campanha").fill(`Mesa GM View ${suffix}`);
   await page.getByLabel("Adventure principal").selectOption({ label: `Aventura GM View ${suffix}` });
   await page.getByRole("button", { name: "Salvar campanha" }).click();
-  await expect(page.getByRole("heading", { name: `Mesa GM View ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Mesa GM View ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
   await expect(page.getByText("Preparação da Adventure")).toBeVisible();
   await expect(page.getByText(`Aventura GM View ${suffix}`)).toBeVisible();

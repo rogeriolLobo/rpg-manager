@@ -34,7 +34,7 @@ test("Preparação de Aventura: cria cena, encontro, vincula NPC do Vault e cria
   await sceneForm.getByLabel("Ato (opcional)").fill("Ato 1");
   await sceneForm.getByLabel("Título").fill("A Emboscada");
   await sceneForm.getByLabel("Resumo").fill("Os heróis são cercados na estrada.");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar cena", exact: true }).click();
   await expect(page.getByText("Ato 1 · A Emboscada")).toBeVisible({ timeout: 30_000 });
 
   // Expande a cena para adicionar encontro e vincular o NPC.

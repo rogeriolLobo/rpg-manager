@@ -84,7 +84,7 @@ test("Minhas Mesas (F-033): jogador descobre a campanha sem link do GM, vê seu 
     // O jogador nunca recebeu um link — descobre a mesa sozinho pela navegação global.
     await playerPage.goto("/app");
     await openNav(playerPage);
-    await playerPage.getByRole("link", { name: "Minhas Mesas" }).click();
+    await playerPage.locator(".sidebar").getByRole("link", { name: "Minhas Mesas", exact: true }).click();
     await expect(playerPage).toHaveURL(/\/app\/my-tables$/u);
     await expect(playerPage.getByRole("heading", { name: "Mesa de Valdren" })).toBeVisible({ timeout: 30_000 });
     await playerPage.getByRole("link", { name: "Mesa de Valdren" }).click();

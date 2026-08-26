@@ -34,7 +34,7 @@ test("Vault avançado: vincula entidade a um segundo World, aparece na Wiki dele
 
   await page.goto("/app/vault/new");
   await page.getByLabel("Nome", { exact: true }).fill(`NPC Compartilhado ${suffix}`);
-  await page.getByLabel("World").selectOption({ label: `World A ${suffix}` });
+  await page.locator("form").getByRole("combobox", { name: "World", exact: true }).selectOption({ label: `World A ${suffix}` });
   await page.getByRole("button", { name: "Salvar entidade" }).click();
   await expect(page.getByRole("heading", { name: `NPC Compartilhado ${suffix}` })).toBeVisible();
   const entityUrl = page.url();

@@ -119,7 +119,7 @@ test("fluxo completo de cadastro até sessão e dashboard", async ({ page }) => 
   await page.getByRole("button", { name: "Adicionar" }).click();
   await expect(page.getByLabel("Personagem de Adriana")).toHaveValue("Lina");
 
-  await page.getByRole("link", { name: "Registrar sessão" }).first().click();
+  await page.locator(".page-header").getByRole("link", { name: "Registrar sessão" }).click();
   await page.getByLabel("Título", { exact: true }).fill("O chamado");
   await page.getByLabel(/Adriana/).check();
   await page

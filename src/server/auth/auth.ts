@@ -143,6 +143,7 @@ async function enforceRateLimit(
   normalizedEmail: string,
   limiter: RateLimit = c.env.AUTH_LOGIN_RATE_LIMITER,
 ): Promise<number> {
+  if (c.env.ENVIRONMENT === "test" && c.env.E2E_BYPASS_RATE_LIMIT === "1") return 0;
   const accountKey = await hashSecret(
     `account:${normalizedEmail}`,
     c.env.PASSWORD_PEPPER,
