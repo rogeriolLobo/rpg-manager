@@ -79,8 +79,8 @@ export function JournalPageContainer() {
   if (journalResource.status !== 'success' || worldsResource.status !== 'success') return null;
 
   const data = journalResource.data;
-  const worlds = worldsResource.data.items.filter((item) => item.isOwner && item.status === 'ACTIVE');
-  const selected = data.pages.find((page) => page.id === selectedId);
+  const worlds = worldsResource.data.items.filter((item) => item.status === 'ACTIVE');
+  const selected = data.pages.find((page) => page.id === selectedId) ?? (selectedId === null ? data.pages[0] : undefined);
 
   const choose = (pageId: string) => {
     setSelectedId(pageId);
@@ -92,8 +92,7 @@ export function JournalPageContainer() {
   const createPage = async () => {
     setError('');
     try {
-      const result = await postJson<{ item: JournalPage }>('/journal/pages', { title: 'Nova página', content: '', folderId: null });
-      if (worldId) await postJson<void>(`/journal/pages/${result.item.id}/worlds/${worldId}`, {});
+      const result = await postJson<{ item: JournalPage }>('/journal/pages', { title: 'Nova página', content: '', folderId: null, worldId: worldId || undefined });
       journalResource.reload();
       choose(result.item.id);
     } catch (reason) {
@@ -124,7 +123,7 @@ export function JournalPageContainer() {
         <form className="compact-form" onSubmit={(event) => void createFolder(event)}><label>Nova pasta<input required value={folderName} onChange={(event) => setFolderName(event.target.value)}/></label><button className="secondary-button">Criar</button></form>
       </aside>
       <section className="panel journal-editor">
-        {selected ? <JournalEditor key={`${selected.id}-${selected.updatedAt}`} page={selected} folders={data.folders} worlds={worlds} setError={setError} onSaved={async () => journalResource.reload()} onDeleted={async () => { await deleteApi(`/journal/pages/${selected.id}`); searchParams.delete('page'); setSearchParams(searchParams, { replace: true }); setSelectedId(null); journalResource.reload(); }}/> : <div><h2>Diário vazio</h2><p>Crie uma página para registrar seus lembretes e notas.</p><button className="primary-button" onClick={() => void createPage()}>Criar primeira página</button></div>}
+        {selected ? <JournalEditor key={`${selected.id}-${selected.updatedAt}`} page={selected} folders={data.folders} worlds={worlds} setError={setError} onSaved={async () => journalResource.reload()} onDeleted={async () => { await deleteApi(`/journal/pages/${selected.id}`); searchParams.delete('page'); setSearchParams(searchParams, { replace: true }); setSelectedId(null); journalResource.reload(); }}/> : data.pages.length === 0 ? <div><h2>Diário vazio</h2><p>Crie uma página para registrar seus lembretes e notas.</p><button className="primary-button" onClick={() => void createPage()}>Criar primeira página</button></div> : <div><h2>Selecione uma página</h2><p>Escolha uma página na lista para abrir o conteúdo.</p></div>}
         {error && <p className="form-error">{error}</p>}
       </section>
     </div>

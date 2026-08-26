@@ -222,6 +222,47 @@ describe('F-015: Backup/Restore completo', () => {
     expect(restoredTwoWorlds.worldIds).not.toContain(worldBId);
   });
 
+  it('normaliza backup v9 com journal_pages.world_id e journal_folders.world_id para ownership e links v10', async () => {
+    const owner = await register('backup-v9-journal');
+    const worldId = await createWorld(owner, 'World legado v9');
+    const folderResponse = await request(`/journal/${worldId}/folders`, 'POST', { name: 'Pasta v9', parentFolderId: null }, owner);
+    const folderId = ((await folderResponse.json()) as { item: { id: string } }).item.id;
+    const pageResponse = await request(`/journal/${worldId}/pages`, 'POST', { title: 'Página v9', content: 'Conteúdo legado preservado', folderId }, owner);
+    const pageId = ((await pageResponse.json()) as { item: { id: string } }).item.id;
+
+    const backup = await exportBackup(owner);
+    backup.schemaVersion = 9;
+    const legacyFolders = backup.data.journalFolders as Array<Record<string, unknown>>;
+    const legacyPages = backup.data.journalPages as Array<Record<string, unknown>>;
+    for (const folder of legacyFolders) {
+      folder.world_id = worldId;
+      delete folder.owner_user_id;
+    }
+    for (const page of legacyPages) {
+      page.world_id = worldId;
+      delete page.owner_user_id;
+    }
+    delete backup.data.journalPageWorldLinks;
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ journalFolders: 1, journalPages: 1, journalPageWorldLinks: 1 });
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ journalFolders: 1, journalPages: 1, journalPageWorldLinks: 1 });
+
+    const journal = await request('/journal', 'GET', undefined, owner);
+    const journalBody = await journal.json() as { folders: Array<{ id: string; name: string }>; pages: Array<{ id: string; folderId: string | null; title: string; content: string; worldIds: string[] }> };
+    const restoredFolder = journalBody.folders.find((folder) => folder.name === 'Pasta v9' && folder.id !== folderId)!;
+    const restoredPage = journalBody.pages.find((page) => page.title === 'Página v9' && page.id !== pageId)!;
+    expect(restoredFolder.id).toBeTruthy();
+    expect(restoredPage).toMatchObject({ folderId: restoredFolder.id, content: 'Conteúdo legado preservado' });
+    expect(restoredPage.worldIds).toHaveLength(1);
+    expect(restoredPage.worldIds).not.toContain(worldId);
+  });
+
   it('restaurar o backup de outra conta cria os dados sob a posse de quem restaura, nunca reatribui ao dono original (nunca um vetor de IDOR)', async () => {
     const victim = await register('backup-idor-victim');
     const victimWorldId = await createWorld(victim, 'Mundo da Vítima');

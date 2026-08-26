@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
-import { journalFolderInputSchema, journalPageInputSchema, type JournalPageInput } from '../../shared/validation/schemas';
-import { ownedWorld } from '../content/authorization';
+import { journalFolderInputSchema, journalPageCreateInputSchema, journalPageInputSchema, type JournalPageInput } from '../../shared/validation/schemas';
+import { authorizedWorld, ownedWorld } from '../content/authorization';
 import { getRevision, listRevisions, parseRevisionNumber, parseSnapshot, recordRevisionStatement } from '../content/revisions';
 import { ApiError, nowIso, readJson } from '../http';
 import type { AppVariables, Env } from '../types';
@@ -104,23 +104,28 @@ async function deleteFolder(c: AppContext, folderId: string): Promise<void> {
   await c.env.DB.prepare('DELETE FROM journal_folders WHERE id=? AND owner_user_id=?').bind(folderId, ownerUserId).run();
 }
 
-async function createPage(c: AppContext, worldId?: string) {
+async function createPage(c: AppContext, legacyWorldId?: string) {
   const ownerUserId = c.get('user').id;
-  const input = await readJson(c, journalPageInputSchema);
-  await validatePageFolder(c.env, ownerUserId, input.folderId);
-  if (worldId) await ownedWorld(c, worldId);
+  const input = await readJson(c, journalPageCreateInputSchema);
+  if (legacyWorldId && input.worldId && input.worldId !== legacyWorldId) {
+    throw new ApiError(422, 'JOURNAL_WORLD_MISMATCH', 'O World do payload não corresponde à rota legada.');
+  }
+  const worldId = legacyWorldId ?? input.worldId;
+  const pageInput: JournalPageInput = { title: input.title, content: input.content, folderId: input.folderId };
+  await validatePageFolder(c.env, ownerUserId, pageInput.folderId);
+  if (worldId) await authorizedWorld(c, worldId);
   const id = crypto.randomUUID();
   const now = nowIso();
   const statements: D1PreparedStatement[] = [
     c.env.DB.prepare('INSERT INTO journal_pages (id,owner_user_id,folder_id,title,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-      .bind(id, ownerUserId, input.folderId, input.title, input.content, now, now),
-    recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: id, ownerUserId, actorUserId: ownerUserId, action: 'CREATE', snapshot: input, now }),
+      .bind(id, ownerUserId, pageInput.folderId, pageInput.title, pageInput.content, now, now),
+    recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: id, ownerUserId, actorUserId: ownerUserId, action: 'CREATE', snapshot: pageInput, now }),
   ];
   if (worldId) {
     statements.push(c.env.DB.prepare('INSERT INTO journal_page_world_links (journal_page_id,world_id,created_at) VALUES (?,?,?)').bind(id, worldId, now));
   }
   await c.env.DB.batch(statements);
-  return { id, ...input, createdAt: now, updatedAt: now, worldIds: worldId ? [worldId] : [] };
+  return { id, ...pageInput, createdAt: now, updatedAt: now, worldIds: worldId ? [worldId] : [] };
 }
 
 async function updatePage(c: AppContext, pageId: string): Promise<void> {
@@ -217,7 +222,7 @@ journalRoutes.post('/pages/:pageId/worlds/:worldId', async (c) => {
   const pageId = c.req.param('pageId');
   const worldId = c.req.param('worldId');
   await requireOwnedPage(c.env, ownerUserId, pageId);
-  await ownedWorld(c, worldId);
+  await authorizedWorld(c, worldId);
   await c.env.DB.prepare('INSERT OR IGNORE INTO journal_page_world_links (journal_page_id,world_id,created_at) VALUES (?,?,?)')
     .bind(pageId, worldId, nowIso()).run();
   return c.body(null, 204);
@@ -257,6 +262,7 @@ journalRoutes.delete('/:worldId/folders/:folderId', async (c) => {
 
 journalRoutes.post('/:worldId/pages', async (c) => {
   const worldId = c.req.param('worldId');
+  await ownedWorld(c, worldId);
   return c.json({ item: await createPage(c, worldId) }, 201);
 });
 
@@ -274,7 +280,7 @@ journalRoutes.delete('/:worldId/pages/:pageId', async (c) => {
   const pageId = c.req.param('pageId');
   await ownedWorld(c, worldId);
   await requireLinkedOwnedPage(c.env, c.get('user').id, pageId, worldId);
-  await c.env.DB.prepare('DELETE FROM journal_page_world_links WHERE journal_page_id=? AND world_id=?').bind(pageId, worldId).run();
+  await c.env.DB.prepare('DELETE FROM journal_pages WHERE id=? AND owner_user_id=?').bind(pageId, c.get('user').id).run();
   return c.body(null, 204);
 });
 

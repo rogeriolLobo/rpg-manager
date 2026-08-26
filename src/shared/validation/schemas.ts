@@ -442,6 +442,10 @@ export const journalPageInputSchema = z.strictObject({
   folderId: z.string().trim().max(80).nullable().default(null),
 });
 
+export const journalPageCreateInputSchema = journalPageInputSchema.extend({
+  worldId: z.string().trim().min(1).max(80).optional(),
+});
+
 // F-003: mesma política de URL do coverUrl (LIB-001) — sintática, sem allowlist de host, sem
 // fetch do servidor (o navegador é quem abre o link, via <a href>).
 export const externalResourceInputSchema = z.strictObject({
@@ -550,5 +554,6 @@ export type WorldCalendarInput = z.infer<typeof worldCalendarInputSchema>;
 export type EventTemporalInput = z.infer<typeof eventTemporalInputSchema>;
 export type CreatureStatTemplateInput = z.infer<typeof creatureStatTemplateInputSchema>;
 export type JournalPageInput = z.infer<typeof journalPageInputSchema>;
+export type JournalPageCreateInput = z.infer<typeof journalPageCreateInputSchema>;
 export type SheetTemplateInput = z.infer<typeof sheetTemplateInputSchema>;
 export type CharacterSheetInput = z.infer<typeof characterSheetInputSchema>;

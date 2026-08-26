@@ -45,7 +45,7 @@ import {
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
 import { normalizeEditorialLabel } from '../../domain/content/wiki';
-import { SUPPORTED_BACKUP_SCHEMA_VERSION, type BackupRestoreWarning } from '../../domain/backup/types';
+import { SUPPORTED_BACKUP_SCHEMA_VERSION, SUPPORTED_BACKUP_SCHEMA_VERSIONS, type BackupRestoreWarning } from '../../domain/backup/types';
 import { validateSheet } from '../../domain/sheets';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import { hashSecret } from '../security/crypto';
@@ -75,6 +75,22 @@ const strOrNull = (row: RawRow, key: string): string | null => { const v = row[k
 const num = (row: RawRow, key: string): number | null => (typeof row[key] === 'number' ? row[key] as number : null);
 function rowsOf(data: RawRow, key: string): RawRow[] { return Array.isArray(data[key]) ? data[key] as RawRow[] : []; }
 function byField(rows: RawRow[], field: string): Map<string, RawRow> { const map = new Map<string, RawRow>(); for (const row of rows) map.set(str(row, field), row); return map; }
+
+function normalizeBackupRoot(root: RawRow): RawRow {
+  if (root.schemaVersion !== 9) return root;
+  const data = (root.data ?? {}) as RawRow;
+  const journalPageWorldLinks = rowsOf(data, 'journalPages').flatMap((page) => {
+    const journalPageId = str(page, 'id');
+    const worldId = str(page, 'world_id');
+    if (!journalPageId || !worldId) return [];
+    return [{ journal_page_id: journalPageId, world_id: worldId, created_at: str(page, 'created_at') }];
+  });
+  return {
+    ...root,
+    schemaVersion: SUPPORTED_BACKUP_SCHEMA_VERSION,
+    data: { ...data, journalPageWorldLinks },
+  };
+}
 
 interface WorldPlanItem { oldId: string; oldDefaultRpgId: string | null; input: WorldInput }
 interface TemplatePlanItem { oldId: string; oldWorldId: string; input: CreatureStatTemplateInput }
@@ -918,10 +934,11 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   const { backup } = await readJson(c, previewSchema);
   let root: unknown;
   try { root = JSON.parse(backup); } catch { throw new ApiError(422, 'INVALID_BACKUP_FILE', 'O arquivo enviado não é um JSON válido.'); }
-  const rootRow = root as RawRow;
-  if (rootRow.schemaVersion !== SUPPORTED_BACKUP_SCHEMA_VERSION) {
-    throw new ApiError(422, 'UNSUPPORTED_BACKUP_VERSION', `Este backup usa o formato v${String(rootRow.schemaVersion ?? 'desconhecido')}. Esta versão do RPG Manager só restaura backups v${SUPPORTED_BACKUP_SCHEMA_VERSION} — gere um novo backup em Configurações → Exportar e tente novamente.`);
+  const rawRoot = root as RawRow;
+  if (!SUPPORTED_BACKUP_SCHEMA_VERSIONS.includes(rawRoot.schemaVersion as 9 | 10)) {
+    throw new ApiError(422, 'UNSUPPORTED_BACKUP_VERSION', `Este backup usa o formato v${String(rawRoot.schemaVersion ?? 'desconhecido')}. Esta versão do RPG Manager restaura backups v9 e v${SUPPORTED_BACKUP_SCHEMA_VERSION} — gere um novo backup em Configurações → Exportar e tente novamente.`);
   }
+  const rootRow = normalizeBackupRoot(rawRoot);
   const user = c.get('user');
   const plan = await buildRestorePlan(c.env, user.id, rootRow);
   const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.journalPageWorldLinks.length + plan.worldEntityLinks.length

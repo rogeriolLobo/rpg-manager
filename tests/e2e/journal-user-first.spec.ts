@@ -35,6 +35,10 @@ test.describe("Journal (User-First Architecture)", () => {
     await page.getByLabel("Nova pasta").fill("Global Folder");
     await page.getByRole("button", { name: "Criar" }).click();
     await expect(page.locator(".journal-navigation").getByText("Global Folder", { exact: true })).toBeVisible();
+
+    await page.goto('/app/journal');
+    await expect(page.getByRole('heading', { name: 'Global Page', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Diário vazio' })).toHaveCount(0);
   });
 
   test("LINK_WORLD, LINK_TWO_WORLDS, UNLINK_WORLD_PRESERVES_PAGE", async () => {
@@ -77,6 +81,17 @@ test.describe("Journal (User-First Architecture)", () => {
     await page.getByRole("button", { name: "Shared Page" }).click();
     await expect(page.getByLabel("World Alpha", { exact: true })).not.toBeChecked();
     await expect(page.getByLabel("World Beta", { exact: true })).toBeChecked();
+
+    if ((page.viewportSize()?.width ?? 1000) <= 850) {
+      await page.getByRole('button', { name: 'Abrir menu' }).click();
+    }
+    await page.getByRole('button', { name: 'Abrir paleta de comandos' }).click();
+    const palette = page.getByRole('dialog', { name: 'Busca global e comandos' });
+    const scope = palette.getByRole('button', { name: /Escopo:/u });
+    if (await scope.isVisible()) await scope.click();
+    await palette.getByRole('textbox').fill('Shared Page');
+    await palette.getByRole('button', { name: /Shared Page/u }).click();
+    await expect(page).toHaveURL(/\/app\/journal\?page=[^&]+$/u);
   });
 
   test("REVISION_HISTORY", async () => {

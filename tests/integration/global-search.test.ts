@@ -148,4 +148,24 @@ describe('Global Search (Command Palette) — isolamento e permissões', () => {
     expect(resultsScopedToA.some((item) => item.id === entityAId)).toBe(true);
     expect(resultsScopedToA.some((item) => item.id === entityBId)).toBe(false);
   });
+
+  it('Journal aparece globalmente e a busca filtrada por World considera somente links N:N', async () => {
+    const owner = await register('gsearch-journal-owner');
+    const uniqueTerm = `JournalBusca${Date.now()}`;
+    const worldA = await request('/worlds', 'POST', { name: 'Journal World A', description: '', defaultRpgId: null, visibility: 'PRIVATE' }, owner);
+    const worldAId = ((await worldA.json()) as { item: { id: string } }).item.id;
+    const worldB = await request('/worlds', 'POST', { name: 'Journal World B', description: '', defaultRpgId: null, visibility: 'PRIVATE' }, owner);
+    const worldBId = ((await worldB.json()) as { item: { id: string } }).item.id;
+    const linked = await request('/journal/pages', 'POST', { title: `${uniqueTerm} vinculado`, content: '', folderId: null, worldId: worldAId }, owner);
+    const linkedId = ((await linked.json()) as { item: { id: string } }).item.id;
+    const unlinked = await request('/journal/pages', 'POST', { title: `${uniqueTerm} global`, content: '', folderId: null }, owner);
+    const unlinkedId = ((await unlinked.json()) as { item: { id: string } }).item.id;
+
+    const globalResults = ((await (await search(owner, uniqueTerm)).json()) as { items: SearchItem[] }).items;
+    expect(globalResults.filter((item) => item.kind === 'JOURNAL').map((item) => item.id).sort()).toEqual([linkedId, unlinkedId].sort());
+    const worldAResults = ((await (await search(owner, uniqueTerm, worldAId)).json()) as { items: SearchItem[] }).items;
+    expect(worldAResults.filter((item) => item.kind === 'JOURNAL').map((item) => item.id)).toEqual([linkedId]);
+    const worldBResults = ((await (await search(owner, uniqueTerm, worldBId)).json()) as { items: SearchItem[] }).items;
+    expect(worldBResults.filter((item) => item.kind === 'JOURNAL')).toHaveLength(0);
+  });
 });
