@@ -34,6 +34,7 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
     await expect(biblioteca.locator('.nav-section-label')).toHaveText('Biblioteca e conteúdo');
     await expect(biblioteca.getByRole('link', { name: 'Biblioteca', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Vault', exact: true })).toBeVisible();
+    await expect(biblioteca.getByRole('link', { name: 'Diário', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Compêndio', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Fichas', exact: true })).toBeVisible();
 
@@ -67,7 +68,6 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
     const sidebar = page.locator('.sidebar');
     await expect(sidebar.getByRole('link', { name: 'Visão do World' })).not.toBeVisible();
     await expect(sidebar.getByRole('link', { name: 'Wiki' })).not.toBeVisible();
-    await expect(sidebar.getByRole('link', { name: 'Diário' })).not.toBeVisible();
     await expect(sidebar.getByRole('link', { name: 'Recursos externos' })).not.toBeVisible();
     await expect(sidebar.getByRole('link', { name: 'Cartografia' })).not.toBeVisible();
     await expect(sidebar.getByRole('link', { name: 'Relações' })).not.toBeVisible();
@@ -116,7 +116,6 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
   await expect(activeWorldNav).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Visão do World', exact: true })).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Wiki', exact: true })).toBeVisible();
-  await expect(activeWorldNav.getByRole('link', { name: 'Diário', exact: true })).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Recursos externos', exact: true })).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Cartografia', exact: true })).toBeVisible();
   await expect(activeWorldNav.getByRole('link', { name: 'Relações', exact: true })).toBeVisible();
