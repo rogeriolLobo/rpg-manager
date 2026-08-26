@@ -12,6 +12,7 @@ export function AppShell() {
   const contentLinks = [
     ['/app/library', BookOpen, 'Biblioteca'],
     ['/app/vault', Archive, 'Vault'],
+    ['/app/journal', NotebookPen, 'Diário'],
     ['/app/compendium', BookMarked, 'Compêndio'],
     ['/app/sheets', ScrollText, 'Fichas'],
   ] as const;
@@ -25,7 +26,6 @@ export function AppShell() {
   const worldLinks = activeWorld ? [
     [`/app/worlds/${activeWorld.id}`, Gauge, 'Visão do World'],
     [`/app/worlds/${activeWorld.id}/wiki`, BookOpen, 'Wiki'],
-    ...(activeWorld.isOwner ? [[`/app/worlds/${activeWorld.id}/journal`, NotebookPen, 'Diário'] as const] : []),
     [`/app/worlds/${activeWorld.id}/resources`, Link2, 'Recursos externos'],
     [`/app/worlds/${activeWorld.id}/cartography`, Map, 'Cartografia'],
     [`/app/worlds/${activeWorld.id}/relations`, GitFork, 'Relações'],

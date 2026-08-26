@@ -31,17 +31,12 @@ export function Badge({children}:{children:React.ReactNode}){return <span classN
 export function Empty({title,text,action,to}:{title:string;text:string;action:string;to:string}){return <div className="empty-state"><Dice5/><h3>{title}</h3><p>{text}</p><Link className="secondary-button link-button" to={to}>{action}</Link></div>}
 export function formatDate(value:string|null|undefined){return value?new Intl.DateTimeFormat('pt-BR').format(new Date(`${value.slice(0,10)}T12:00:00`)):'—'}
 
-// F-005 (Ideas/Quick Capture): UX rápida sobre o Diário já existente
-// (journal_pages via POST /journal/:worldId/pages, folderId=null) — deliberadamente
-// SEM domínio novo (ver docs/product/MASTER_BACKLOG.md). World continua obrigatório
-// (journal_pages.world_id é NOT NULL desde a migration 0011; relaxar isso exigiria um
-// rebuild de tabela — ver docs/architecture/DATABASE_MIGRATION_SAFETY.md — desproporcional
-// para esta feature opcional); por isso o seletor de World abaixo, default no World ativo
-// quando o usuário é dono dele. Só aparece para quem já é dono de pelo menos um World —
-// sem onde salvar a ideia, o atalho não faz sentido.
+// F-005 (Ideas/Quick Capture): UX rápida sobre o Diário User-First, sem domínio novo.
+// O World é contexto opcional e pode ser qualquer World acessível ao usuário. Quando
+// informado, página, revisão inicial e link são persistidos atomicamente pelo backend.
 function QuickIdeaButton() {
   const { worlds, activeWorld } = useActiveWorld();
-  const ownedWorlds = worlds.filter((world) => world.isOwner);
+  const accessibleWorlds = worlds;
   const [open, setOpen] = useState(false);
   const [worldId, setWorldId] = useState('');
   const [title, setTitle] = useState('');
@@ -50,23 +45,20 @@ function QuickIdeaButton() {
   const [savedPageId, setSavedPageId] = useState<string | null>(null);
 
   const openModal = () => {
-    setWorldId((activeWorld?.isOwner ? activeWorld.id : ownedWorlds[0]?.id) ?? '');
+    setWorldId(activeWorld?.id ?? accessibleWorlds[0]?.id ?? '');
     setTitle(''); setContent(''); setError(''); setSavedPageId(null);
     setOpen(true);
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!worldId) { setError('Escolha um World.'); return; }
     try {
-      const { item } = await postJson<{ item: { id: string } }>(`/journal/${worldId}/pages`, { folderId: null, title, content });
+      const { item } = await postJson<{ item: { id: string } }>('/journal/pages', { folderId: null, title, content, worldId: worldId || undefined });
       setSavedPageId(item.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível salvar a ideia.');
     }
   };
-
-  if (!ownedWorlds.length) return null;
   return <>
     <button type="button" className="secondary-button" onClick={openModal}><Lightbulb size={18}/>Nova ideia</button>
     {open && <div className="quick-idea-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
@@ -75,13 +67,14 @@ function QuickIdeaButton() {
         {savedPageId ? <>
           <p className="success-message">Ideia salva no Diário.</p>
           <div className="button-row">
-            <Link className="secondary-button link-button" to={`/app/worlds/${worldId}/journal`} onClick={() => setOpen(false)}>Ver no Diário</Link>
+            <Link className="secondary-button link-button" to={worldId ? `/app/journal?page=${savedPageId}&worldId=${worldId}` : `/app/journal?page=${savedPageId}`} onClick={() => setOpen(false)}>Ver no Diário</Link>
             <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Fechar</button>
           </div>
         </> : <form className="form-grid" onSubmit={(event) => void submit(event)}>
-          <label className="span-2">World
-            <select value={worldId} onChange={(event) => setWorldId(event.target.value)} required>
-              {ownedWorlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}
+          <label className="span-2">Vincular a um World (opcional)
+            <select value={worldId} onChange={(event) => setWorldId(event.target.value)}>
+              <option value="">Apenas privado no Diário</option>
+              {accessibleWorlds.map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}
             </select>
           </label>
           <label className="span-2">Título

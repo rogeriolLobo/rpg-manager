@@ -21,7 +21,7 @@ function resultPath(item: SearchResult): string {
   if (item.kind === 'CAMPAIGN') return `/app/campaigns/${item.id}`;
   if (item.kind === 'GROUP') return `/app/groups/${item.id}`;
   if (item.kind === 'RPG') return `/app/library/${item.id}`;
-  return `/app/worlds/${item.worldId}/journal?page=${item.id}`;
+  return `/app/journal?page=${item.id}`;
 }
 
 export function CommandPalette({ onNavigate }: { onNavigate?: () => void }) {

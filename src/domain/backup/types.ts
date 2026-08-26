@@ -1,13 +1,11 @@
 // F-015: Backup/Restore completo. Tipos puros do domínio de backup — nenhuma
 // dependência de D1/Hono aqui (mesmo padrão de domain/content/revision.ts).
 //
-// SUPPORTED_SCHEMA_VERSION: a v1 do restore exige exatamente esta versão do
-// export (ver GET /api/v1/export em transfer.ts). Um backup de uma versão
-// anterior (ex.: v8, sem os domínios do BATCH19) precisa ser reexportado antes
-// de poder ser restaurado — não há shim de compatibilidade retroativa nesta v1
-// (decisão registrada, não omissão: um shim exigiria manter para sempre o
-// mapeamento de todo schema antigo, custo real sem usuário afetado hoje).
-export const SUPPORTED_BACKUP_SCHEMA_VERSION = 9;
+// O export atual permanece em v10. Durante a transição User-First, o restore
+// também aceita v9 e o normaliza para v10; versões anteriores continuam fora
+// do contrato porque não possuem todos os domínios necessários ao restore.
+export const SUPPORTED_BACKUP_SCHEMA_VERSION = 10;
+export const SUPPORTED_BACKUP_SCHEMA_VERSIONS = [9, SUPPORTED_BACKUP_SCHEMA_VERSION] as const;
 
 // Escopo de restore automatizado (ver docs/product/RPG_MANAGER_FINAL_STATUS.md, seção F-015;
 // BATCH20 — pedido de finalização absoluta, reclassificou F-015 de DONE para IN_PROGRESS até
@@ -49,6 +47,7 @@ export interface BackupRestorePreviewSummary {
   entities: number;
   journalFolders: number;
   journalPages: number;
+  journalPageWorldLinks: number;
   worldEntityLinks: number;
   library: number;
   groups: number;

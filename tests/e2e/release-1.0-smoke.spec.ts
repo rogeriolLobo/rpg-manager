@@ -95,7 +95,7 @@ test("RPG Manager 1.0 — smoke de release: Ideas, External Resources, Global Se
   await ideaDialog.getByRole("button", { name: "Salvar ideia" }).click();
   await expect(page.getByText("Ideia salva no Diário.")).toBeVisible();
   await page.getByRole("link", { name: "Ver no Diário" }).click();
-  await expect(page).toHaveURL(/\/journal$/u);
+  await expect(page).toHaveURL(/worldId=/);
   // getByText sozinho é ambíguo aqui de propósito: o título da página aberta aparece na lista
   // lateral (item ativo) E no heading do editor — só o heading é role="heading".
   await expect(page.getByRole("heading", { name: `${PREFIX} Idea`, exact: true })).toBeVisible();
@@ -208,7 +208,7 @@ test("RPG Manager 1.0 — smoke de release: Ideas, External Resources, Global Se
   const worldNavigation: Array<[string, string]> = [
     [`/app/worlds/${worldId}`, `${PREFIX} World`],
     [`/app/worlds/${worldId}/wiki`, `${PREFIX} World`],
-    [`/app/worlds/${worldId}/journal`, `${PREFIX} World`],
+
     [`/app/worlds/${worldId}/relations`, `${PREFIX} World`],
     [`/app/worlds/${worldId}/timeline`, `${PREFIX} World`],
     [`/app/worlds/${worldId}/bestiary`, `Criaturas de ${PREFIX} World`],

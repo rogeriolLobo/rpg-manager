@@ -45,7 +45,7 @@ import {
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
 import { normalizeEditorialLabel } from '../../domain/content/wiki';
-import { SUPPORTED_BACKUP_SCHEMA_VERSION, type BackupRestoreWarning } from '../../domain/backup/types';
+import { SUPPORTED_BACKUP_SCHEMA_VERSION, SUPPORTED_BACKUP_SCHEMA_VERSIONS, type BackupRestoreWarning } from '../../domain/backup/types';
 import { validateSheet } from '../../domain/sheets';
 import { ApiError, cleanNullable, nowIso, readJson } from '../http';
 import { hashSecret } from '../security/crypto';
@@ -76,11 +76,28 @@ const num = (row: RawRow, key: string): number | null => (typeof row[key] === 'n
 function rowsOf(data: RawRow, key: string): RawRow[] { return Array.isArray(data[key]) ? data[key] as RawRow[] : []; }
 function byField(rows: RawRow[], field: string): Map<string, RawRow> { const map = new Map<string, RawRow>(); for (const row of rows) map.set(str(row, field), row); return map; }
 
+function normalizeBackupRoot(root: RawRow): RawRow {
+  if (root.schemaVersion !== 9) return root;
+  const data = (root.data ?? {}) as RawRow;
+  const journalPageWorldLinks = rowsOf(data, 'journalPages').flatMap((page) => {
+    const journalPageId = str(page, 'id');
+    const worldId = str(page, 'world_id');
+    if (!journalPageId || !worldId) return [];
+    return [{ journal_page_id: journalPageId, world_id: worldId, created_at: str(page, 'created_at') }];
+  });
+  return {
+    ...root,
+    schemaVersion: SUPPORTED_BACKUP_SCHEMA_VERSION,
+    data: { ...data, journalPageWorldLinks },
+  };
+}
+
 interface WorldPlanItem { oldId: string; oldDefaultRpgId: string | null; input: WorldInput }
 interface TemplatePlanItem { oldId: string; oldWorldId: string; input: CreatureStatTemplateInput }
 interface EntityPlanItem { oldId: string; oldWorldId: string | null; oldParentEntityId: string | null; oldTemplateId: string | null; input: VaultEntityInput }
-interface JournalFolderPlanItem { oldId: string; oldWorldId: string; oldParentFolderId: string | null; input: { name: string; parentFolderId: string | null } }
-interface JournalPagePlanItem { oldId: string; oldWorldId: string; oldFolderId: string | null; input: JournalPageInput }
+interface JournalFolderPlanItem { oldId: string; oldParentFolderId: string | null; input: { name: string; parentFolderId: string | null } }
+interface JournalPagePlanItem { oldId: string; oldFolderId: string | null; input: JournalPageInput }
+interface JournalPageWorldLinkPlanItem { oldPageId: string; oldWorldId: string }
 // F-022 (BATCH19): world_entity_links — extensão mais simples possível do escopo de restore
 // v1: liga dois IDs já restaurados na MESMA operação (World + entidade), sem INSERT próprio de
 // domínio nem parsing adicional. Adventures/Sheets/VTT/Social continuam export-only nesta v1
@@ -154,7 +171,7 @@ interface SocialInvitePlanItem { inviterUserId: string; inviteeUserId: string; t
 interface RpgSocialInterestPlanItem { oldRpgId: string }
 interface RestorePlan {
   worlds: WorldPlanItem[]; creatureStatTemplates: TemplatePlanItem[]; entities: EntityPlanItem[];
-  journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
+  journalFolders: JournalFolderPlanItem[]; journalPages: JournalPagePlanItem[]; journalPageWorldLinks: JournalPageWorldLinkPlanItem[]; worldEntityLinks: WorldEntityLinkPlanItem[];
   library: LibraryPlanItem[]; groups: GroupPlanItem[]; groupMembers: GroupMemberPlanItem[];
   campaigns: CampaignPlanItem[]; campaignMembers: CampaignMemberPlanItem[]; campaignSessions: CampaignSessionPlanItem[];
   sheetTemplates: SheetTemplatePlanItem[]; characterSheets: CharacterSheetPlanItem[];
@@ -173,8 +190,9 @@ const restorePlanSchema = z.strictObject({
   worlds: z.array(z.strictObject({ oldId: z.string(), oldDefaultRpgId: z.string().nullable(), input: worldInputSchema })),
   creatureStatTemplates: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: creatureStatTemplateInputSchema })),
   entities: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string().nullable(), oldParentEntityId: z.string().nullable(), oldTemplateId: z.string().nullable(), input: vaultEntityInputSchema })),
-  journalFolders: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldParentFolderId: z.string().nullable(), input: journalFolderInputSchema })),
-  journalPages: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldFolderId: z.string().nullable(), input: journalPageInputSchema })),
+  journalFolders: z.array(z.strictObject({ oldId: z.string(), oldParentFolderId: z.string().nullable(), input: journalFolderInputSchema })),
+  journalPages: z.array(z.strictObject({ oldId: z.string(), oldFolderId: z.string().nullable(), input: journalPageInputSchema })),
+  journalPageWorldLinks: z.array(z.strictObject({ oldPageId: z.string(), oldWorldId: z.string() })),
   worldEntityLinks: z.array(z.strictObject({ oldWorldId: z.string(), oldEntityId: z.string() })),
   library: z.array(z.strictObject({ oldId: z.string(), oldPlayGroupId: z.string().nullable(), oldGameSystemId: z.string().nullable(), input: rpgInputSchema })),
   groups: z.array(z.strictObject({ oldId: z.string(), input: playGroupInputSchema })),
@@ -323,23 +341,33 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
   const folderOldIds = new Set(rawFolders.map((row) => str(row, 'id')));
   const journalFolders: JournalFolderPlanItem[] = [];
   for (const row of rawFolders) {
-    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
-    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'journalFolders', oldId, message: 'World original não pôde ser restaurado — pasta do Diário não será restaurada.' }); continue; }
+    const oldId = str(row, 'id');
     const oldParentFolderId = strOrNull(row, 'parent_folder_id');
     const parsed = journalFolderInputSchema.safeParse({ name: str(row, 'name'), parentFolderId: null });
     if (!parsed.success) { warnings.push({ domain: 'journalFolders', oldId, message: 'Pasta com dados inválidos após validação — não será restaurada.' }); continue; }
-    journalFolders.push({ oldId, oldWorldId, oldParentFolderId: oldParentFolderId && folderOldIds.has(oldParentFolderId) ? oldParentFolderId : null, input: parsed.data });
+    journalFolders.push({ oldId, oldParentFolderId: oldParentFolderId && folderOldIds.has(oldParentFolderId) ? oldParentFolderId : null, input: parsed.data });
   }
   const rawPages = rowsOf(data, 'journalPages');
   if (rawPages.length > 1000) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais páginas de Diário do que a v1 do restore suporta (1000 por operação).');
   const journalPages: JournalPagePlanItem[] = [];
   for (const row of rawPages) {
-    const oldId = str(row, 'id'); const oldWorldId = str(row, 'world_id');
-    if (!worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'journalPages', oldId, message: 'World original não pôde ser restaurado — página do Diário não será restaurada.' }); continue; }
+    const oldId = str(row, 'id');
     const oldFolderId = strOrNull(row, 'folder_id');
     const parsed = journalPageInputSchema.safeParse({ title: str(row, 'title'), content: str(row, 'content'), folderId: null });
     if (!parsed.success) { warnings.push({ domain: 'journalPages', oldId, message: 'Página com dados inválidos após validação — não será restaurada.' }); continue; }
-    journalPages.push({ oldId, oldWorldId, oldFolderId: oldFolderId && folderOldIds.has(oldFolderId) ? oldFolderId : null, input: parsed.data });
+    journalPages.push({ oldId, oldFolderId: oldFolderId && folderOldIds.has(oldFolderId) ? oldFolderId : null, input: parsed.data });
+  }
+  const validJournalPageOldIds = new Set(journalPages.map((page) => page.oldId));
+  const rawJournalPageWorldLinks = rowsOf(data, 'journalPageWorldLinks');
+  if (rawJournalPageWorldLinks.length > 5000) throw new ApiError(422, 'BACKUP_TOO_LARGE', 'Este backup tem mais vínculos World/Diário do que a v1 do restore suporta (5000 por operação).');
+  const journalPageWorldLinks: JournalPageWorldLinkPlanItem[] = [];
+  for (const row of rawJournalPageWorldLinks) {
+    const oldPageId = str(row, 'journal_page_id'); const oldWorldId = str(row, 'world_id');
+    if (!validJournalPageOldIds.has(oldPageId) || !worldOldIds.has(oldWorldId)) {
+      warnings.push({ domain: 'journalPageWorldLinks', oldId: `${oldPageId}:${oldWorldId}`, message: 'Página ou World original não pôde ser restaurado — vínculo do Diário não será restaurado.', category: 'SKIP' });
+      continue;
+    }
+    journalPageWorldLinks.push({ oldPageId, oldWorldId });
   }
 
   // ---- world_entity_links (F-022) — só restaura o vínculo se AMBOS World e entidade também
@@ -890,7 +918,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
   if (rowsOf(data, 'notifications').length > 0) warnings.push({ domain: 'notifications', oldId: '*', message: 'Notificações não são restauradas — referenciam IDs do ambiente original que o restore sempre substitui, e recriá-las geraria notificações quebradas. Notificação é considerada atividade efêmera do usuário, não estado de domínio.', category: 'EPHEMERAL_USER_ACTIVITY' });
 
   return {
-    worlds, creatureStatTemplates, entities, journalFolders, journalPages, worldEntityLinks,
+    worlds, creatureStatTemplates, entities, journalFolders, journalPages, journalPageWorldLinks, worldEntityLinks,
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
     sheetTemplates, characterSheets,
     wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
@@ -906,13 +934,14 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   const { backup } = await readJson(c, previewSchema);
   let root: unknown;
   try { root = JSON.parse(backup); } catch { throw new ApiError(422, 'INVALID_BACKUP_FILE', 'O arquivo enviado não é um JSON válido.'); }
-  const rootRow = root as RawRow;
-  if (rootRow.schemaVersion !== SUPPORTED_BACKUP_SCHEMA_VERSION) {
-    throw new ApiError(422, 'UNSUPPORTED_BACKUP_VERSION', `Este backup usa o formato v${String(rootRow.schemaVersion ?? 'desconhecido')}. Esta versão do RPG Manager só restaura backups v${SUPPORTED_BACKUP_SCHEMA_VERSION} — gere um novo backup em Configurações → Exportar e tente novamente.`);
+  const rawRoot = root as RawRow;
+  if (!SUPPORTED_BACKUP_SCHEMA_VERSIONS.includes(rawRoot.schemaVersion as 9 | 10)) {
+    throw new ApiError(422, 'UNSUPPORTED_BACKUP_VERSION', `Este backup usa o formato v${String(rawRoot.schemaVersion ?? 'desconhecido')}. Esta versão do RPG Manager restaura backups v9 e v${SUPPORTED_BACKUP_SCHEMA_VERSION} — gere um novo backup em Configurações → Exportar e tente novamente.`);
   }
+  const rootRow = normalizeBackupRoot(rawRoot);
   const user = c.get('user');
   const plan = await buildRestorePlan(c.env, user.id, rootRow);
-  const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.worldEntityLinks.length
+  const rowCount = plan.worlds.length + plan.creatureStatTemplates.length + plan.entities.length + plan.journalFolders.length + plan.journalPages.length + plan.journalPageWorldLinks.length + plan.worldEntityLinks.length
     + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
     + plan.sheetTemplates.length + plan.characterSheets.length
     + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
@@ -931,7 +960,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
   return c.json({
     jobId,
     summary: {
-      worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length, worldEntityLinks: plan.worldEntityLinks.length,
+      worlds: plan.worlds.length, creatureStatTemplates: plan.creatureStatTemplates.length, entities: plan.entities.length, journalFolders: plan.journalFolders.length, journalPages: plan.journalPages.length, journalPageWorldLinks: plan.journalPageWorldLinks.length, worldEntityLinks: plan.worldEntityLinks.length,
       library: plan.library.length, groups: plan.groups.length, groupMembers: plan.groupMembers.length, campaigns: plan.campaigns.length, campaignMembers: plan.campaignMembers.length, campaignSessions: plan.campaignSessions.length,
       sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
       wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
@@ -1284,9 +1313,8 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
   const folderIdMap = new Map<string, string>();
   const folderParentPending: Array<{ newId: string; oldParentFolderId: string }> = [];
   for (const item of plan.journalFolders) {
-    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
     const newId = crypto.randomUUID();
-    statements.push(c.env.DB.prepare('INSERT INTO journal_folders (id,world_id,parent_folder_id,name,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind(newId, newWorldId, null, item.input.name, now, now));
+    statements.push(c.env.DB.prepare('INSERT INTO journal_folders (id,owner_user_id,parent_folder_id,name,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind(newId, user.id, null, item.input.name, now, now));
     folderIdMap.set(item.oldId, newId);
     if (item.oldParentFolderId) folderParentPending.push({ newId, oldParentFolderId: item.oldParentFolderId });
   }
@@ -1297,13 +1325,22 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
 
   // ---- Journal pages ----
   let journalPagesCreated = 0;
+  const journalPageIdMap = new Map<string, string>();
   for (const item of plan.journalPages) {
-    const newWorldId = worldIdMap.get(item.oldWorldId); if (!newWorldId) continue;
     const newId = crypto.randomUUID();
     const resolvedFolderId = item.oldFolderId ? folderIdMap.get(item.oldFolderId) ?? null : null;
-    statements.push(c.env.DB.prepare('INSERT INTO journal_pages (id,world_id,folder_id,title,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(newId, newWorldId, resolvedFolderId, item.input.title, item.input.content, now, now));
+    statements.push(c.env.DB.prepare('INSERT INTO journal_pages (id,owner_user_id,folder_id,title,content,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(newId, user.id, resolvedFolderId, item.input.title, item.input.content, now, now));
     statements.push(recordRevisionStatement(c.env.DB, { resourceType: 'JOURNAL_PAGE', resourceId: newId, ownerUserId: user.id, actorUserId: user.id, action: 'CREATE', snapshot: item.input, now }));
+    journalPageIdMap.set(item.oldId, newId);
     journalPagesCreated += 1;
+  }
+
+  let journalPageWorldLinksCreated = 0;
+  for (const item of plan.journalPageWorldLinks) {
+    const newPageId = journalPageIdMap.get(item.oldPageId); const newWorldId = worldIdMap.get(item.oldWorldId);
+    if (!newPageId || !newWorldId) continue;
+    statements.push(c.env.DB.prepare('INSERT OR IGNORE INTO journal_page_world_links (journal_page_id,world_id,created_at) VALUES (?,?,?)').bind(newPageId, newWorldId, now));
+    journalPageWorldLinksCreated += 1;
   }
 
   // ---- Campaigns — precisa de rpgIdMap (Library, já construído acima) + opcionalmente
@@ -1427,7 +1464,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
   await c.env.DB.batch(statements);
   return c.json({
     restored: {
-      worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated, worldEntityLinks: worldEntityLinksCreated,
+      worlds: worldIdMap.size, creatureStatTemplates: templateIdMap.size, entities: entityIdMap.size, journalFolders: folderIdMap.size, journalPages: journalPagesCreated, journalPageWorldLinks: journalPageWorldLinksCreated, worldEntityLinks: worldEntityLinksCreated,
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
       sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
       wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,

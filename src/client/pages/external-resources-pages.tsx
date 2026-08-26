@@ -65,7 +65,7 @@ export function WorldExternalResourcesPage() {
           title="Nenhum recurso externo ainda"
           text={data.world.isOwner ? "Adicione o primeiro link de referência abaixo." : "O narrador ainda não adicionou nenhum link de referência."}
           action="Ver Diário"
-          to={`/app/worlds/${id}/journal`}
+          to={`/app/journal?worldId=${id}`}
         />
       ) : (
         <ul className="clean-list external-resource-list">

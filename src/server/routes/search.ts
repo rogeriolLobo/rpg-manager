@@ -19,7 +19,7 @@ searchRoutes.get('/', async (c) => {
   // F-022 (BATCH12): entidades linkadas ao World (world_entity_links) também aparecem na
   // busca escopada por World — ver worldEntityDiscoveryPredicate.
   const entityWorld = worldId ? `AND ${worldEntityDiscoveryPredicate()}` : '';
-  const journalWorld = worldId ? 'AND p.world_id=?' : '';
+  const journalWorld = worldId ? 'AND EXISTS(SELECT 1 FROM journal_page_world_links l WHERE l.journal_page_id=p.id AND l.world_id=?)' : '';
   const [entities, worlds, campaigns, groups, rpgs, journal] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT e.id,e.name,e.summary,e.entity_type subtype,e.world_id worldId,w.name worldName,'ENTITY' kind
       FROM vault_entities e LEFT JOIN worlds w ON w.id=e.world_id
@@ -46,8 +46,8 @@ searchRoutes.get('/', async (c) => {
     c.env.DB.prepare(`SELECT r.id,r.title name,r.notes summary,r.reading_status subtype,NULL worldId,NULL worldName,'RPG' kind
       FROM rpgs r WHERE r.user_id=? AND (r.title LIKE ? ESCAPE '\\' OR r.notes LIKE ? ESCAPE '\\')
       ORDER BY r.title COLLATE NOCASE LIMIT 6`).bind(userId, pattern, pattern),
-    c.env.DB.prepare(`SELECT p.id,p.title name,substr(p.content,1,240) summary,'JOURNAL' subtype,p.world_id worldId,w.name worldName,'JOURNAL' kind
-      FROM journal_pages p JOIN worlds w ON w.id=p.world_id WHERE w.owner_user_id=? ${journalWorld}
+    c.env.DB.prepare(`SELECT p.id,p.title name,substr(p.content,1,240) summary,'JOURNAL' subtype,NULL worldId,NULL worldName,'JOURNAL' kind
+      FROM journal_pages p WHERE p.owner_user_id=? ${journalWorld}
       AND (p.title LIKE ? ESCAPE '\\' OR p.content LIKE ? ESCAPE '\\') ORDER BY p.updated_at DESC LIMIT 8`)
       .bind(userId, ...(worldId ? [worldId] : []), pattern, pattern),
   ]);
