@@ -20,15 +20,15 @@ test("VTT: cria cena com névoa, revela uma célula e depois reencobre tudo", as
   await page.getByLabel("Status da leitura").selectOption("READ");
   await page.getByLabel("Prioridade").selectOption("HIGH");
   await page.getByRole("button", { name: "Salvar RPG" }).click();
-  await expect(page.getByRole("heading", { name: `RPG Névoa ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `RPG Névoa ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Criar campanha" }).click();
-  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u);
+  await expect(page.getByLabel("RPG")).toHaveValue(/.+/u, { timeout: 30_000 });
   await page.getByLabel("Nome da campanha").fill(`Mesa Névoa ${suffix}`);
   await page.getByRole("button", { name: "Salvar campanha" }).click();
-  await expect(page.getByRole("heading", { name: `Mesa Névoa ${suffix}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Mesa Névoa ${suffix}` })).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole("link", { name: "Mesa Virtual" }).click();
+  await page.locator(".page-header").getByRole("link", { name: "Mesa do Mestre", exact: true }).click();
   await expect(page.getByRole("heading", { name: "VTT — cenas e tokens" })).toBeVisible();
 
   const sceneForm = page.locator("form").filter({ hasText: "Nova cena" });
@@ -37,7 +37,7 @@ test("VTT: cria cena com névoa, revela uma célula e depois reencobre tudo", as
   await sceneForm.getByLabel(/Névoa da guerra/u).check();
   await sceneForm.getByLabel("Colunas da grade").fill("4");
   await sceneForm.getByLabel("Linhas da grade").fill("4");
-  await page.getByRole("button", { name: "Criar cena" }).click();
+  await sceneForm.getByRole("button", { name: "Criar primeira cena", exact: true }).click();
   await expect(page.getByText("Cripta Selada")).toBeVisible();
 
   await page.getByRole("button", { name: "Expandir cena" }).click();

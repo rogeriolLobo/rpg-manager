@@ -26,6 +26,7 @@ export interface Env {
   PASSWORD_PEPPER?: string;
   TURNSTILE_SECRET_KEY?: string;
   ENVIRONMENT?: string;
+  E2E_BYPASS_RATE_LIMIT?: string;
 }
 
 export interface AuthenticatedUser {

@@ -17,6 +17,14 @@ async function register(page: Page, email: string, name: string) {
 const isMobileViewport = (page: Page) => (page.viewportSize()?.width ?? 1000) <= 850;
 const openNav = async (page: Page) => { if (isMobileViewport(page)) await page.getByRole("button", { name: "Abrir menu" }).click(); };
 
+const waitForSuccessfulMutation = async (page: Page, path: RegExp, action: () => Promise<void>) => {
+  const responsePromise = page.waitForResponse((response) =>
+    response.request().method() !== "GET" && path.test(new URL(response.url()).pathname),
+  );
+  await action();
+  expect((await responsePromise).ok()).toBeTruthy();
+};
+
 test("Biblioteca social: opt-in liga/desliga, amigo vê só depois, interesse social separado do campo pessoal", async ({ page, browser }) => {
   test.setTimeout(60_000);
   const suffix = Date.now();
@@ -39,7 +47,9 @@ test("Biblioteca social: opt-in liga/desliga, amigo vê só depois, interesse so
     await page.getByRole("listitem").filter({ hasText: `Amigo Lib ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
     await openNav(friendPage);
     await friendPage.getByRole("link", { name: "Amigos" }).click();
-    await friendPage.getByRole("listitem").filter({ hasText: `Dono Lib ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await waitForSuccessfulMutation(friendPage, /\/api\/v1\/social\/requests\/[^/]+\/accept$/u, async () => {
+      await friendPage.getByRole("listitem").filter({ hasText: `Dono Lib ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    });
 
     // Cadastra um RPG.
     await page.goto("/app/library/new");
@@ -62,7 +72,9 @@ test("Biblioteca social: opt-in liga/desliga, amigo vê só depois, interesse so
     // Liga o opt-in em Configurações.
     await openNav(page);
     await page.getByRole("link", { name: "Configurações" }).click();
-    await page.getByLabel("Compartilhar minha Biblioteca com amigos").check();
+    await waitForSuccessfulMutation(page, /\/api\/v1\/preferences\/library-visibility$/u, async () => {
+      await page.getByLabel("Compartilhar minha Biblioteca com amigos").check();
+    });
 
     await openNav(friendPage);
     await friendPage.getByRole("link", { name: "Amigos" }).click();
@@ -94,7 +106,9 @@ test("Convite de amigo para Grupo: só amigo aparece na lista, precisa aceitar p
     await page.getByRole("listitem").filter({ hasText: `Amigo Convite ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
     await openNav(friendPage);
     await friendPage.getByRole("link", { name: "Amigos" }).click();
-    await friendPage.getByRole("listitem").filter({ hasText: `Dono Convite ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await waitForSuccessfulMutation(friendPage, /\/api\/v1\/social\/requests\/[^/]+\/accept$/u, async () => {
+      await friendPage.getByRole("listitem").filter({ hasText: `Dono Convite ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    });
 
     await openNav(page);
     await page.getByRole("link", { name: "Grupos" }).click();
@@ -112,7 +126,9 @@ test("Convite de amigo para Grupo: só amigo aparece na lista, precisa aceitar p
     // recarregar para buscar o convite recém-criado (clicar no link da rota atual é um no-op).
     await friendPage.reload();
     await expect(friendPage.getByRole("heading", { name: /Convites de Grupo\/Campanha/u })).toBeVisible();
-    await friendPage.getByRole("listitem").filter({ hasText: `Dono Convite ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await waitForSuccessfulMutation(friendPage, /\/api\/v1\/social\/invites\/[^/]+\/accept$/u, async () => {
+      await friendPage.getByRole("listitem").filter({ hasText: `Dono Convite ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    });
 
     await openNav(page);
     await page.getByRole("link", { name: "Grupos" }).click();
@@ -149,7 +165,9 @@ test("Convite de amigo para Campaign: aparece em Minhas Mesas; bloquear remove a
     await page.getByRole("listitem").filter({ hasText: `Amigo Campanha ${suffix}` }).getByRole("button", { name: "Adicionar" }).click();
     await openNav(friendPage);
     await friendPage.getByRole("link", { name: "Amigos" }).click();
-    await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await waitForSuccessfulMutation(friendPage, /\/api\/v1\/social\/requests\/[^/]+\/accept$/u, async () => {
+      await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    });
 
     await page.goto("/app/library/new");
     await page.getByLabel("Título", { exact: true }).fill(`RPG Convite Campanha ${suffix}`);
@@ -174,11 +192,13 @@ test("Convite de amigo para Campaign: aparece em Minhas Mesas; bloquear remove a
 
     await friendPage.reload();
     await expect(friendPage.getByRole("heading", { name: /Convites de Grupo\/Campanha/u })).toBeVisible();
-    await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    await waitForSuccessfulMutation(friendPage, /\/api\/v1\/social\/invites\/[^/]+\/accept$/u, async () => {
+      await friendPage.getByRole("listitem").filter({ hasText: `Dono Campanha ${suffix}` }).getByRole("button", { name: "Aceitar" }).click();
+    });
 
     // Aparece em Minhas Mesas — o jogador descobre a campanha sem link do mestre.
     await openNav(friendPage);
-    await friendPage.getByRole("link", { name: "Minhas Mesas" }).click();
+    await friendPage.locator(".sidebar").getByRole("link", { name: "Minhas Mesas", exact: true }).click();
     await expect(friendPage.getByRole("heading", { name: `Mesa Convite Campanha ${suffix}` })).toBeVisible();
 
     // Bloquear: amizade some, e o amigo bloqueado nem aparece mais no seletor de "Convidar amigo"
@@ -187,7 +207,9 @@ test("Convite de amigo para Campaign: aparece em Minhas Mesas; bloquear remove a
     await openNav(page);
     await page.getByRole("link", { name: "Amigos" }).click();
     page.once("dialog", (dialog) => void dialog.accept());
-    await page.getByRole("listitem").filter({ hasText: `Amigo Campanha ${suffix}` }).getByRole("button", { name: "Bloquear" }).click();
+    await waitForSuccessfulMutation(page, /\/api\/v1\/social\/blocks$/u, async () => {
+      await page.getByRole("listitem").filter({ hasText: `Amigo Campanha ${suffix}` }).getByRole("button", { name: "Bloquear" }).click();
+    });
     await expect(page.getByRole("heading", { name: /Amigos \(0\)/u })).toBeVisible();
 
     await page.goto(`/app/campaigns`);

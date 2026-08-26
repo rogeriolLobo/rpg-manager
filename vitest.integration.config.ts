@@ -9,7 +9,9 @@ export default defineConfig({
       bindings: {
         TEST_MIGRATIONS: await readD1Migrations(path.join(import.meta.dirname, 'migrations')),
         ENVIRONMENT: 'test',
+        E2E_BYPASS_RATE_LIMIT: '0',
         PASSWORD_PEPPER: 'integration-test-pepper-not-a-production-secret',
+        TURNSTILE_SECRET_KEY: '',
       },
     },
   }))],
