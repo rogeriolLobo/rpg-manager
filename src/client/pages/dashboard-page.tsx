@@ -1,4 +1,4 @@
-import { Archive, BookCheck, BookMarked, BookOpen, CalendarDays, Castle, Dice5, Globe2, Library, Lightbulb, ScrollText, Swords, Target } from 'lucide-react';
+import { Archive, BookCheck, BookMarked, BookOpen, CalendarDays, Castle, Dice5, Globe2, Library, Lightbulb, Map, ScrollText, Swords, Target } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { postJson } from '../api/client';
@@ -12,6 +12,7 @@ const metricIcons=[Library,BookCheck,Dice5,Target,BookOpen,CalendarDays,ScrollTe
 const quickAccessLinks = [
   { to:'/app/library', label:'Biblioteca', description:'Sua coleção de RPGs', Icon:BookOpen },
   { to:'/app/vault', label:'Vault', description:'Personagens e conteúdo', Icon:Archive },
+  { to:'/app/maps', label:'Map Studio', description:'Crie e edite mapas', Icon:Map },
   { to:'/app/campaigns', label:'Campanhas', description:'Preparação e mesas', Icon:Castle },
   { to:'/app/my-tables', label:'Minhas Mesas', description:'Campanhas como jogador', Icon:Swords },
   { to:'/app/worlds', label:'Mundos', description:'Cenários e conhecimento', Icon:Globe2 },

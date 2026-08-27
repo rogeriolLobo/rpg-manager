@@ -13,6 +13,7 @@ export function AppShell() {
     ['/app/library', BookOpen, 'Biblioteca'],
     ['/app/vault', Archive, 'Vault'],
     ['/app/journal', NotebookPen, 'Diário'],
+    ['/app/maps', Map, 'Map Studio'],
     ['/app/compendium', BookMarked, 'Compêndio'],
     ['/app/sheets', ScrollText, 'Fichas'],
   ] as const;
