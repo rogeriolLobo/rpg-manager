@@ -470,6 +470,54 @@ export const mapPinInputSchema = z.strictObject({
   entityId: z.string().trim().max(80).nullable().default(null),
 });
 
+// Map Studio User-First: MapDocument pertence ao usuário. World é somente contexto N:N.
+export const MAP_DOCUMENT_TYPES = ['GENERIC','GEOGRAPHIC','SETTLEMENT','INTERIOR','TACTICAL','HEX','SPACE','NETWORK','ABSTRACT','IMPORTED'] as const;
+export const MAP_GRID_TYPES = ['NONE','SQUARE','HEX_POINTY','HEX_FLAT'] as const;
+export const mapDocumentInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  description: trimmed(4000).default(''),
+  mapType: z.enum(MAP_DOCUMENT_TYPES).default('GENERIC'),
+  width: z.number().int().min(64).max(32768).default(1920),
+  height: z.number().int().min(64).max(32768).default(1080),
+  gridType: z.enum(MAP_GRID_TYPES).default('NONE'),
+  gridSize: z.number().int().min(4).max(512).default(50),
+  backgroundAssetId: z.string().trim().max(80).nullable().default(null),
+});
+
+export const MAP_EDITOR_OBJECT_TYPES = ['RECTANGLE','ELLIPSE','TEXT'] as const;
+const mapEditorCoordinateSchema = z.number().finite().min(-32768).max(32768);
+const mapEditorSizeSchema = z.number().finite().min(4).max(32768);
+export const mapEditorObjectSchema = z.strictObject({
+  id: z.string().uuid(),
+  type: z.enum(MAP_EDITOR_OBJECT_TYPES),
+  x: mapEditorCoordinateSchema,
+  y: mapEditorCoordinateSchema,
+  width: mapEditorSizeSchema,
+  height: mapEditorSizeSchema,
+  rotation: z.number().finite().min(-3600).max(3600),
+  fill: z.string().regex(/^#[0-9a-fA-F]{6}$/u),
+  text: z.string().max(500).default(''),
+});
+export const mapEditorLayerSchema = z.strictObject({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(120),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  objects: z.array(mapEditorObjectSchema).max(300),
+});
+export const mapEditorDocumentSchema = z.strictObject({
+  version: z.literal(1),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/u),
+  layers: z.array(mapEditorLayerSchema).max(40),
+}).refine((document) => JSON.stringify(document).length <= 750_000, 'O documento do mapa excede 750.000 caracteres.');
+export const mapEditorSaveSchema = z.strictObject({
+  expectedVersion: z.number().int().min(0).max(2_147_483_647),
+  document: mapEditorDocumentSchema,
+});
+export type MapEditorDocumentInput = z.infer<typeof mapEditorDocumentSchema>;
+export type MapEditorLayerInput = z.infer<typeof mapEditorLayerSchema>;
+export type MapEditorObjectInput = z.infer<typeof mapEditorObjectSchema>;
+
 export const worldInviteInputSchema = z.strictObject({
   expiresInDays: z.number().int().min(1).max(30).default(7),
   maxUses: z.number().int().min(1).max(100).default(1),

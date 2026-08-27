@@ -37,10 +37,10 @@ import { z } from 'zod';
 import {
   adventureEncounterInputSchema, adventureHandoutInputSchema, adventureSceneEntityInputSchema, adventureSceneInputSchema,
   campaignInputSchema, characterSheetInputSchema, creatureStatTemplateInputSchema, entityRelationInputSchema, eventTemporalInputSchema, externalResourceInputSchema, journalFolderInputSchema, journalPageInputSchema,
-  mapPinInputSchema, memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldCalendarInputSchema, worldEraInputSchema, worldMapInputSchema, worldTagInputSchema,
+  mapDocumentInputSchema, mapEditorDocumentSchema, mapPinInputSchema, memberInputSchema, playGroupInputSchema, playGroupMemberCreateSchema, rpgInputSchema, sessionInputSchema, sheetTemplateInputSchema, wikiEntityOrganizationSchema, worldCalendarInputSchema, worldEraInputSchema, worldMapInputSchema, worldTagInputSchema,
   vaultEntityInputSchema, worldInputSchema,
   vttCombatantInputSchema, vttFogCellInputSchema, vttSceneInputSchema, vttTokenInputSchema,
-  type AdventureEncounterInput, type AdventureHandoutInput, type AdventureSceneInput,
+  type AdventureEncounterInput, type AdventureHandoutInput, type AdventureSceneInput, type MapEditorDocumentInput,
   type CampaignInput, type CreatureStatTemplateInput, type EntityRelationInput, type EventTemporalInput, type JournalPageInput, type RpgInput, type SheetTemplateInput, type VaultEntityInput, type VttCombatantInput, type VttFogCellInput, type VttSceneInput, type VttTokenInput, type WorldCalendarInput, type WorldEraInput, type WorldInput,
 } from '../../shared/validation/schemas';
 import { createWorldSlug } from '../../domain/content/validation';
@@ -63,6 +63,7 @@ export const backupRestoreRoutes = new Hono<{ Bindings: Env; Variables: AppVaria
 type ExternalResourceInput = z.infer<typeof externalResourceInputSchema>;
 type WorldMapInput = z.infer<typeof worldMapInputSchema>;
 type MapPinInput = z.infer<typeof mapPinInputSchema>;
+type MapDocumentInput = z.infer<typeof mapDocumentInputSchema>;
 
 const previewSchema = z.strictObject({ backup: z.string().min(1).max(3_000_000) });
 const confirmSchema = z.strictObject({ jobId: z.string().uuid() });
@@ -138,6 +139,8 @@ interface MapPinPlanItem { oldId: string; oldMapId: string; oldEntityId: string 
 interface ExternalResourcePlanItem { oldId: string; oldWorldId: string; input: ExternalResourceInput }
 interface WorldEraPlanItem { oldId: string; oldWorldId: string; input: WorldEraInput }
 interface WorldCalendarPlanItem { oldWorldId: string; input: WorldCalendarInput }
+interface MapDocumentPlanItem { oldId: string; oldBackgroundAssetId: string | null; archivedAt: string | null; document: MapEditorDocumentInput; input: MapDocumentInput }
+interface MapDocumentWorldLinkPlanItem { oldMapId: string; oldWorldId: string }
 interface EventTemporalPlanItem { oldEntityId: string; oldEraId: string | null; hasCalendarDate: boolean; input: EventTemporalInput }
 // Adventures estruturadas (F-025): Scene -> Encounter/SceneEntity; Handout (adventure_entity_id
 // + scene_id opcional + external_resource_id opcional).
@@ -177,7 +180,7 @@ interface RestorePlan {
   sheetTemplates: SheetTemplatePlanItem[]; characterSheets: CharacterSheetPlanItem[];
   wikiFolders: WikiFolderPlanItem[]; wikiEntityMetadata: WikiEntityMetadataPlanItem[]; worldTags: WorldTagPlanItem[];
   wikiEntityTags: WikiEntityTagPlanItem[]; wikiEntityAliases: WikiEntityAliasPlanItem[]; entityRelations: EntityRelationPlanItem[];
-  worldMaps: WorldMapPlanItem[]; mapPins: MapPinPlanItem[]; externalResources: ExternalResourcePlanItem[];
+  worldMaps: WorldMapPlanItem[]; mapPins: MapPinPlanItem[]; mapDocuments: MapDocumentPlanItem[]; mapDocumentWorldLinks: MapDocumentWorldLinkPlanItem[]; externalResources: ExternalResourcePlanItem[];
   worldEras: WorldEraPlanItem[]; worldCalendars: WorldCalendarPlanItem[]; eventTemporalDetails: EventTemporalPlanItem[];
   adventureScenes: AdventureScenePlanItem[]; adventureEncounters: AdventureEncounterPlanItem[];
   adventureSceneEntities: AdventureSceneEntityPlanItem[]; adventureHandouts: AdventureHandoutPlanItem[];
@@ -213,6 +216,8 @@ const restorePlanSchema = z.strictObject({
   entityRelations: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), oldSourceEntityId: z.string(), oldTargetEntityId: z.string(), input: entityRelationInputSchema })),
   worldMaps: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: worldMapInputSchema })),
   mapPins: z.array(z.strictObject({ oldId: z.string(), oldMapId: z.string(), oldEntityId: z.string().nullable(), input: mapPinInputSchema })),
+  mapDocuments: z.array(z.strictObject({ oldId: z.string(), oldBackgroundAssetId: z.string().nullable(), archivedAt: z.string().nullable(), document: mapEditorDocumentSchema, input: mapDocumentInputSchema })),
+  mapDocumentWorldLinks: z.array(z.strictObject({ oldMapId: z.string(), oldWorldId: z.string() })),
   externalResources: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: externalResourceInputSchema })),
   worldEras: z.array(z.strictObject({ oldId: z.string(), oldWorldId: z.string(), input: worldEraInputSchema })),
   worldCalendars: z.array(z.strictObject({ oldWorldId: z.string(), input: worldCalendarInputSchema })),
@@ -505,6 +510,39 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     const parsed = mapPinInputSchema.safeParse({ label: str(row, 'label'), notes: str(row, 'notes'), x: num(row, 'x'), y: num(row, 'y'), entityId: null });
     if (!parsed.success) { warnings.push({ domain: 'mapPins', oldId, message: 'Pin com dados inválidos após validação — não será restaurado.', category: 'SKIP' }); continue; }
     mapPins.push({ oldId, oldMapId, oldEntityId: oldEntityId && entityOldIds.has(oldEntityId) ? oldEntityId : null, input: parsed.data });
+  }
+
+  // ---- Map Studio User-First: documento pertence ao usuário; links com Worlds são opcionais. ----
+  const rawMapDocuments = rowsOf(data, 'mapDocuments');
+  const mapDocuments: MapDocumentPlanItem[] = [];
+  for (const row of rawMapDocuments) {
+    const oldId = str(row, 'id');
+    const parsed = mapDocumentInputSchema.safeParse({
+      name: str(row, 'name'), description: str(row, 'description'), mapType: str(row, 'map_type') || 'GENERIC',
+      width: num(row, 'width') ?? 1920, height: num(row, 'height') ?? 1080, gridType: str(row, 'grid_type') || 'NONE',
+      gridSize: num(row, 'grid_size') ?? 50, backgroundAssetId: null,
+    });
+    if (!parsed.success) { warnings.push({ domain: 'mapDocuments', oldId, message: 'Mapa do Map Studio com dados inválidos — não será restaurado.', category: 'SKIP' }); continue; }
+    const emptyDocument: MapEditorDocumentInput = { version: 1, backgroundColor: '#f5f1e8', layers: [] };
+    let document = emptyDocument;
+    const rawDocument = str(row, 'document_json');
+    if (rawDocument) {
+      try {
+        const parsedDocument = mapEditorDocumentSchema.safeParse(JSON.parse(rawDocument));
+        if (parsedDocument.success) document = parsedDocument.data;
+        else warnings.push({ domain: 'mapDocuments', oldId, message: 'Conteúdo do editor inválido — o mapa será restaurado vazio.', category: 'SKIP' });
+      } catch {
+        warnings.push({ domain: 'mapDocuments', oldId, message: 'Conteúdo do editor corrompido — o mapa será restaurado vazio.', category: 'SKIP' });
+      }
+    }
+    mapDocuments.push({ oldId, oldBackgroundAssetId: strOrNull(row, 'background_asset_id'), archivedAt: strOrNull(row, 'archived_at'), document, input: parsed.data });
+  }
+  const mapDocumentOldIds = new Set(mapDocuments.map((item) => item.oldId));
+  const mapDocumentWorldLinks: MapDocumentWorldLinkPlanItem[] = [];
+  for (const row of rowsOf(data, 'mapDocumentWorldLinks')) {
+    const oldMapId = str(row, 'map_document_id'), oldWorldId = str(row, 'world_id');
+    if (!mapDocumentOldIds.has(oldMapId) || !worldOldIds.has(oldWorldId)) { warnings.push({ domain: 'mapDocumentWorldLinks', oldId: `${oldMapId}:${oldWorldId}`, message: 'Mapa ou World original não será restaurado — vínculo do Map Studio será ignorado.', category: 'SKIP' }); continue; }
+    mapDocumentWorldLinks.push({ oldMapId, oldWorldId });
   }
 
   // ---- External Resources (F-003) ----
@@ -922,7 +960,7 @@ async function buildRestorePlan(env: Env, userId: string, root: RawRow): Promise
     library, groups, groupMembers, campaigns, campaignMembers, campaignSessions,
     sheetTemplates, characterSheets,
     wikiFolders, wikiEntityMetadata, worldTags, wikiEntityTags, wikiEntityAliases, entityRelations,
-    worldMaps, mapPins, externalResources, worldEras, worldCalendars, eventTemporalDetails,
+    worldMaps, mapPins, mapDocuments, mapDocumentWorldLinks, externalResources, worldEras, worldCalendars, eventTemporalDetails,
     adventureScenes, adventureEncounters, adventureSceneEntities, adventureHandouts,
     vttScenes, vttTokens, vttFogCells, vttCombatants,
     friendRequests, friendships, userBlocks, socialInvites, rpgSocialInterests,
@@ -945,7 +983,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
     + plan.library.length + plan.groups.length + plan.groupMembers.length + plan.campaigns.length + plan.campaignMembers.length + plan.campaignSessions.length
     + plan.sheetTemplates.length + plan.characterSheets.length
     + plan.wikiFolders.length + plan.wikiEntityMetadata.length + plan.worldTags.length + plan.wikiEntityTags.length + plan.wikiEntityAliases.length + plan.entityRelations.length
-    + plan.worldMaps.length + plan.mapPins.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length
+    + plan.worldMaps.length + plan.mapPins.length + plan.mapDocuments.length + plan.mapDocumentWorldLinks.length + plan.externalResources.length + plan.worldEras.length + plan.worldCalendars.length + plan.eventTemporalDetails.length
     + plan.adventureScenes.length + plan.adventureEncounters.length + plan.adventureSceneEntities.length + plan.adventureHandouts.length
     + plan.vttScenes.length + plan.vttTokens.length + plan.vttFogCells.length + plan.vttCombatants.length
     + plan.friendRequests.length + plan.friendships.length + plan.userBlocks.length + plan.socialInvites.length + plan.rpgSocialInterests.length;
@@ -964,7 +1002,7 @@ backupRestoreRoutes.post('/import/backup/preview', async (c) => {
       library: plan.library.length, groups: plan.groups.length, groupMembers: plan.groupMembers.length, campaigns: plan.campaigns.length, campaignMembers: plan.campaignMembers.length, campaignSessions: plan.campaignSessions.length,
       sheetTemplates: plan.sheetTemplates.length, characterSheets: plan.characterSheets.length,
       wikiFolders: plan.wikiFolders.length, wikiEntityMetadata: plan.wikiEntityMetadata.length, worldTags: plan.worldTags.length, wikiEntityTags: plan.wikiEntityTags.length, wikiEntityAliases: plan.wikiEntityAliases.length, entityRelations: plan.entityRelations.length,
-      worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
+      worldMaps: plan.worldMaps.length, mapPins: plan.mapPins.length, mapDocuments: plan.mapDocuments.length, mapDocumentWorldLinks: plan.mapDocumentWorldLinks.length, externalResources: plan.externalResources.length, worldEras: plan.worldEras.length, worldCalendars: plan.worldCalendars.length, eventTemporalDetails: plan.eventTemporalDetails.length,
       adventureScenes: plan.adventureScenes.length, adventureEncounters: plan.adventureEncounters.length, adventureSceneEntities: plan.adventureSceneEntities.length, adventureHandouts: plan.adventureHandouts.length,
       vttScenes: plan.vttScenes.length, vttTokens: plan.vttTokens.length, vttFogCells: plan.vttFogCells.length, vttCombatants: plan.vttCombatants.length,
       friendRequests: plan.friendRequests.length, friendships: plan.friendships.length, userBlocks: plan.userBlocks.length, socialInvites: plan.socialInvites.length, rpgSocialInterests: plan.rpgSocialInterests.length,
@@ -1236,6 +1274,26 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
     mapPinsCreated += 1;
   }
 
+  // ---- Map Studio User-First ----
+  const existingAssetRows = await c.env.DB.prepare("SELECT id FROM file_assets WHERE owner_user_id=? AND content_type IN ('image/jpeg','image/png','image/webp')").bind(user.id).all<{ id: string }>();
+  const ownedImageAssetIds = new Set(existingAssetRows.results.map((row) => row.id));
+  const mapDocumentIdMap = new Map<string, string>();
+  for (const item of plan.mapDocuments) {
+    const newId = crypto.randomUUID();
+    const backgroundAssetId = item.oldBackgroundAssetId && ownedImageAssetIds.has(item.oldBackgroundAssetId) ? item.oldBackgroundAssetId : null;
+    if (item.oldBackgroundAssetId && !backgroundAssetId) confirmWarnings.push({ domain: 'mapDocuments', oldId: item.oldId, message: 'A imagem do mapa não está disponível nesta conta. O documento foi restaurado sem background; restaure o bundle de arquivos antes do backup principal para preservar o asset.', category: 'MISSING_ASSET' });
+    statements.push(c.env.DB.prepare('INSERT INTO map_documents (id,owner_user_id,name,description,map_type,width,height,grid_type,grid_size,document_json,document_version,background_asset_id,created_at,updated_at,archived_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(newId, user.id, item.input.name, item.input.description, item.input.mapType, item.input.width, item.input.height, item.input.gridType, item.input.gridSize, JSON.stringify(item.document), 0, backgroundAssetId, now, now, item.archivedAt ? now : null));
+    mapDocumentIdMap.set(item.oldId, newId);
+  }
+  let mapDocumentWorldLinksCreated = 0;
+  for (const item of plan.mapDocumentWorldLinks) {
+    const newMapId = mapDocumentIdMap.get(item.oldMapId), newWorldId = worldIdMap.get(item.oldWorldId);
+    if (!newMapId || !newWorldId) continue;
+    statements.push(c.env.DB.prepare('INSERT INTO map_document_world_links (map_document_id,world_id,created_at) VALUES (?,?,?)').bind(newMapId, newWorldId, now));
+    mapDocumentWorldLinksCreated += 1;
+  }
+
   // ---- External Resources (F-003) ----
   const externalResourceIdMap = new Map<string, string>();
   for (const item of plan.externalResources) {
@@ -1468,7 +1526,7 @@ backupRestoreRoutes.post('/import/backup/confirm', async (c) => {
       library: rpgIdMap.size, groups: groupIdMap.size, groupMembers: groupMemberIdMap.size, campaigns: campaignIdMap.size, campaignMembers: campaignMemberIdMap.size, campaignSessions: campaignSessionsCreated, campaignAttendance: campaignAttendanceCreated,
       sheetTemplates: sheetTemplateIdMap.size, characterSheets: characterSheetsCreated,
       wikiFolders: wikiFolderIdMap.size, wikiEntityMetadata: wikiEntityMetadataCreated, worldTags: worldTagIdMap.size, wikiEntityTags: wikiEntityTagsCreated, wikiEntityAliases: wikiEntityAliasesCreated, entityRelations: entityRelationsCreated,
-      worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, externalResources: externalResourceIdMap.size, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
+      worldMaps: worldMapIdMap.size, mapPins: mapPinsCreated, mapDocuments: mapDocumentIdMap.size, mapDocumentWorldLinks: mapDocumentWorldLinksCreated, externalResources: externalResourceIdMap.size, worldEras: worldEraIdMap.size, worldCalendars: worldCalendarIdMap.size, eventTemporalDetails: eventTemporalDetailsCreated,
       adventureScenes: adventureSceneIdMap.size, adventureEncounters: adventureEncountersCreated, adventureSceneEntities: adventureSceneEntitiesCreated, adventureHandouts: adventureHandoutsCreated,
       vttScenes: vttSceneIdMap.size, vttTokens: vttTokenIdMap.size, vttFogCells: vttFogCellsCreated, vttCombatants: vttCombatantsCreated,
       friendRequests: friendRequestsCreated, friendships: friendshipsCreated, userBlocks: userBlocksCreated, socialInvites: socialInvitesCreated, rpgSocialInterests: rpgSocialInterestsCreated,
