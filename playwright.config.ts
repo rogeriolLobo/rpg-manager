@@ -46,7 +46,7 @@ export default defineConfig({
     url: 'http://127.0.0.1:5173/login',
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', E2E_BYPASS_RATE_LIMIT: '1', VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA' },
+    env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', ENVIRONMENT: 'test', E2E_BYPASS_RATE_LIMIT: '1', VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA' },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

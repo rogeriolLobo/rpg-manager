@@ -222,6 +222,64 @@ describe('F-015: Backup/Restore completo', () => {
     expect(restoredTwoWorlds.worldIds).not.toContain(worldBId);
   });
 
+  it('round-trip Map Studio preserva documento User-First e remapeia vínculos de World', async () => {
+    const owner = await register('backup-map-studio');
+    const worldId = await createWorld(owner, 'World do Mapa');
+    const createMap = await request('/maps', 'POST', {
+      name: 'Mapa do Backup',
+      description: 'Mapa global do usuário',
+      mapType: 'TACTICAL',
+      width: 1400,
+      height: 900,
+      gridType: 'SQUARE',
+      gridSize: 50,
+      backgroundAssetId: null,
+    }, owner);
+    expect(createMap.status).toBe(201);
+    const mapId = ((await createMap.json()) as { item: { id: string } }).item.id;
+    const document = {
+      version: 1,
+      backgroundColor: '#112233',
+      layers: [{
+        id: '00000000-0000-4000-8000-000000000201', name: 'Marcadores', visible: true, locked: false,
+        objects: [{
+          id: '00000000-0000-4000-8000-000000000202', type: 'TEXT', x: 80, y: 90,
+          width: 220, height: 70, rotation: 5, fill: '#ddeeff', text: 'Entrada secreta',
+        }],
+      }],
+    };
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document }, owner)).status).toBe(200);
+    expect((await request(`/maps/${mapId}/worlds/${worldId}`, 'POST', {}, owner)).status).toBe(201);
+
+    const backup = await exportBackup(owner);
+    expect(backup.data.mapDocuments).toHaveLength(1);
+    expect(backup.data.mapDocumentWorldLinks).toHaveLength(1);
+
+    const preview = await request('/import/backup/preview', 'POST', { backup: JSON.stringify(backup) }, owner);
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { jobId: string; summary: Record<string, number> };
+    expect(previewBody.summary).toMatchObject({ mapDocuments: 1, mapDocumentWorldLinks: 1 });
+
+    const confirm = await request('/import/backup/confirm', 'POST', { jobId: previewBody.jobId }, owner);
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as { restored: Record<string, number> };
+    expect(confirmBody.restored).toMatchObject({ mapDocuments: 1, mapDocumentWorldLinks: 1 });
+
+    const maps = await request('/maps?archived=1', 'GET', undefined, owner);
+    const mapItems = ((await maps.json()) as { items: Array<{ id: string; name: string }> }).items;
+    const restoredMap = mapItems.find((item) => item.name === 'Mapa do Backup' && item.id !== mapId);
+    expect(restoredMap).toBeDefined();
+
+    const detail = await request(`/maps/${restoredMap!.id}`, 'GET', undefined, owner);
+    expect(detail.status).toBe(200);
+    const restoredDetail = (await detail.json()) as { item: { document: unknown; documentVersion: number; worlds: Array<{ id: string; name: string }> } };
+    expect(restoredDetail.item.document).toEqual(document);
+    expect(restoredDetail.item.documentVersion).toBe(0);
+    expect(restoredDetail.item.worlds).toHaveLength(1);
+    expect(restoredDetail.item.worlds[0].id).not.toBe(worldId);
+    expect(restoredDetail.item.worlds[0].name).toBe('World do Mapa');
+  });
+
   it('normaliza backup v9 com journal_pages.world_id e journal_folders.world_id para ownership e links v10', async () => {
     const owner = await register('backup-v9-journal');
     const worldId = await createWorld(owner, 'World legado v9');

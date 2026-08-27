@@ -35,6 +35,7 @@ test('navegação global: estrutura por seções sem e com world ativo, deep lin
     await expect(biblioteca.getByRole('link', { name: 'Biblioteca', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Vault', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Diário', exact: true })).toBeVisible();
+    await expect(biblioteca.getByRole('link', { name: 'Map Studio', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Compêndio', exact: true })).toBeVisible();
     await expect(biblioteca.getByRole('link', { name: 'Fichas', exact: true })).toBeVisible();
 
