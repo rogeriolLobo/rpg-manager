@@ -1,0 +1,6 @@
+ENVIRONMENT=test
+PASSWORD_PEPPER=
+E2E_BYPASS_RATE_LIMIT=1
+
+# Cloudflare's documented test secret; never use the production secret in E2E.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

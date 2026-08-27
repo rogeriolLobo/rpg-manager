@@ -49,6 +49,7 @@ export function CommandPalette({ onNavigate }: { onNavigate?: () => void }) {
   const commands = useMemo(() => [
     { label: 'Abrir Biblioteca', path: '/app/library', Icon: BookOpen },
     { label: 'Abrir Vault', path: '/app/vault', Icon: Archive },
+    { label: 'Abrir Map Studio', path: '/app/maps', Icon: Map },
     { label: 'Abrir Compêndio', path: '/app/compendium', Icon: BookMarked },
     { label: 'Abrir Fichas', path: '/app/sheets', Icon: ScrollText },
     { label: 'Abrir Worlds', path: '/app/worlds', Icon: Globe2 },

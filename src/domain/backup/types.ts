@@ -65,6 +65,8 @@ export interface BackupRestorePreviewSummary {
   entityRelations: number;
   worldMaps: number;
   mapPins: number;
+  mapDocuments: number;
+  mapDocumentWorldLinks: number;
   externalResources: number;
   worldEras: number;
   worldCalendars: number;
