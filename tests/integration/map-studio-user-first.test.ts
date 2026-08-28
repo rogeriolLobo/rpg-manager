@@ -167,6 +167,40 @@ describe('Map Studio User-First', () => {
     expect((await request(`/maps/${mapId}`, 'PATCH', { ...input, name: 'Mapa restaurado' }, owner)).status).toBe(200);
   });
 
+  it('salva e recarrega Square, Hex Flat e Hex Pointy com o tamanho escolhido', async () => {
+    const owner = await register(`map-grid-${seq}`);
+    const created = await request('/maps', 'POST', input, owner);
+    const mapId = ((await created.json()) as { item: { id: string } }).item.id;
+
+    for (const [gridType, gridSize] of [['SQUARE', 40], ['HEX_FLAT', 56], ['HEX_POINTY', 72]] as const) {
+      const saved = await request(`/maps/${mapId}`, 'PATCH', { ...input, gridType, gridSize }, owner);
+      expect(saved.status).toBe(200);
+      const loaded = await request(`/maps/${mapId}`, 'GET', undefined, owner);
+      expect(await loaded.json()).toMatchObject({ item: { gridType, gridSize } });
+    }
+  });
+
+  it('salva e recarrega preset e parâmetros refinados do brush', async () => {
+    const owner = await register(`map-brush-${seq}`);
+    const created = await request('/maps', 'POST', input, owner);
+    const mapId = ((await created.json()) as { item: { id: string } }).item.id;
+    const firstLayer = terrainDocument.extensions.terrain.layers[0];
+    const refined = {
+      ...terrainDocument,
+      extensions: { terrain: { ...terrainDocument.extensions.terrain, layers: [{
+        ...firstLayer,
+        strokes: [{ ...firstLayer.strokes[0], brush: {
+          ...firstLayer.strokes[0].brush,
+          presetId: 'TEXTURED_NOISE' as const, smoothing: .72, opacity: .61, flow: .34, hardness: .27, spacing: .11,
+        } }, firstLayer.strokes[1]],
+      }] } },
+    };
+
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: refined }, owner)).status).toBe(200);
+    const loaded = await request(`/maps/${mapId}`, 'GET', undefined, owner);
+    expect(await loaded.json()).toMatchObject({ item: { document: refined, documentVersion: 1 } });
+  });
+
   it('persiste o documento do editor e rejeita gravação concorrente', async () => {
     const owner = await register(`map-content-${seq}`);
     const created = await request('/maps', 'POST', input, owner);

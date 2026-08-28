@@ -139,6 +139,37 @@ test('Map Studio usa workspace dedicado e preserva edição, autosave e atalhos'
   await expect(page.locator('.map-object-surface text')).toHaveCount(1);
 });
 
+test('Grid Engine alterna geometrias reais e persiste modo e tamanho', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do Grid Engine');
+  await registerAndCreateMap(page, 'Mapa Grid E2E');
+  await page.getByRole('button', { name: 'Configurações do mapa' }).click();
+  const gridType = page.locator('.map-settings-pair').nth(1).locator('select');
+  const gridSize = page.locator('.map-settings-pair').nth(1).locator('input');
+
+  await gridType.selectOption('SQUARE');
+  const square = page.locator('[data-grid-type="SQUARE"]');
+  await expect(square).toBeVisible();
+  const squarePath = await square.getAttribute('data-grid-path');
+  await gridType.selectOption('HEX_FLAT');
+  const flat = page.locator('[data-grid-type="HEX_FLAT"]');
+  await expect(flat).toBeVisible();
+  const flatPath = await flat.getAttribute('data-grid-path');
+  expect(flatPath).not.toBe(squarePath);
+  await gridType.selectOption('HEX_POINTY');
+  const pointy = page.locator('[data-grid-type="HEX_POINTY"]');
+  await expect(pointy).toBeVisible();
+  expect(await pointy.getAttribute('data-grid-path')).not.toBe(flatPath);
+  await gridType.selectOption('SQUARE');
+  await expect(page.locator('[data-grid-type="SQUARE"]')).toHaveAttribute('data-grid-path', squarePath!);
+  await gridType.selectOption('HEX_POINTY');
+  await gridSize.fill('72');
+  await expect(pointy).toHaveAttribute('data-grid-size', '72');
+  await expect(page.getByLabel('Status do mapa')).toContainText('Grade hexagonal (ponta)');
+  await page.getByRole('button', { name: 'Salvar detalhes' }).click();
+  await page.reload();
+  await expect(page.locator('[data-grid-type="HEX_POINTY"]')).toHaveAttribute('data-grid-size', '72');
+});
+
 test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do Terrain Engine');
   await registerAndCreateMap(page, 'Mapa Terrain E2E');
@@ -160,13 +191,24 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
   }
 
   await terrainPanel.getByRole('button', { name: 'Textura Grass' }).click();
+  await terrainPanel.getByRole('button', { name: 'Soft Round' }).click();
   await drawTerrainStroke(page);
   await expect(terrainSurface).toHaveAttribute('data-stroke-count', '1');
   await expect(terrainSurface).toHaveAttribute('data-last-mode', 'PAINT');
   await expect(terrainSurface).toHaveAttribute('data-last-texture', 'grass');
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
 
-  let strokeCount = 1;
+  await terrainPanel.getByRole('button', { name: 'Hard Round' }).click();
+  await drawTerrainStroke(page, -8);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '2');
+  await terrainPanel.getByRole('button', { name: 'Textured Noise' }).click();
+  await drawTerrainStroke(page, 8);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '3');
+  for (const control of [['Opacity', '61'], ['Hardness', '27'], ['Flow', '34'], ['Spacing', '11'], ['Smoothing', '72']] as const) {
+    await terrainPanel.getByLabel(new RegExp(`^${control[0]}`)).fill(control[1]);
+  }
+
+  let strokeCount = 3;
   for (const [texture, id, offset] of [
     ['Dirt', 'dirt', -36], ['Sand', 'sand', -24], ['Rock', 'rock', -12],
     ['Water', 'water', 12], ['Snow', 'snow', 24],
@@ -188,26 +230,26 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
 
   await terrainPanel.getByRole('button', { name: 'Erase' }).click();
   await drawTerrainStroke(page, 12);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '7');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
   await expect(terrainSurface).toHaveAttribute('data-last-mode', 'ERASE');
 
   await page.getByRole('button', { name: 'Desfazer' }).click();
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '6');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '8');
   await page.getByRole('button', { name: 'Refazer' }).click();
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '7');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
 
   await page.getByRole('button', { name: 'Aumentar zoom' }).click();
   await terrainPanel.getByRole('button', { name: 'Paint' }).click();
   await terrainPanel.getByRole('button', { name: 'Textura Water' }).click();
   await drawTerrainStroke(page, -18);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '8');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '10');
   await expect(terrainSurface).toHaveAttribute('data-last-texture', 'water');
 
   await page.getByRole('button', { name: 'Mover tela' }).click();
   await drawTerrainStroke(page, 24);
   await page.getByRole('button', { name: 'Terrain', exact: true }).click();
   await drawTerrainStroke(page, 24);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '11');
 
   await page.getByRole('button', { name: 'Camadas', exact: true }).click();
   const layersPanel = page.getByRole('complementary', { name: 'Painel de camadas' });
@@ -216,7 +258,7 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
   await expect(terrainSurface).toHaveAttribute('data-visible', 'false');
   await page.getByRole('button', { name: 'Terrain', exact: true }).click();
   await drawTerrainStroke(page, -30);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '11');
   await expect(terrainPanel.getByRole('status')).toContainText('Mostre a layer');
 
   await page.getByRole('button', { name: 'Camadas', exact: true }).click();
@@ -224,7 +266,7 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
   await layersPanel.getByRole('button', { name: 'Bloquear Terrain Base' }).click();
   await page.getByRole('button', { name: 'Terrain', exact: true }).click();
   await drawTerrainStroke(page, -30);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '11');
   await expect(terrainPanel.getByRole('status')).toContainText('Desbloqueie a layer');
 
   await page.getByRole('button', { name: 'Camadas', exact: true }).click();
@@ -232,12 +274,12 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
   await page.getByRole('button', { name: 'Terrain', exact: true }).click();
   await page.getByRole('button', { name: 'Modo Foco' }).click();
   await drawTerrainStroke(page, 32);
-  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '10');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '12');
   await page.getByRole('button', { name: 'Modo Foco' }).click();
 
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('img', { name: 'Terrain Terrain Base' })).toHaveAttribute('data-stroke-count', '10');
+  await expect(page.getByRole('img', { name: 'Terrain Terrain Base' })).toHaveAttribute('data-stroke-count', '12');
 });
 
 test('Map Studio permanece utilizável em viewport mobile', async ({ page }, testInfo) => {

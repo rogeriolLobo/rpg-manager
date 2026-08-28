@@ -513,8 +513,10 @@ export const terrainPointSchema = z.strictObject({
   y: terrainCoordinateSchema,
   pressure: z.number().finite().min(0).max(1).optional(),
 });
-export const terrainBrushSchema = z.strictObject({
-  size: z.number().finite().min(4).max(4096),
+  export const terrainBrushSchema = z.strictObject({
+    presetId: z.enum(['SOFT_ROUND', 'HARD_ROUND', 'TEXTURED_NOISE']).optional(),
+    smoothing: z.number().finite().min(0).max(1).optional(),
+    size: z.number().finite().min(4).max(4096),
   opacity: z.number().finite().min(0).max(1),
   hardness: z.number().finite().min(0).max(1),
   flow: z.number().finite().min(0).max(1),

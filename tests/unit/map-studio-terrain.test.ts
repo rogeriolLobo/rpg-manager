@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyMapDocument } from '../../src/domain/map-studio/editor';
-import { BrushEngine, interpolateTerrainStamps, simplifyTerrainPoints } from '../../src/domain/map-studio/terrain/brush-engine';
+import { BrushEngine, interpolateTerrainStamps, simplifyTerrainPoints, smoothTerrainPoints, terrainBrushFalloffAlpha, terrainFlowDepositAlpha, terrainStrokeOpacity } from '../../src/domain/map-studio/terrain/brush-engine';
+import { applyTerrainBrushPreset, listTerrainBrushPresets, resolveTerrainBrushPreset, terrainBrushNoise } from '../../src/domain/map-studio/terrain/brush-presets';
 import { addTerrainLayer, addTerrainStroke, findTerrainLayer, getTerrainDocument, listUnifiedMapLayers, moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer } from '../../src/domain/map-studio/terrain/terrain-document';
 import { TerrainTileIndex } from '../../src/domain/map-studio/terrain/terrain-spatial-index';
 import { textureRegistry } from '../../src/domain/map-studio/terrain/texture-registry';
 import { DEFAULT_TERRAIN_BRUSH, type TerrainLayer, type TerrainStroke } from '../../src/domain/map-studio/terrain/terrain-types';
-import { isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint } from '../../src/client/components/map-studio/use-terrain-tool';
+import { clampTerrainPoint, isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint } from '../../src/client/components/map-studio/use-terrain-tool';
 import { mapEditorDocumentSchema, terrainDocumentSchema } from '../../src/shared/validation/schemas';
 
 const layerId = '00000000-0000-4000-8000-000000000401';
@@ -51,6 +52,44 @@ describe('Map Studio Terrain engine', () => {
     const stamps = interpolateTerrainStamps(points, { ...DEFAULT_TERRAIN_BRUSH, size: 100, spacing: .25 });
     expect(stamps.length).toBeGreaterThanOrEqual(5);
     expect(stamps.at(-1)).toMatchObject({ x: 100, y: 0 });
+  });
+
+  it('suaviza o gesto preservando exatamente os endpoints', () => {
+    const points = [{ x: 0, y: 0 }, { x: 50, y: 80 }, { x: 100, y: 0 }];
+    const smoothed = smoothTerrainPoints(points, 1);
+    expect(smoothed[0]).toEqual(points[0]);
+    expect(smoothed.at(-1)).toEqual(points.at(-1));
+    expect(smoothed[1]).toEqual({ x: 50, y: 40, pressure: undefined });
+    expect(smoothTerrainPoints(points, 0)).toEqual(points);
+  });
+
+  it('mantém flow e opacity como controles matematicamente distintos', () => {
+    expect(terrainFlowDepositAlpha(.4, .5)).toBe(.2);
+    expect(terrainFlowDepositAlpha(2)).toBe(1);
+    expect(terrainStrokeOpacity(.65)).toBe(.65);
+    expect(terrainStrokeOpacity(-1)).toBe(0);
+  });
+
+  it('calcula falloff real para soft/hard e aplica o mesmo perfil ao erase', () => {
+    expect(terrainBrushFalloffAlpha(0, 0)).toBe(1);
+    expect(terrainBrushFalloffAlpha(.5, 0)).toBe(.5);
+    expect(terrainBrushFalloffAlpha(.75, .5)).toBe(.5);
+    expect(terrainBrushFalloffAlpha(.75, 1)).toBe(1);
+    const erased = stroke(22, 'ERASE');
+    expect(erased.brush.hardness).toBe(DEFAULT_TERRAIN_BRUSH.hardness);
+  });
+
+  it('oferece três presets reais e preserva fallback de strokes legados', () => {
+    expect(listTerrainBrushPresets().map((preset) => preset.id)).toEqual(['SOFT_ROUND', 'HARD_ROUND', 'TEXTURED_NOISE']);
+    const soft = applyTerrainBrushPreset(DEFAULT_TERRAIN_BRUSH, 'SOFT_ROUND');
+    const hard = applyTerrainBrushPreset(DEFAULT_TERRAIN_BRUSH, 'HARD_ROUND');
+    const noise = applyTerrainBrushPreset(DEFAULT_TERRAIN_BRUSH, 'TEXTURED_NOISE');
+    expect(soft.hardness).toBeLessThan(hard.hardness);
+    expect(noise.spacing).not.toBe(soft.spacing);
+    const legacy = { ...DEFAULT_TERRAIN_BRUSH, presetId: undefined, smoothing: undefined };
+    expect(resolveTerrainBrushPreset(legacy).id).toBe('HARD_ROUND');
+    expect(terrainBrushNoise(id(30), 4)).toEqual(terrainBrushNoise(id(30), 4));
+    expect(terrainBrushNoise(id(30), 4)).not.toEqual(terrainBrushNoise(id(30), 5));
   });
 
   it('adiciona paint/erase imutavelmente e permite undo/redo por snapshot do stroke inteiro', () => {
@@ -100,6 +139,10 @@ describe('Map Studio Terrain engine', () => {
     const legacy = createEmptyMapDocument();
     const terrain = addTerrainStroke(addTerrainLayer(legacy, layer()), layerId, stroke(5));
     expect(mapEditorDocumentSchema.safeParse(legacy).success).toBe(true);
+    const legacyBrush = { ...DEFAULT_TERRAIN_BRUSH };
+    delete legacyBrush.presetId;
+    delete legacyBrush.smoothing;
+    expect(mapEditorDocumentSchema.safeParse(addTerrainStroke(addTerrainLayer(legacy, layer()), layerId, { ...stroke(5), brush: legacyBrush })).success).toBe(true);
     expect(mapEditorDocumentSchema.safeParse(terrain).success).toBe(true);
     expect(terrainDocumentSchema.safeParse({ ...getTerrainDocument(terrain), layers: [{ ...layer(), strokes: [{ ...stroke(5), points: [] }] }] }).success).toBe(false);
     expect(terrainDocumentSchema.safeParse({ ...getTerrainDocument(terrain), layers: [{ ...layer(), strokes: [{ ...stroke(5), textureId: 'copyrighted-pack' }] }] }).success).toBe(false);
@@ -123,6 +166,7 @@ describe('Map Studio Terrain engine', () => {
     expect(isScreenPointInsideViewport(250, 250, { left: 0, top: 0, width: 1000, height: 500 }, { x: 0, y: 0, width: 500, height: 500 })).toBe(true);
     expect(isTerrainPointInsideMap({ x: -1, y: 250 }, 500, 500)).toBe(false);
     expect(isTerrainPointInsideMap({ x: 500, y: 500 }, 500, 500)).toBe(true);
+    expect(clampTerrainPoint({ x: -12, y: 520, pressure: .5 }, 500, 500)).toEqual({ x: 0, y: 500, pressure: .5 });
   });
 
   it('mantém 300 strokes válidos, compactos e indexáveis sem canvas raster gigante', () => {

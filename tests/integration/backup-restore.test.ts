@@ -247,7 +247,7 @@ describe('F-015: Backup/Restore completo', () => {
             id: '00000000-0000-4000-8000-000000000203', name: 'Terrain Backup', visible: true, locked: false, opacity: .9,
             strokes: [{
               id: '00000000-0000-4000-8000-000000000204', mode: 'PAINT', textureId: 'water',
-              brush: { size: 180, opacity: .8, hardness: .4, flow: .7, spacing: .2, textureScale: 1.2, textureRotation: 12, color: '#276b8d' },
+              brush: { presetId: 'TEXTURED_NOISE', smoothing: .66, size: 180, opacity: .8, hardness: .4, flow: .7, spacing: .2, textureScale: 1.2, textureRotation: 12, color: '#276b8d' },
               points: [{ x: 20, y: 30 }, { x: 140, y: 150 }],
             }],
           }],

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { MapEditorObject } from '../../../domain/map-studio/editor';
+import { gridStatusLabel, type MapGridType } from '../../../domain/map-studio/grid-engine';
 
 export type MapSaveState = 'saved' | 'dirty' | 'saving' | 'error';
 export type MapTool = 'SELECT' | 'PAN' | 'TERRAIN';
@@ -96,7 +97,7 @@ export function ToolDock({
 interface StatusBarProps {
   width: number;
   height: number;
-  gridType: string;
+  gridType: MapGridType;
   zoom: number;
   saveLabel: string;
 }
@@ -105,7 +106,7 @@ export function StatusBar({ width, height, gridType, zoom, saveLabel }: StatusBa
   return (
     <footer className="map-workspace-status" aria-label="Status do mapa">
       <span>{width} × {height}px</span>
-      <span>{gridType === 'NONE' ? 'Grade desligada' : `Grade ${gridType.toLowerCase()}`}</span>
+      <span>{gridStatusLabel(gridType)}</span>
       <span>{Math.round(zoom * 100)}%</span>
       <span>{saveLabel}</span>
       <span className="map-status-hint">Tab: Modo Foco</span>

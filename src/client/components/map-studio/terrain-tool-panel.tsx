@@ -1,4 +1,5 @@
 import { Eraser, Paintbrush, X } from 'lucide-react';
+import { applyTerrainBrushPreset, listTerrainBrushPresets } from '../../../domain/map-studio/terrain/brush-presets';
 import { textureRegistry } from '../../../domain/map-studio/terrain/texture-registry';
 import type { TerrainBrush, TerrainLayer, TerrainMode, TerrainTextureId } from '../../../domain/map-studio/terrain/terrain-types';
 
@@ -54,12 +55,22 @@ export function TerrainToolPanel({
             ))}
           </div>
           <h3>Brush</h3>
+          <div className="terrain-preset-grid" role="group" aria-label="Brush presets">
+            {listTerrainBrushPresets().map((preset) => (
+              <button key={preset.id} type="button" disabled={disabled} className={brush.presetId === preset.id ? 'active' : ''}
+                aria-pressed={brush.presetId === preset.id} title={preset.description}
+                onClick={() => onBrushChange(applyTerrainBrushPreset(brush, preset.id))}>
+                <span className={`terrain-brush-tip ${preset.id.toLowerCase()}`}/><span>{preset.name}</span>
+              </button>
+            ))}
+          </div>
           <div className="terrain-controls">
             <label>Size <input disabled={disabled} type="range" min="4" max="1024" step="4" value={brush.size} onChange={(event) => onBrushChange({ ...brush, size: Number(event.target.value) })}/><span>{Math.round(brush.size)} px</span></label>
             <label>Opacity <input disabled={disabled} type="range" min="0" max="100" value={percent(brush.opacity)} onChange={(event) => onBrushChange({ ...brush, opacity: Number(event.target.value) / 100 })}/><span>{percent(brush.opacity)}%</span></label>
             <label>Hardness <input disabled={disabled} type="range" min="0" max="100" value={percent(brush.hardness)} onChange={(event) => onBrushChange({ ...brush, hardness: Number(event.target.value) / 100 })}/><span>{percent(brush.hardness)}%</span></label>
             <label>Flow <input disabled={disabled} type="range" min="0" max="100" value={percent(brush.flow)} onChange={(event) => onBrushChange({ ...brush, flow: Number(event.target.value) / 100 })}/><span>{percent(brush.flow)}%</span></label>
             <label>Spacing <input disabled={disabled} type="range" min="5" max="100" value={percent(brush.spacing)} onChange={(event) => onBrushChange({ ...brush, spacing: Number(event.target.value) / 100 })}/><span>{percent(brush.spacing)}%</span></label>
+            <label>Smoothing <input disabled={disabled} type="range" min="0" max="100" value={percent(brush.smoothing ?? 0)} onChange={(event) => onBrushChange({ ...brush, smoothing: Number(event.target.value) / 100 })}/><span>{percent(brush.smoothing ?? 0)}%</span></label>
           </div>
           <h3>Texture</h3>
           <div className="terrain-controls">
