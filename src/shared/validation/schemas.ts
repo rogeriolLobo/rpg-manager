@@ -505,9 +505,49 @@ export const mapEditorLayerSchema = z.strictObject({
   locked: z.boolean(),
   objects: z.array(mapEditorObjectSchema).max(300),
 });
-const mapEditorExtensionsSchema = z.record(
-  z.string().trim().min(1).max(80),
-  z.unknown(),
+export const TERRAIN_TEXTURE_IDS = ['grass','dirt','sand','rock','water','snow','stone','wood','metal','plain'] as const;
+export const TERRAIN_STROKE_MODES = ['PAINT','ERASE'] as const;
+const terrainCoordinateSchema = z.number().finite().min(-32768).max(32768);
+export const terrainPointSchema = z.strictObject({
+  x: terrainCoordinateSchema,
+  y: terrainCoordinateSchema,
+  pressure: z.number().finite().min(0).max(1).optional(),
+});
+export const terrainBrushSchema = z.strictObject({
+  size: z.number().finite().min(4).max(4096),
+  opacity: z.number().finite().min(0).max(1),
+  hardness: z.number().finite().min(0).max(1),
+  flow: z.number().finite().min(0).max(1),
+  spacing: z.number().finite().min(.05).max(2),
+  textureScale: z.number().finite().min(.1).max(8),
+  textureRotation: z.number().finite().min(-360).max(360),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/u),
+});
+export const terrainStrokeSchema = z.strictObject({
+  id: z.string().uuid(),
+  mode: z.enum(TERRAIN_STROKE_MODES),
+  textureId: z.enum(TERRAIN_TEXTURE_IDS),
+  brush: terrainBrushSchema,
+  points: z.array(terrainPointSchema).min(1).max(512),
+});
+export const terrainLayerSchema = z.strictObject({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(120),
+  visible: z.boolean(),
+  locked: z.boolean(),
+  opacity: z.number().finite().min(0).max(1),
+  strokes: z.array(terrainStrokeSchema).max(1200),
+});
+export const terrainDocumentSchema = z.strictObject({
+  version: z.literal(1),
+  layers: z.array(terrainLayerSchema).max(20),
+  layerOrder: z.array(z.string().uuid()).max(60),
+});
+const mapEditorExtensionsSchema = z.object({
+  terrain: terrainDocumentSchema.optional(),
+}).catchall(z.unknown()).refine(
+  (extensions) => Object.keys(extensions).every((key) => key.trim().length > 0 && key.length <= 80),
+  'As chaves de extensão devem ter entre 1 e 80 caracteres.',
 );
 export const mapEditorDocumentSchema = z.strictObject({
   version: z.literal(1),
@@ -524,6 +564,11 @@ export const mapEditorSaveSchema = z.strictObject({
 export type MapEditorDocumentInput = z.infer<typeof mapEditorDocumentSchema>;
 export type MapEditorLayerInput = z.infer<typeof mapEditorLayerSchema>;
 export type MapEditorObjectInput = z.infer<typeof mapEditorObjectSchema>;
+export type TerrainBrushInput = z.infer<typeof terrainBrushSchema>;
+export type TerrainDocumentInput = z.infer<typeof terrainDocumentSchema>;
+export type TerrainLayerInput = z.infer<typeof terrainLayerSchema>;
+export type TerrainPointInput = z.infer<typeof terrainPointSchema>;
+export type TerrainStrokeInput = z.infer<typeof terrainStrokeSchema>;
 
 export const worldInviteInputSchema = z.strictObject({
   expiresInDays: z.number().int().min(1).max(30).default(7),

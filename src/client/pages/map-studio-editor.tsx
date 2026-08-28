@@ -2,10 +2,17 @@ import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   addMapLayer, addMapObject, cloneMapDocument, findMapObject, findObjectLayer,
-  moveMapLayer, removeMapObject, updateMapLayer, updateMapObject,
+  removeMapObject, updateMapLayer, updateMapObject,
   type MapEditorDocument, type MapEditorLayer, type MapEditorObject,
 } from '../../domain/map-studio/editor';
-import { MapCanvas } from '../components/map-studio/map-canvas';
+import {
+  addTerrainLayer, addTerrainStroke, listUnifiedMapLayers,
+  moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer,
+} from '../../domain/map-studio/terrain/terrain-document';
+import type { TerrainLayer, TerrainStroke, TerrainViewport } from '../../domain/map-studio/terrain/terrain-types';
+import { MapCanvas, type MapCanvasHandle } from '../components/map-studio/map-canvas';
+import { TerrainToolPanel } from '../components/map-studio/terrain-tool-panel';
+import { isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint, useTerrainTool, viewportScale } from '../components/map-studio/use-terrain-tool';
 import { InspectorPanel, LayersPanel } from '../components/map-studio/workspace-panels';
 import { StatusBar, ToolDock, WorkspaceTopbar, type MapSaveState, type MapTool } from '../components/map-studio/workspace-chrome';
 import { patchJson } from '../api/client';
@@ -46,8 +53,9 @@ export function MapStudioEditor({
   const [past, setPast] = useState<MapEditorDocument[]>([]);
   const [future, setFuture] = useState<MapEditorDocument[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [activeLayerId, setActiveLayerId] = useState<string | null>(initialDocument.layers.at(-1)?.id ?? null);
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(listUnifiedMapLayers(initialDocument).at(-1)?.id ?? null);
   const [tool, setTool] = useState<MapTool>('SELECT');
+  const [toolPanelKind, setToolPanelKind] = useState<'LAYERS' | 'TERRAIN'>('LAYERS');
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [saveState, setSaveState] = useState<MapSaveState>('saved');
@@ -59,6 +67,7 @@ export function MapStudioEditor({
   const versionRef = useRef(initialVersion);
   const dragRef = useRef<DragState | null>(null);
   const panRef = useRef<PanState | null>(null);
+  const canvasRef = useRef<MapCanvasHandle>(null);
   const panelSnapshotRef = useRef({ toolPanelOpen: true, inspectorOpen: true });
 
   useEffect(() => { mapStateRef.current = mapState; }, [mapState]);
@@ -86,6 +95,27 @@ export function MapStudioEditor({
       return next;
     });
   }, [archived]);
+
+  const viewWidth = width / zoom;
+  const viewHeight = height / zoom;
+  const viewport = useMemo<TerrainViewport>(() => ({
+    x: pan.x + (width - viewWidth) / 2,
+    y: pan.y + (height - viewHeight) / 2,
+    width: viewWidth,
+    height: viewHeight,
+  }), [height, pan.x, pan.y, viewHeight, viewWidth, width]);
+
+  const commitTerrainStroke = useCallback((layerId: string, stroke: TerrainStroke) => {
+    commit((current) => addTerrainStroke(current, layerId, stroke));
+  }, [commit]);
+
+  const terrainTool = useTerrainTool({
+    document: mapState,
+    activeLayerId,
+    archived,
+    canvasRef,
+    onCommitStroke: commitTerrainStroke,
+  });
 
   const save = useCallback(async (snapshot = mapStateRef.current) => {
     if (archived) return;
@@ -204,6 +234,33 @@ export function MapStudioEditor({
     setActiveLayerId(id);
   };
 
+  const createTerrainLayer = () => {
+    const id = crypto.randomUUID();
+    const terrainCount = listUnifiedMapLayers(mapState).filter((candidate) => candidate.type === 'TERRAIN').length;
+    const layer: TerrainLayer = {
+      id,
+      name: terrainCount === 0 ? 'Terrain Base' : `Terrain ${terrainCount + 1}`,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      strokes: [],
+    };
+    commit((current) => addTerrainLayer(current, layer));
+    setActiveLayerId(id);
+    setTool('TERRAIN');
+    setToolPanelKind('TERRAIN');
+    setToolPanelOpen(true);
+  };
+
+  const selectTool = (nextTool: MapTool) => {
+    setTool(nextTool);
+    if (nextTool === 'TERRAIN') {
+      setSelectedId(null);
+      setToolPanelKind('TERRAIN');
+      setToolPanelOpen(true);
+    }
+  };
+
   const addObject = (type: MapEditorObject['type']) => {
     const layerId = activeLayerId && mapState.layers.some((layer) => layer.id === activeLayerId)
       ? activeLayerId
@@ -237,39 +294,61 @@ export function MapStudioEditor({
     dragRef.current = { objectId: object.id, startClientX: event.clientX, startClientY: event.clientY, startX: object.x, startY: object.y };
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (tool === 'PAN') {
       event.currentTarget.setPointerCapture(event.pointerId);
       panRef.current = { startClientX: event.clientX, startClientY: event.clientY, startX: pan.x, startY: pan.y };
-    } else if (event.target === event.currentTarget) {
+    } else if (tool === 'TERRAIN') {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (!isScreenPointInsideViewport(event.clientX, event.clientY, bounds, viewport)) return;
+      const pressure = event.pointerType === 'mouse' ? 1 : Math.max(.05, event.pressure || 1);
+      const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, pressure);
+      if (!isTerrainPointInsideMap(point, width, height)) return;
+      if (terrainTool.begin(point)) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+    } else if (!(event.target as Element).closest('[data-map-object]')) {
       setSelectedId(null);
     }
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+  const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
+    canvasRef.current?.updateBrushCursor(event.clientX, event.clientY, true);
     if (panRef.current) {
-      const scaleX = width / Math.max(1, bounds.width) / zoom;
-      const scaleY = height / Math.max(1, bounds.height) / zoom;
+      const scale = viewportScale(bounds, viewport);
       setPan({
-        x: panRef.current.startX - (event.clientX - panRef.current.startClientX) * scaleX,
-        y: panRef.current.startY - (event.clientY - panRef.current.startClientY) * scaleY,
+        x: panRef.current.startX - (event.clientX - panRef.current.startClientX) / scale,
+        y: panRef.current.startY - (event.clientY - panRef.current.startClientY) / scale,
       });
     }
     if (dragRef.current) {
-      const scaleX = width / Math.max(1, bounds.width) / zoom;
-      const scaleY = height / Math.max(1, bounds.height) / zoom;
+      const scale = viewportScale(bounds, viewport);
       const drag = dragRef.current;
       setMapState((current) => updateMapObject(current, drag.objectId, {
-        x: drag.startX + (event.clientX - drag.startClientX) * scaleX,
-        y: drag.startY + (event.clientY - drag.startClientY) * scaleY,
+        x: drag.startX + (event.clientX - drag.startClientX) / scale,
+        y: drag.startY + (event.clientY - drag.startClientY) / scale,
       }));
+    }
+    if (tool === 'TERRAIN') {
+      const pressure = event.pointerType === 'mouse' ? 1 : Math.max(.05, event.pressure || 1);
+      const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, pressure);
+      if (isTerrainPointInsideMap(point, width, height)) terrainTool.add(point);
     }
   };
 
-  const finishPointer = () => {
+  const finishPointer = (event: ReactPointerEvent<HTMLElement>) => {
+    if (tool === 'TERRAIN') terrainTool.finish();
     dragRef.current = null;
     panRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const cancelPointer = (event: ReactPointerEvent<HTMLElement>) => {
+    if (tool === 'TERRAIN') terrainTool.cancel();
+    dragRef.current = null;
+    panRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const updateSelected = (update: Partial<Omit<MapEditorObject, 'id' | 'type'>>) => {
@@ -281,10 +360,18 @@ export function MapStudioEditor({
     commit((current) => updateMapLayer(current, layerId, update));
   };
 
-  const viewWidth = width / zoom;
-  const viewHeight = height / zoom;
-  const viewX = pan.x + (width - viewWidth) / 2;
-  const viewY = pan.y + (height - viewHeight) / 2;
+  const updateTerrain = (layerId: string, update: Partial<Pick<TerrainLayer, 'name' | 'visible' | 'locked' | 'opacity'>>) => {
+    commit((current) => updateTerrainLayer(current, layerId, update));
+  };
+
+  const deleteTerrain = (layerId: string) => {
+    commit((current) => removeTerrainLayer(current, layerId));
+    if (activeLayerId === layerId) {
+      const remaining = listUnifiedMapLayers(removeTerrainLayer(mapStateRef.current, layerId));
+      setActiveLayerId(remaining.at(-1)?.id ?? null);
+    }
+  };
+
   const saveLabel = saveState === 'saving' ? 'Salvando…' : saveState === 'dirty' ? 'Alterações pendentes' : saveState === 'error' ? 'Falha ao salvar' : 'Salvo';
   const workspaceClasses = ['map-workspace', focusMode ? 'focus-mode' : '', toolPanelOpen ? '' : 'tool-panel-closed', inspectorOpen ? '' : 'inspector-closed'].filter(Boolean).join(' ');
 
@@ -301,25 +388,42 @@ export function MapStudioEditor({
       />
       <div className="map-workspace-body">
         <ToolDock
-          tool={tool} archived={archived} toolPanelOpen={toolPanelOpen} inspectorOpen={inspectorOpen}
-          onToolChange={setTool} onAddObject={addObject}
+          tool={tool} archived={archived} toolPanelOpen={toolPanelOpen} toolPanelKind={toolPanelKind} inspectorOpen={inspectorOpen}
+          onToolChange={selectTool} onAddObject={addObject}
           onToggleToolPanel={() => setToolPanelOpen((open) => !open)}
+          onShowLayers={() => {
+            setToolPanelKind('LAYERS');
+            setToolPanelOpen((open) => toolPanelKind === 'LAYERS' ? !open : true);
+          }}
           onToggleInspector={() => setInspectorOpen((open) => !open)}
           onShowSettings={() => { setSelectedId(null); setInspectorOpen(true); }}
         />
-        {toolPanelOpen && (
+        {toolPanelOpen && toolPanelKind === 'LAYERS' && (
           <LayersPanel
             document={mapState} activeLayerId={activeLayerId} archived={archived}
-            onClose={() => setToolPanelOpen(false)} onAddLayer={addLayer} onActivateLayer={setActiveLayerId}
-            onUpdateLayer={updateLayer} onMoveLayer={(layerId, direction) => commit((current) => moveMapLayer(current, layerId, direction))}
+            onClose={() => setToolPanelOpen(false)} onAddLayer={addLayer} onAddTerrainLayer={createTerrainLayer} onActivateLayer={setActiveLayerId}
+            onUpdateLayer={updateLayer} onUpdateTerrainLayer={updateTerrain}
+            onMoveLayer={(layerId, direction) => commit((current) => moveUnifiedMapLayer(current, layerId, direction))}
+            onRemoveTerrainLayer={deleteTerrain}
+          />
+        )}
+        {toolPanelOpen && toolPanelKind === 'TERRAIN' && (
+          <TerrainToolPanel
+            activeLayer={terrainTool.activeLayer} archived={archived} mode={terrainTool.mode}
+            textureId={terrainTool.textureId} brush={terrainTool.brush} feedback={terrainTool.feedback}
+            onClose={() => setToolPanelOpen(false)} onCreateLayer={createTerrainLayer}
+            onModeChange={terrainTool.setMode} onTextureChange={terrainTool.selectTexture} onBrushChange={terrainTool.setBrush}
           />
         )}
         <MapCanvas
+          ref={canvasRef}
           mapId={mapId} document={mapState} selected={selected} width={width} height={height}
           gridType={gridType} gridSize={gridSize} backgroundUrl={backgroundUrl} tool={tool}
-          viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`}
+          viewport={viewport} brushSize={terrainTool.brush.size}
           onObjectPointerDown={beginObjectDrag} onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove} onPointerFinish={finishPointer}
+          onPointerCancel={cancelPointer}
+          onPointerLeave={() => canvasRef.current?.updateBrushCursor(0, 0, false)}
         />
         {inspectorOpen && (
           <InspectorPanel

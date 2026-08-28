@@ -23,6 +23,18 @@ async function registerAndCreateMap(page: Page, name: string, withBackground = f
   await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 
+async function drawTerrainStroke(page: Page, offset = 0) {
+  const area = page.getByLabel('Área de criação do mapa');
+  const box = await area.boundingBox();
+  expect(box).not.toBeNull();
+  const startX = box!.x + box!.width * .42 + offset;
+  const startY = box!.y + box!.height * .46 + offset;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 70, startY + 30, { steps: 8 });
+  await page.mouse.up();
+}
+
 test('Map Studio usa workspace dedicado e preserva edição, autosave e atalhos', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do workspace');
   await registerAndCreateMap(page, 'Mapa One-Shot', true);
@@ -76,17 +88,17 @@ test('Map Studio usa workspace dedicado e preserva edição, autosave e atalhos'
   // Shapes, Inspector contextual, undo/redo e autosave continuam funcionais.
   await page.getByRole('button', { name: 'Retângulo' }).click();
   await expect(page.getByRole('heading', { name: 'Seleção' })).toBeVisible();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] rect[fill="#8b5e3c"]')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface rect[fill="#8b5e3c"]')).toHaveCount(1);
   await expect(page.getByLabel('Status do mapa').getByText('Alterações pendentes')).toBeVisible();
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Desfazer' }).click();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] rect[fill="#8b5e3c"]')).toHaveCount(0);
+  await expect(page.locator('.map-object-surface rect[fill="#8b5e3c"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Refazer' }).click();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] rect[fill="#8b5e3c"]')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface rect[fill="#8b5e3c"]')).toHaveCount(1);
   await page.getByRole('button', { name: 'Elipse' }).click();
   await page.getByRole('button', { name: 'Texto' }).click();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] ellipse')).toHaveCount(1);
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] text')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface ellipse')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface text')).toHaveCount(1);
 
   // Layers mantém add, rename, visibility, lock e reorder.
   await page.getByRole('button', { name: '+ Nova camada' }).click();
@@ -122,9 +134,110 @@ test('Map Studio usa workspace dedicado e preserva edição, autosave e atalhos'
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Mapa Workspace' })).toBeVisible();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] rect[fill="#8b5e3c"]')).toHaveCount(1);
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] ellipse')).toHaveCount(1);
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] text')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface rect[fill="#8b5e3c"]')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface ellipse')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface text')).toHaveCount(1);
+});
+
+test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do Terrain Engine');
+  await registerAndCreateMap(page, 'Mapa Terrain E2E');
+
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  const terrainPanel = page.getByRole('complementary', { name: 'Painel Terrain' });
+  await expect(terrainPanel).toBeVisible();
+  await expect(terrainPanel.getByRole('button', { name: 'Create Terrain Layer' })).toBeVisible();
+  await terrainPanel.getByRole('button', { name: 'Create Terrain Layer' }).click();
+
+  const terrainSurface = page.locator('.map-terrain-surface[data-layer-id]');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '0');
+  const area = page.getByLabel('Área de criação do mapa');
+  const areaBox = await area.boundingBox();
+  expect(await terrainSurface.evaluate((canvas) => (canvas as HTMLCanvasElement).width)).toBeLessThanOrEqual(areaBox!.width * 2 + 2);
+  expect(await terrainSurface.evaluate((canvas) => (canvas as HTMLCanvasElement).height)).toBeLessThanOrEqual(areaBox!.height * 2 + 2);
+  for (const texture of ['Grass', 'Dirt', 'Sand', 'Rock', 'Water', 'Snow', 'Stone', 'Wood', 'Metal', 'Plain Color']) {
+    await expect(terrainPanel.getByRole('button', { name: `Textura ${texture}` })).toBeVisible();
+  }
+
+  await terrainPanel.getByRole('button', { name: 'Textura Grass' }).click();
+  await drawTerrainStroke(page);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '1');
+  await expect(terrainSurface).toHaveAttribute('data-last-mode', 'PAINT');
+  await expect(terrainSurface).toHaveAttribute('data-last-texture', 'grass');
+  await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
+
+  let strokeCount = 1;
+  for (const [texture, id, offset] of [
+    ['Dirt', 'dirt', -36], ['Sand', 'sand', -24], ['Rock', 'rock', -12],
+    ['Water', 'water', 12], ['Snow', 'snow', 24],
+  ] as const) {
+    await terrainPanel.getByRole('button', { name: `Textura ${texture}` }).click();
+    await drawTerrainStroke(page, offset);
+    strokeCount += 1;
+    await expect(terrainSurface).toHaveAttribute('data-stroke-count', String(strokeCount));
+    await expect(terrainSurface).toHaveAttribute('data-last-texture', id);
+  }
+
+  const cursor = page.locator('.map-brush-cursor');
+  await page.mouse.move(areaBox!.x + areaBox!.width / 2, areaBox!.y + areaBox!.height / 2);
+  await expect(cursor).toBeVisible();
+  const initialCursorWidth = (await cursor.boundingBox())!.width;
+  await terrainPanel.getByText('Size').locator('input').fill('320');
+  await page.mouse.move(areaBox!.x + areaBox!.width / 2 + 1, areaBox!.y + areaBox!.height / 2 + 1);
+  expect((await cursor.boundingBox())!.width).toBeGreaterThan(initialCursorWidth);
+
+  await terrainPanel.getByRole('button', { name: 'Erase' }).click();
+  await drawTerrainStroke(page, 12);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '7');
+  await expect(terrainSurface).toHaveAttribute('data-last-mode', 'ERASE');
+
+  await page.getByRole('button', { name: 'Desfazer' }).click();
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '6');
+  await page.getByRole('button', { name: 'Refazer' }).click();
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '7');
+
+  await page.getByRole('button', { name: 'Aumentar zoom' }).click();
+  await terrainPanel.getByRole('button', { name: 'Paint' }).click();
+  await terrainPanel.getByRole('button', { name: 'Textura Water' }).click();
+  await drawTerrainStroke(page, -18);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '8');
+  await expect(terrainSurface).toHaveAttribute('data-last-texture', 'water');
+
+  await page.getByRole('button', { name: 'Mover tela' }).click();
+  await drawTerrainStroke(page, 24);
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  await drawTerrainStroke(page, 24);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+
+  await page.getByRole('button', { name: 'Camadas', exact: true }).click();
+  const layersPanel = page.getByRole('complementary', { name: 'Painel de camadas' });
+  await expect(layersPanel.getByText('Terrain', { exact: true })).toBeVisible();
+  await layersPanel.getByRole('button', { name: 'Ocultar Terrain Base' }).click();
+  await expect(terrainSurface).toHaveAttribute('data-visible', 'false');
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  await drawTerrainStroke(page, -30);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+  await expect(terrainPanel.getByRole('status')).toContainText('Mostre a layer');
+
+  await page.getByRole('button', { name: 'Camadas', exact: true }).click();
+  await layersPanel.getByRole('button', { name: 'Mostrar Terrain Base' }).click();
+  await layersPanel.getByRole('button', { name: 'Bloquear Terrain Base' }).click();
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  await drawTerrainStroke(page, -30);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '9');
+  await expect(terrainPanel.getByRole('status')).toContainText('Desbloqueie a layer');
+
+  await page.getByRole('button', { name: 'Camadas', exact: true }).click();
+  await layersPanel.getByRole('button', { name: 'Desbloquear Terrain Base' }).click();
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  await page.getByRole('button', { name: 'Modo Foco' }).click();
+  await drawTerrainStroke(page, 32);
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '10');
+  await page.getByRole('button', { name: 'Modo Foco' }).click();
+
+  await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('img', { name: 'Terrain Terrain Base' })).toHaveAttribute('data-stroke-count', '10');
 });
 
 test('Map Studio permanece utilizável em viewport mobile', async ({ page }, testInfo) => {
@@ -146,6 +259,6 @@ test('Map Studio permanece utilizável em viewport mobile', async ({ page }, tes
   expect(box!.width).toBeGreaterThan(250);
   expect(box!.height).toBeGreaterThan(400);
   await page.getByRole('button', { name: 'Retângulo' }).click();
-  await expect(page.locator('svg[aria-label="Canvas do mapa"] rect[fill="#8b5e3c"]')).toHaveCount(1);
+  await expect(page.locator('.map-object-surface rect[fill="#8b5e3c"]')).toHaveCount(1);
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
 });

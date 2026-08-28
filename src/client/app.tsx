@@ -17,7 +17,6 @@ import { WorldExternalResourcesPage } from './pages/external-resources-pages';
 import { GmToolsPage } from './pages/gm-tools-page';
 import { WorldCartographyPage, WorldMapDetailPage } from './pages/cartography-pages';
 import { MapStudioPage } from './pages/map-studio-pages';
-import { MapStudioWorkspacePage } from './pages/map-studio-workspace-page';
 import { WorldTimelinePage } from './pages/timeline-pages';
 import { WorldBestiaryPage } from './pages/bestiary-page';
 import { FriendLibraryPage, FriendsPage } from './pages/social-pages';
@@ -28,6 +27,9 @@ import { CompendiumPage } from './pages/compendium-pages';
 import { Link } from 'react-router-dom';
 
 const WorldRelationsPage = lazy(() => import('./pages/relations-pages').then((module) => ({ default: module.WorldRelationsPage })));
+const LazyMapStudioWorkspacePage = lazy(() => import('./pages/map-studio-workspace-page').then((module) => ({ default: module.MapStudioWorkspacePage })));
+
+function MapStudioWorkspacePage(){return <Suspense fallback={<Loading/>}><LazyMapStudioWorkspacePage/></Suspense>;}
 
 function Protected(){const {user,loading}=useAuth();if(loading)return <Loading/>;return user?<Outlet/>:<Navigate to="/login" replace/>;}
 function Home(){const {user}=useAuth();return <Navigate to={user?'/app':'/login'} replace/>;}

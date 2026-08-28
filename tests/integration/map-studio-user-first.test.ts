@@ -84,6 +84,36 @@ const editorDocument = {
   }],
 };
 
+const terrainDocument = {
+  ...editorDocument,
+  extensions: {
+    terrain: {
+      version: 1 as const,
+      layers: [{
+        id: '00000000-0000-4000-8000-000000000111',
+        name: 'Terrain Base',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        strokes: [{
+          id: '00000000-0000-4000-8000-000000000112',
+          mode: 'PAINT' as const,
+          textureId: 'grass' as const,
+          brush: { size: 140, opacity: .82, hardness: .62, flow: .7, spacing: .18, textureScale: 1, textureRotation: 0, color: '#557a35' },
+          points: [{ x: 100, y: 120 }, { x: 260, y: 280 }],
+        }, {
+          id: '00000000-0000-4000-8000-000000000113',
+          mode: 'ERASE' as const,
+          textureId: 'plain' as const,
+          brush: { size: 80, opacity: 1, hardness: .8, flow: 1, spacing: .2, textureScale: 1, textureRotation: 0, color: '#000000' },
+          points: [{ x: 170, y: 190 }],
+        }],
+      }],
+      layerOrder: ['00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000111'],
+    },
+  },
+};
+
 describe('Map Studio User-First', () => {
   it('protege toda a superfície /maps com autenticação', async () => {
     expect((await request('/maps')).status).toBe(401);
@@ -168,6 +198,25 @@ describe('Map Studio User-First', () => {
     });
   });
 
+  it('salva, carrega e valida Terrain sem quebrar optimistic concurrency', async () => {
+    const owner = await register(`map-terrain-${seq}`);
+    const created = await request('/maps', 'POST', input, owner);
+    const mapId = ((await created.json()) as { item: { id: string } }).item.id;
+
+    const saved = await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: terrainDocument }, owner);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ version: 1 });
+
+    const loaded = await request(`/maps/${mapId}`, 'GET', undefined, owner);
+    expect((await loaded.json()) as unknown).toMatchObject({ item: { document: terrainDocument, documentVersion: 1 } });
+
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: terrainDocument }, owner)).status).toBe(409);
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', {
+      expectedVersion: 1,
+      document: { ...terrainDocument, extensions: { terrain: { ...terrainDocument.extensions.terrain, layers: [{ ...terrainDocument.extensions.terrain.layers[0], strokes: [{ ...terrainDocument.extensions.terrain.layers[0].strokes[0], points: [] }] }] } } },
+    }, owner)).status).toBe(422);
+  });
+
   it('isola ownership e não permite operar mapa de outro usuário', async () => {
     const owner = await register(`map-isolation-${seq}`);
     const other = await register(`map-other-${seq}`);
@@ -177,7 +226,7 @@ describe('Map Studio User-First', () => {
 
     expect((await request(`/maps/${mapId}`, 'GET', undefined, other)).status).toBe(404);
     expect((await request(`/maps/${mapId}`, 'PATCH', input, other)).status).toBe(404);
-    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: editorDocument }, other)).status).toBe(404);
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: terrainDocument }, other)).status).toBe(404);
     expect((await request(`/maps/${mapId}/worlds/${world}`, 'POST', {}, other)).status).toBe(404);
     expect((await request(`/maps/${mapId}`, 'DELETE', undefined, other)).status).toBe(404);
   });
