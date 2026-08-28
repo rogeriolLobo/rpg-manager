@@ -143,9 +143,15 @@ describe('Map Studio User-First', () => {
     const createdItem = ((await created.json()) as { item: { id: string; documentVersion: number } }).item;
 
     expect(createdItem.documentVersion).toBe(0);
+    const documentWithFutureExtension = {
+      ...editorDocument,
+      extensions: {
+        'future.terrain': { version: 1, strokes: [{ id: 'stroke-1', points: [[10, 20]] }] },
+      },
+    };
     const saved = await request(`/maps/${createdItem.id}/content`, 'PATCH', {
       expectedVersion: 0,
-      document: editorDocument,
+      document: documentWithFutureExtension,
     }, owner);
     expect(saved.status).toBe(200);
     expect(await saved.json()).toMatchObject({ success: true, version: 1 });
@@ -158,7 +164,7 @@ describe('Map Studio User-First', () => {
 
     const detail = await request(`/maps/${createdItem.id}`, 'GET', undefined, owner);
     expect((await detail.json()) as unknown).toMatchObject({
-      item: { documentVersion: 1, document: editorDocument },
+      item: { documentVersion: 1, document: documentWithFutureExtension },
     });
   });
 
