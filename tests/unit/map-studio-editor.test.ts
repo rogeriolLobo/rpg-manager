@@ -10,6 +10,7 @@ import {
   updateMapObject,
   type MapEditorObject,
 } from '../../src/domain/map-studio/editor';
+import { mapEditorDocumentSchema } from '../../src/shared/validation/schemas';
 
 const layerA = '00000000-0000-4000-8000-000000000001';
 const layerB = '00000000-0000-4000-8000-000000000002';
@@ -49,5 +50,33 @@ describe('Map Studio editor domain', () => {
     expect(ignored.layers[1].objects).toEqual([]);
     expect(moveMapLayer(locked, layerB, -1).layers.map((layer) => layer.id)).toEqual([layerB, layerA]);
     expect(moveMapLayer(locked, layerB, 1)).toBe(locked);
+  });
+
+  it('aceita documentos legados e preserva extensões futuras nas operações do editor', () => {
+    const legacy = createEmptyMapDocument();
+    expect(mapEditorDocumentSchema.safeParse(legacy).success).toBe(true);
+    expect(legacy).not.toHaveProperty('extensions');
+
+    const extended = mapEditorDocumentSchema.parse({
+      ...legacy,
+      extensions: {
+        'future.terrain': { version: 1, strokes: [{ id: 'stroke-1' }] },
+      },
+    });
+    const updated = addMapLayer(extended, layerA, 'Elementos');
+
+    expect(updated.extensions).toEqual(extended.extensions);
+    expect(mapEditorDocumentSchema.parse(updated).extensions).toEqual(extended.extensions);
+  });
+
+  it('mantém o contrato raiz estrito e limita o tamanho do envelope de extensões', () => {
+    expect(mapEditorDocumentSchema.safeParse({
+      ...createEmptyMapDocument(),
+      unknownTopLevelField: true,
+    }).success).toBe(false);
+    expect(mapEditorDocumentSchema.safeParse({
+      ...createEmptyMapDocument(),
+      extensions: { 'future.terrain': 'x'.repeat(750_000) },
+    }).success).toBe(false);
   });
 });

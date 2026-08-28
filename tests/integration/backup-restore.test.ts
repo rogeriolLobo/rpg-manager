@@ -240,6 +240,9 @@ describe('F-015: Backup/Restore completo', () => {
     const document = {
       version: 1,
       backgroundColor: '#112233',
+      extensions: {
+        'future.terrain': { version: 1, strokes: [{ id: 'stroke-backup', points: [[20, 30], [40, 50]] }] },
+      },
       layers: [{
         id: '00000000-0000-4000-8000-000000000201', name: 'Marcadores', visible: true, locked: false,
         objects: [{

@@ -505,10 +505,17 @@ export const mapEditorLayerSchema = z.strictObject({
   locked: z.boolean(),
   objects: z.array(mapEditorObjectSchema).max(300),
 });
+const mapEditorExtensionsSchema = z.record(
+  z.string().trim().min(1).max(80),
+  z.unknown(),
+);
 export const mapEditorDocumentSchema = z.strictObject({
   version: z.literal(1),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/u),
   layers: z.array(mapEditorLayerSchema).max(40),
+  // Envelope opcional para evolução progressiva do editor. Não aplicar default:
+  // documentos legados devem continuar serializados sem campos novos após um save comum.
+  extensions: mapEditorExtensionsSchema.optional(),
 }).refine((document) => JSON.stringify(document).length <= 750_000, 'O documento do mapa excede 750.000 caracteres.');
 export const mapEditorSaveSchema = z.strictObject({
   expectedVersion: z.number().int().min(0).max(2_147_483_647),
