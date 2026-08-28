@@ -241,7 +241,18 @@ describe('F-015: Backup/Restore completo', () => {
       version: 1,
       backgroundColor: '#112233',
       extensions: {
-        'future.terrain': { version: 1, strokes: [{ id: 'stroke-backup', points: [[20, 30], [40, 50]] }] },
+        terrain: {
+          version: 1,
+          layers: [{
+            id: '00000000-0000-4000-8000-000000000203', name: 'Terrain Backup', visible: true, locked: false, opacity: .9,
+            strokes: [{
+              id: '00000000-0000-4000-8000-000000000204', mode: 'PAINT', textureId: 'water',
+              brush: { size: 180, opacity: .8, hardness: .4, flow: .7, spacing: .2, textureScale: 1.2, textureRotation: 12, color: '#276b8d' },
+              points: [{ x: 20, y: 30 }, { x: 140, y: 150 }],
+            }],
+          }],
+          layerOrder: ['00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000201'],
+        },
       },
       layers: [{
         id: '00000000-0000-4000-8000-000000000201', name: 'Marcadores', visible: true, locked: false,
