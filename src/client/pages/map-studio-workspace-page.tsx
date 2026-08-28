@@ -2,10 +2,11 @@ import { Archive, Copy, Link2, RotateCcw, Save, Trash2, Upload } from 'lucide-re
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { MapEditorDocument } from '../../domain/map-studio/editor';
+import type { MapGridType } from '../../domain/map-studio/grid-engine';
 import { api, deleteApi, patchJson, postJson } from '../api/client';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
-import { MapStudioEditor } from './map-studio-editor';
+import { MapStudioEditor, type MapGridPreview } from './map-studio-editor';
 
 const MAP_TYPES = ['GENERIC', 'GEOGRAPHIC', 'SETTLEMENT', 'INTERIOR', 'TACTICAL', 'HEX', 'SPACE', 'NETWORK', 'ABSTRACT', 'IMPORTED'] as const;
 const GRID_TYPES = ['NONE', 'SQUARE', 'HEX_POINTY', 'HEX_FLAT'] as const;
@@ -58,9 +59,10 @@ interface DocumentSettingsProps {
   item: MapDetail;
   worlds: WorldOption[];
   reload: () => void;
+  onGridPreviewChange: (preview: MapGridPreview) => void;
 }
 
-function DocumentSettings({ item, worlds, reload }: DocumentSettingsProps) {
+function DocumentSettings({ item, worlds, reload, onGridPreviewChange }: DocumentSettingsProps) {
   const navigate = useNavigate();
   const [form, setForm] = useState(() => formFromMap(item));
   const [file, setFile] = useState<File | null>(null);
@@ -143,8 +145,17 @@ function DocumentSettings({ item, worlds, reload }: DocumentSettingsProps) {
         <label>Altura<input disabled={archived} required type="number" min={64} max={32768} value={form.height} onChange={(event) => setForm((current) => ({ ...current, height: event.target.value }))}/></label>
       </div>
       <div className="map-settings-pair">
-        <label>Grade<select disabled={archived} value={form.gridType} onChange={(event) => setForm((current) => ({ ...current, gridType: event.target.value as GridType }))}>{GRID_TYPES.map((type) => <option key={type} value={type}>{gridLabel[type]}</option>)}</select></label>
-        <label>Tamanho<input disabled={archived} type="number" min={4} max={512} value={form.gridSize} onChange={(event) => setForm((current) => ({ ...current, gridSize: event.target.value }))}/></label>
+        <label>Grade<select disabled={archived} value={form.gridType} onChange={(event) => {
+          const type = event.target.value as MapGridType;
+          setForm((current) => ({ ...current, gridType: type }));
+          onGridPreviewChange({ type, size: Number(form.gridSize) });
+        }}>{GRID_TYPES.map((type) => <option key={type} value={type}>{gridLabel[type]}</option>)}</select></label>
+        <label>Tamanho<input disabled={archived} type="number" min={4} max={512} value={form.gridSize} onChange={(event) => {
+          const nextSize = event.target.value;
+          setForm((current) => ({ ...current, gridSize: nextSize }));
+          const size = Number(nextSize);
+          if (Number.isFinite(size) && size >= 4 && size <= 512) onGridPreviewChange({ type: form.gridType, size });
+        }}/></label>
       </div>
       <label>Imagem de fundo<span className="map-workspace-file"><Upload size={15}/>{file ? file.name : 'Selecionar imagem'}<input disabled={archived} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)}/></span></label>
       <details className="map-world-settings">
@@ -184,7 +195,7 @@ export function MapStudioWorkspacePage() {
       mapId={mapId} mapName={item.name} width={item.width} height={item.height}
       gridType={item.gridType} gridSize={item.gridSize} backgroundUrl={item.backgroundUrl}
       initialDocument={item.document} initialVersion={item.documentVersion} archived={Boolean(item.archivedAt)}
-      documentSettings={<DocumentSettings item={item} worlds={worlds} reload={resource.reload}/>}
+      documentSettings={(onGridPreviewChange) => <DocumentSettings item={item} worlds={worlds} reload={resource.reload} onGridPreviewChange={onGridPreviewChange}/>}
     />
   );
 }

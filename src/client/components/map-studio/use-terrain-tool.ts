@@ -37,6 +37,10 @@ export function isTerrainPointInsideMap(point: TerrainPoint, width: number, heig
   return point.x >= 0 && point.x <= width && point.y >= 0 && point.y <= height;
 }
 
+export function clampTerrainPoint(point: TerrainPoint, width: number, height: number): TerrainPoint {
+  return { ...point, x: Math.min(width, Math.max(0, point.x)), y: Math.min(height, Math.max(0, point.y)) };
+}
+
 interface UseTerrainToolOptions {
   document: MapEditorDocument;
   activeLayerId: string | null;

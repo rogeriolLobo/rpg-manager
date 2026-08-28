@@ -10,9 +10,10 @@ import {
   moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer,
 } from '../../domain/map-studio/terrain/terrain-document';
 import type { TerrainLayer, TerrainStroke, TerrainViewport } from '../../domain/map-studio/terrain/terrain-types';
+import type { MapGridType } from '../../domain/map-studio/grid-engine';
 import { MapCanvas, type MapCanvasHandle } from '../components/map-studio/map-canvas';
 import { TerrainToolPanel } from '../components/map-studio/terrain-tool-panel';
-import { isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint, useTerrainTool, viewportScale } from '../components/map-studio/use-terrain-tool';
+import { clampTerrainPoint, isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint, useTerrainTool, viewportScale } from '../components/map-studio/use-terrain-tool';
 import { InspectorPanel, LayersPanel } from '../components/map-studio/workspace-panels';
 import { StatusBar, ToolDock, WorkspaceTopbar, type MapSaveState, type MapTool } from '../components/map-studio/workspace-chrome';
 import { patchJson } from '../api/client';
@@ -22,14 +23,16 @@ interface MapStudioEditorProps {
   mapName: string;
   width: number;
   height: number;
-  gridType: 'NONE' | 'SQUARE' | 'HEX_POINTY' | 'HEX_FLAT';
+  gridType: MapGridType;
   gridSize: number;
   backgroundUrl: string | null;
   initialDocument: MapEditorDocument;
   initialVersion: number;
   archived: boolean;
-  documentSettings: ReactNode;
+  documentSettings: (onGridPreviewChange: (preview: MapGridPreview) => void) => ReactNode;
 }
+
+export interface MapGridPreview { type: MapGridType; size: number }
 
 interface SaveResponse { success: true; version: number; updatedAt: string }
 interface DragState { objectId: string; startClientX: number; startClientY: number; startX: number; startY: number }
@@ -63,6 +66,7 @@ export function MapStudioEditor({
   const [toolPanelOpen, setToolPanelOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
   const [inspectorOpen, setInspectorOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
   const [focusMode, setFocusMode] = useState(false);
+  const [gridPreviewOverride, setGridPreviewOverride] = useState<MapGridPreview | null>(null);
   const mapStateRef = useRef(mapState);
   const versionRef = useRef(initialVersion);
   const dragRef = useRef<DragState | null>(null);
@@ -71,6 +75,7 @@ export function MapStudioEditor({
   const panelSnapshotRef = useRef({ toolPanelOpen: true, inspectorOpen: true });
 
   useEffect(() => { mapStateRef.current = mapState; }, [mapState]);
+  const gridPreview = gridPreviewOverride ?? { type: gridType, size: gridSize };
 
   useEffect(() => {
     const compactViewport = window.matchMedia('(max-width: 900px)');
@@ -333,7 +338,7 @@ export function MapStudioEditor({
     if (tool === 'TERRAIN') {
       const pressure = event.pointerType === 'mouse' ? 1 : Math.max(.05, event.pressure || 1);
       const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, pressure);
-      if (isTerrainPointInsideMap(point, width, height)) terrainTool.add(point);
+      terrainTool.add(clampTerrainPoint(point, width, height));
     }
   };
 
@@ -418,8 +423,8 @@ export function MapStudioEditor({
         <MapCanvas
           ref={canvasRef}
           mapId={mapId} document={mapState} selected={selected} width={width} height={height}
-          gridType={gridType} gridSize={gridSize} backgroundUrl={backgroundUrl} tool={tool}
-          viewport={viewport} brushSize={terrainTool.brush.size}
+          gridType={gridPreview.type} gridSize={gridPreview.size} backgroundUrl={backgroundUrl} tool={tool}
+          viewport={viewport} brushSize={terrainTool.brush.size} brushHardness={terrainTool.brush.hardness}
           onObjectPointerDown={beginObjectDrag} onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove} onPointerFinish={finishPointer}
           onPointerCancel={cancelPointer}
@@ -428,7 +433,7 @@ export function MapStudioEditor({
         {inspectorOpen && (
           <InspectorPanel
             selected={selected} selectedLayer={selectedLayer} archived={archived} onClose={() => setInspectorOpen(false)}
-            settings={<div className="map-document-settings"><label>Fundo<input disabled={archived} type="color" value={mapState.backgroundColor} onChange={(event) => commit((current) => ({ ...current, backgroundColor: event.target.value }))}/></label>{documentSettings}</div>}
+            settings={<div className="map-document-settings"><label>Fundo<input disabled={archived} type="color" value={mapState.backgroundColor} onChange={(event) => commit((current) => ({ ...current, backgroundColor: event.target.value }))}/></label>{documentSettings(setGridPreviewOverride)}</div>}
             onUpdateSelected={updateSelected}
             onRemoveSelected={() => { if (selected) commit((current) => removeMapObject(current, selected.id)); setSelectedId(null); }}
           />
@@ -437,7 +442,7 @@ export function MapStudioEditor({
           <div className="map-save-error" role="alert"><AlertTriangle size={17}/><span>{saveError}</span><button type="button" onClick={() => void save()}><RotateCcw size={15}/>Tentar novamente</button></div>
         )}
       </div>
-      <StatusBar width={width} height={height} gridType={gridType} zoom={zoom} saveLabel={saveLabel}/>
+      <StatusBar width={width} height={height} gridType={gridPreview.type} zoom={zoom} saveLabel={saveLabel}/>
     </section>
   );
 }

@@ -1,8 +1,10 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { MapEditorDocument, MapEditorObject } from '../../../domain/map-studio/editor';
+import type { MapGridType } from '../../../domain/map-studio/grid-engine';
 import { listUnifiedMapLayers } from '../../../domain/map-studio/terrain/terrain-document';
 import type { TerrainStroke, TerrainViewport } from '../../../domain/map-studio/terrain/terrain-types';
 import type { MapTool } from './workspace-chrome';
+import { GridOverlay } from './grid-overlay';
 import { TerrainLayerSurface, type TerrainLayerSurfaceHandle } from './terrain-layer-surface';
 
 export interface MapCanvasHandle {
@@ -16,12 +18,13 @@ interface MapCanvasProps {
   selected: MapEditorObject | null;
   width: number;
   height: number;
-  gridType: 'NONE' | 'SQUARE' | 'HEX_POINTY' | 'HEX_FLAT';
+  gridType: MapGridType;
   gridSize: number;
   backgroundUrl: string | null;
   tool: MapTool;
   viewport: TerrainViewport;
   brushSize: number;
+  brushHardness: number;
   onObjectPointerDown: (event: ReactPointerEvent<SVGElement>, object: MapEditorObject) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -31,7 +34,7 @@ interface MapCanvasProps {
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas({
-  mapId, document, selected, width, height, gridType, gridSize, backgroundUrl, tool, viewport, brushSize,
+  mapId, document, selected, width, height, gridType, gridSize, backgroundUrl, tool, viewport, brushSize, brushHardness,
   onObjectPointerDown, onPointerDown, onPointerMove, onPointerFinish, onPointerCancel, onPointerLeave,
 }, ref) {
   const viewportRef = useRef<HTMLElement>(null);
@@ -68,9 +71,10 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       element.hidden = false;
       element.style.width = `${diameter}px`;
       element.style.height = `${diameter}px`;
+      element.style.setProperty('--brush-hardness', `${Math.max(8, brushHardness * 100)}%`);
       element.style.transform = `translate(${localX - diameter / 2}px,${localY - diameter / 2}px)`;
     },
-  }), [brushSize, height, tool, viewport, width]);
+  }), [brushHardness, brushSize, height, tool, viewport, width]);
 
   return (
     <main
@@ -115,12 +119,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         </svg>
       ) : null)}
       <svg className="map-canvas-surface map-overlay-surface" viewBox={viewBox} aria-hidden="true">
-        <defs>
-          <pattern id={`grid-${mapId}`} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse">
-            <path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="rgba(40,40,40,.22)" strokeWidth={Math.max(1, gridSize / 40)}/>
-          </pattern>
-        </defs>
-        {gridType !== 'NONE' && <rect x="0" y="0" width={width} height={height} fill={`url(#grid-${mapId})`}/>}
+        <GridOverlay mapId={mapId} type={gridType} size={gridSize} width={width} height={height}/>
         {selected && (
           <rect x={selected.x} y={selected.y} width={selected.width} height={selected.height} transform={`rotate(${selected.rotation} ${selected.x + selected.width / 2} ${selected.y + selected.height / 2})`} fill="none" stroke="#d47b2a" strokeWidth={Math.max(2, width / 700)} strokeDasharray="12 8"/>
         )}
