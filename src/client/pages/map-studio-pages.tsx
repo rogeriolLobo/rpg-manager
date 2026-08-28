@@ -1,12 +1,11 @@
-import { Archive, Copy, Link2, Map, Plus, RotateCcw, Save, Trash2, Unlink, Upload } from 'lucide-react';
+import { Copy, Map, Plus, Upload } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, deleteApi, patchJson, postJson } from '../api/client';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { api, deleteApi, postJson } from '../api/client';
 import { useResource } from '../api/use-resource';
 import { ResourceFallback } from '../components/resource-state';
 import type { MapEditorDocument } from '../../domain/map-studio/editor';
 import { Empty, PageHeader } from './dashboard-page';
-import { MapStudioEditor } from './map-studio-editor';
 
 const MAP_TYPES = ['GENERIC', 'GEOGRAPHIC', 'SETTLEMENT', 'INTERIOR', 'TACTICAL', 'HEX', 'SPACE', 'NETWORK', 'ABSTRACT', 'IMPORTED'] as const;
 const GRID_TYPES = ['NONE', 'SQUARE', 'HEX_POINTY', 'HEX_FLAT'] as const;
@@ -31,10 +30,6 @@ interface MapDocument {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-interface MapDetail extends MapDocument {
-  worlds: Array<{ id: string; name: string }>;
 }
 
 interface WorldOption {
@@ -84,18 +79,6 @@ function mapPayload(form: MapForm, backgroundAssetId: string | null) {
     gridType: form.gridType,
     gridSize: Number(form.gridSize),
     backgroundAssetId,
-  };
-}
-
-function formFromMap(item: MapDocument): MapForm {
-  return {
-    name: item.name,
-    description: item.description,
-    mapType: item.mapType,
-    width: String(item.width),
-    height: String(item.height),
-    gridType: item.gridType,
-    gridSize: String(item.gridSize),
   };
 }
 
@@ -302,211 +285,5 @@ export function MapStudioPage() {
         </div>
       </form>
     </div>
-  );
-}
-
-interface MapStudioDetailEditorProps {
-  item: MapDetail;
-  mapId: string;
-  worlds: WorldOption[];
-  reload: () => void;
-}
-
-function MapStudioDetailEditor({ item, mapId, worlds, reload }: MapStudioDetailEditorProps) {
-  const navigate = useNavigate();
-  const [form, setForm] = useState(() => formFromMap(item));
-  const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const linkedIds = new Set(item.worlds.map((world) => world.id));
-  const archived = Boolean(item.archivedAt);
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    let uploaded: string | null = null;
-    try {
-      if (file) uploaded = await uploadImage(file);
-      await patchJson(`/maps/${mapId}`, mapPayload(form, uploaded ?? item.backgroundAssetId));
-      setFile(null);
-      reload();
-    } catch (reason) {
-      if (uploaded) {
-        try {
-          await deleteApi(`/files/${uploaded}`);
-        } catch {
-          // Best effort: o asset continua user-owned e pode ser removido depois pelo gerenciador de arquivos.
-        }
-      }
-      setError(reason instanceof Error ? reason.message : 'Não foi possível salvar o mapa.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleWorld = async (worldId: string, checked: boolean) => {
-    setError('');
-    try {
-      if (checked) await postJson(`/maps/${mapId}/worlds/${worldId}`, {});
-      else await deleteApi(`/maps/${mapId}/worlds/${worldId}`);
-      reload();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível atualizar o vínculo.');
-    }
-  };
-
-  const toggleArchive = async () => {
-    setError('');
-    try {
-      await postJson(`/maps/${mapId}/${archived ? 'restore' : 'archive'}`, {});
-      reload();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível alterar o arquivamento.');
-    }
-  };
-
-  const duplicate = async () => {
-    try {
-      const result = await postJson<{ id: string }>(`/maps/${mapId}/duplicate`, {});
-      navigate(`/app/maps/${result.id}`);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível duplicar.');
-    }
-  };
-
-  const remove = async () => {
-    if (!confirm(`Excluir o mapa "${item.name}"? Os Worlds vinculados não serão excluídos.`)) return;
-    try {
-      await deleteApi(`/maps/${mapId}`);
-      navigate('/app/maps');
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível excluir.');
-    }
-  };
-
-  return (
-    <div className="page">
-      <PageHeader
-        eyebrow="Map Studio"
-        title={item.name}
-        description="Documento de criação independente. Vínculos com Worlds são apenas contexto opcional."
-      />
-
-      <MapStudioEditor
-        mapId={mapId}
-        width={item.width}
-        height={item.height}
-        gridType={item.gridType}
-        gridSize={item.gridSize}
-        backgroundUrl={item.backgroundUrl}
-        initialDocument={item.document}
-        initialVersion={item.documentVersion}
-        archived={archived}
-      />
-
-      <div className="map-studio-detail-layout map-studio-settings-layout">
-        <section className="panel">
-          <h2><Link2 size={18}/>Worlds opcionais</h2>
-          <p className="section-note">Um mapa pode estar em zero, um ou vários Worlds.</p>
-          <div className="map-world-links">
-            {worlds.map((world) => (
-              <label key={world.id} className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={linkedIds.has(world.id)}
-                  disabled={archived}
-                  onChange={(event) => void toggleWorld(world.id, event.target.checked)}
-                />
-                {world.name}
-              </label>
-            ))}
-          </div>
-          {worlds.length === 0 && <p>Nenhum World disponível. O mapa continua utilizável.</p>}
-        </section>
-      </div>
-
-      <form className="panel form-grid" onSubmit={(event) => void save(event)}>
-        <h2 className="span-2"><Save size={18}/>Metadados</h2>
-        {archived && <p className="section-note span-2">Este mapa está arquivado. Restaure-o para editar metadados ou vínculos.</p>}
-        <label className="span-2">
-          Nome
-          <input disabled={archived} required maxLength={160} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}/>
-        </label>
-        <label className="span-2">
-          Descrição
-          <textarea disabled={archived} rows={3} maxLength={4000} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}/>
-        </label>
-        <label>
-          Tipo
-          <select disabled={archived} value={form.mapType} onChange={(event) => setForm((current) => ({ ...current, mapType: event.target.value as MapType }))}>
-            {MAP_TYPES.map((type) => <option key={type} value={type}>{typeLabel[type]}</option>)}
-          </select>
-        </label>
-        <label>
-          Trocar imagem
-          <span className="secondary-button link-button map-file-button">
-            <Upload size={16}/>{file ? file.name : 'Selecionar imagem'}
-            <input disabled={archived} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)}/>
-          </span>
-        </label>
-        <label>
-          Largura
-          <input disabled={archived} required type="number" min={64} max={32768} value={form.width} onChange={(event) => setForm((current) => ({ ...current, width: event.target.value }))}/>
-        </label>
-        <label>
-          Altura
-          <input disabled={archived} required type="number" min={64} max={32768} value={form.height} onChange={(event) => setForm((current) => ({ ...current, height: event.target.value }))}/>
-        </label>
-        <label>
-          Grade
-          <select disabled={archived} value={form.gridType} onChange={(event) => setForm((current) => ({ ...current, gridType: event.target.value as GridType }))}>
-            {GRID_TYPES.map((type) => <option key={type} value={type}>{gridLabel[type]}</option>)}
-          </select>
-        </label>
-        <label>
-          Tamanho
-          <input disabled={archived} type="number" min={4} max={512} value={form.gridSize} onChange={(event) => setForm((current) => ({ ...current, gridSize: event.target.value }))}/>
-        </label>
-        {error && <p className="form-error span-2">{error}</p>}
-        <div className="form-actions span-2">
-          <button className="primary-button" disabled={saving || archived}><Save size={16}/>{saving ? 'Salvando…' : 'Salvar'}</button>
-          <button type="button" className="secondary-button" onClick={() => void duplicate()}><Copy size={16}/>Duplicar</button>
-          <button type="button" className="secondary-button" onClick={() => void toggleArchive()}>
-            {archived ? <RotateCcw size={16}/> : <Archive size={16}/>}
-            {archived ? 'Restaurar' : 'Arquivar'}
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void remove()}><Trash2 size={16}/>Excluir</button>
-        </div>
-      </form>
-
-      <p><Link to="/app/maps"><Unlink size={14}/> Voltar para todos os mapas</Link></p>
-    </div>
-  );
-}
-
-export function MapStudioDetailPage() {
-  const { mapId } = useParams();
-  const resource = useResource<{ item: MapDetail }>(mapId ? `/maps/${mapId}` : null);
-  const [worlds, setWorlds] = useState<WorldOption[]>([]);
-
-  useEffect(() => {
-    void api<{ items: WorldOption[] }>('/worlds?pageSize=50')
-      .then((result) => setWorlds(result.items))
-      .catch(() => setWorlds([]));
-  }, []);
-
-  if (resource.status !== 'success') return <ResourceFallback state={resource} onRetry={resource.reload}/>;
-  if (!mapId) return null;
-
-  const item = resource.data.item;
-  return (
-    <MapStudioDetailEditor
-      key={`${item.id}:${item.updatedAt}:${item.backgroundAssetId ?? ''}`}
-      item={item}
-      mapId={mapId}
-      worlds={worlds}
-      reload={resource.reload}
-    />
   );
 }
