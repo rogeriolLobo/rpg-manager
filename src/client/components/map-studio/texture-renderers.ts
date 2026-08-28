@@ -1,5 +1,7 @@
 import type { TextureDefinition } from '../../../domain/map-studio/terrain/texture-registry';
 import type { TerrainBrush, TerrainPoint } from '../../../domain/map-studio/terrain/terrain-types';
+import { resolveTerrainBrushPreset, terrainBrushNoise } from '../../../domain/map-studio/terrain/brush-presets';
+import { terrainFlowDepositAlpha } from '../../../domain/map-studio/terrain/brush-engine';
 
 function hash(value: string): number {
   let result = 2166136261;
@@ -57,28 +59,26 @@ export function drawTextureStamp(
   brush: TerrainBrush,
   strokeId: string,
   stampIndex: number,
-  layerOpacity: number,
 ): void {
   const pressure = point.pressure ?? 1;
   const radius = Math.max(2, brush.size * pressure / 2);
-  const alpha = Math.max(0, Math.min(1, brush.opacity * brush.flow * layerOpacity * pressure));
+  const alpha = terrainFlowDepositAlpha(brush.flow, pressure);
+  const preset = resolveTerrainBrushPreset(brush);
+  const noise = preset.rendererConfig.tip === 'NOISE' ? terrainBrushNoise(strokeId, stampIndex) : null;
   const baseColor = definition.id === 'plain' ? brush.color : definition.palette[0];
   context.save();
-  context.translate(point.x, point.y);
+  const jitter = noise ? radius * preset.rendererConfig.jitter : 0;
+  context.translate(point.x + (noise ? (noise[0] - .5) * jitter : 0), point.y + (noise ? (noise[1] - .5) * jitter : 0));
   context.rotate(brush.textureRotation * Math.PI / 180);
-  context.globalAlpha = alpha * Math.max(.12, .28 + brush.hardness * .72);
-  context.fillStyle = baseColor;
+  context.globalAlpha = alpha * (noise ? 1 - preset.rendererConfig.alphaVariance + noise[2] * preset.rendererConfig.alphaVariance : 1);
+  const gradient = context.createRadialGradient(0, 0, 0, 0, 0, radius);
+  gradient.addColorStop(0, baseColor);
+  if (brush.hardness > 0) gradient.addColorStop(Math.min(.999, brush.hardness), baseColor);
+  gradient.addColorStop(1, brush.hardness >= 1 ? baseColor : 'transparent');
+  context.fillStyle = gradient;
   context.beginPath();
   context.arc(0, 0, radius, 0, Math.PI * 2);
   context.fill();
-  if (brush.hardness < .98) {
-    const gradient = context.createRadialGradient(0, 0, radius * brush.hardness, 0, 0, radius);
-    gradient.addColorStop(0, `${baseColor}dd`);
-    gradient.addColorStop(1, `${baseColor}00`);
-    context.globalAlpha = alpha * (1 - brush.hardness);
-    context.fillStyle = gradient;
-    context.fill();
-  }
   context.beginPath();
   context.arc(0, 0, radius * .94, 0, Math.PI * 2);
   context.clip();

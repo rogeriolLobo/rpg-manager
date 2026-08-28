@@ -25,6 +25,8 @@ export const TERRAIN_TILE_SIZE = 512;
 export const MAX_TERRAIN_POINTS_PER_STROKE = 512;
 
 export const DEFAULT_TERRAIN_BRUSH: TerrainBrush = {
+  presetId: 'SOFT_ROUND',
+  smoothing: .55,
   size: 140,
   opacity: .82,
   hardness: .62,

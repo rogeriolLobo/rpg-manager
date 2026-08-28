@@ -1,4 +1,4 @@
-import { interpolateTerrainStamps } from '../../../domain/map-studio/terrain/brush-engine';
+import { interpolateTerrainStamps, terrainStrokeOpacity } from '../../../domain/map-studio/terrain/brush-engine';
 import { terrainBoundsIntersectViewport, TerrainTileIndex, terrainStrokeBounds } from '../../../domain/map-studio/terrain/terrain-spatial-index';
 import { textureRegistry } from '../../../domain/map-studio/terrain/texture-registry';
 import type { TerrainLayer, TerrainStroke, TerrainViewport } from '../../../domain/map-studio/terrain/terrain-types';
@@ -29,13 +29,55 @@ function applyViewportTransform(
   context.setTransform(ratio * scale, 0, 0, ratio * scale, ratio * (offsetX - viewport.x * scale), ratio * (offsetY - viewport.y * scale));
 }
 
-function drawTerrainStrokes(context: CanvasRenderingContext2D, strokes: TerrainStroke[], layerOpacity: number): void {
+function drawTerrainStroke(context: CanvasRenderingContext2D, stroke: TerrainStroke): void {
+  const definition = textureRegistry.get(stroke.textureId);
+  interpolateTerrainStamps(stroke.points, stroke.brush).forEach((point, index) => {
+    drawTextureStamp(context, definition, point, stroke.brush, stroke.id, index);
+  });
+}
+
+interface SurfaceRect { x: number; y: number; width: number; height: number }
+
+function terrainStrokeSurfaceRect(
+  stroke: TerrainStroke,
+  surface: HTMLCanvasElement,
+  width: number,
+  height: number,
+  ratio: number,
+  viewport: TerrainViewport,
+): SurfaceRect {
+  const scale = Math.min(width / viewport.width, height / viewport.height);
+  const offsetX = (width - viewport.width * scale) / 2;
+  const offsetY = (height - viewport.height * scale) / 2;
+  const bounds = terrainStrokeBounds(stroke);
+  const padding = 3;
+  const minX = Math.max(0, Math.floor((offsetX + (bounds.minX - viewport.x) * scale) * ratio) - padding);
+  const minY = Math.max(0, Math.floor((offsetY + (bounds.minY - viewport.y) * scale) * ratio) - padding);
+  const maxX = Math.min(surface.width, Math.ceil((offsetX + (bounds.maxX - viewport.x) * scale) * ratio) + padding);
+  const maxY = Math.min(surface.height, Math.ceil((offsetY + (bounds.maxY - viewport.y) * scale) * ratio) + padding);
+  return { x: minX, y: minY, width: Math.max(0, maxX - minX), height: Math.max(0, maxY - minY) };
+}
+
+function compositeTerrainStrokes(
+  context: CanvasRenderingContext2D,
+  strokeSurface: HTMLCanvasElement,
+  strokes: TerrainStroke[],
+  applyTransform: (context: CanvasRenderingContext2D) => void,
+  surfaceRect: (stroke: TerrainStroke) => SurfaceRect,
+): void {
+  const strokeContext = strokeSurface.getContext('2d');
+  if (!strokeContext) return;
   for (const stroke of strokes) {
+    const rect = surfaceRect(stroke);
+    if (rect.width === 0 || rect.height === 0) continue;
+    strokeContext.setTransform(1, 0, 0, 1, 0, 0);
+    strokeContext.clearRect(rect.x, rect.y, rect.width, rect.height);
+    applyTransform(strokeContext);
+    drawTerrainStroke(strokeContext, stroke);
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.globalCompositeOperation = stroke.mode === 'ERASE' ? 'destination-out' : 'source-over';
-    const definition = textureRegistry.get(stroke.textureId);
-    interpolateTerrainStamps(stroke.points, stroke.brush).forEach((point, index) => {
-      drawTextureStamp(context, definition, point, stroke.brush, stroke.id, index, layerOpacity);
-    });
+    context.globalAlpha = terrainStrokeOpacity(stroke.brush.opacity);
+    context.drawImage(strokeSurface, rect.x, rect.y, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
   }
   context.globalCompositeOperation = 'source-over';
   context.globalAlpha = 1;
@@ -46,6 +88,7 @@ export class TerrainRenderer {
   private frame: number | null = null;
   private backing: HTMLCanvasElement | null = null;
   private draftBacking: HTMLCanvasElement | null = null;
+  private strokeSurface: HTMLCanvasElement | null = null;
   private cachedLayerId = '';
   private cachedStrokes: TerrainStroke[] = [];
   private cachedVisible = true;
@@ -65,6 +108,12 @@ export class TerrainRenderer {
       if (backing.height !== canvas.height) backing.height = canvas.height;
       const backingContext = backing.getContext('2d');
       if (!backingContext) return;
+      this.strokeSurface ??= document.createElement('canvas');
+      const strokeSurface = this.strokeSurface;
+      if (strokeSurface.width !== canvas.width) strokeSurface.width = canvas.width;
+      if (strokeSurface.height !== canvas.height) strokeSurface.height = canvas.height;
+      const applyTransform = (target: CanvasRenderingContext2D) => applyViewportTransform(target, width, height, ratio, viewport);
+      const surfaceRect = (stroke: TerrainStroke) => terrainStrokeSurfaceRect(stroke, strokeSurface, width, height, ratio, viewport);
 
       const sameSurface = this.cachedLayerId === layer.id
         && this.cachedViewportKey === viewportKey
@@ -78,15 +127,13 @@ export class TerrainRenderer {
         backingContext.clearRect(0, 0, backing.width, backing.height);
         this.index.synchronize(layer.strokes);
         if (layer.visible) {
-          applyViewportTransform(backingContext, width, height, ratio, viewport);
-          drawTerrainStrokes(backingContext, this.index.visible(layer.strokes, viewport), 1);
+          compositeTerrainStrokes(backingContext, strokeSurface, this.index.visible(layer.strokes, viewport), applyTransform, surfaceRect);
         }
       } else if (layer.visible && layer.strokes.length > this.cachedStrokes.length) {
         this.index.synchronize(layer.strokes);
         const appended = layer.strokes.slice(this.cachedStrokes.length)
           .filter((stroke) => terrainBoundsIntersectViewport(terrainStrokeBounds(stroke), viewport));
-        applyViewportTransform(backingContext, width, height, ratio, viewport);
-        drawTerrainStrokes(backingContext, appended, 1);
+        compositeTerrainStrokes(backingContext, strokeSurface, appended, applyTransform, surfaceRect);
       }
 
       this.cachedLayerId = layer.id;
@@ -106,8 +153,7 @@ export class TerrainRenderer {
         draftContext.setTransform(1, 0, 0, 1, 0, 0);
         draftContext.clearRect(0, 0, draftBacking.width, draftBacking.height);
         draftContext.drawImage(backing, 0, 0);
-        applyViewportTransform(draftContext, width, height, ratio, viewport);
-        drawTerrainStrokes(draftContext, [draft], 1);
+        compositeTerrainStrokes(draftContext, strokeSurface, [draft], applyTransform, surfaceRect);
         context.globalAlpha = layer.opacity;
         context.drawImage(draftBacking, 0, 0);
       } else if (layer.visible) {

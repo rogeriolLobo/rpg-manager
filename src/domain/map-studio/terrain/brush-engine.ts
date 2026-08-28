@@ -29,6 +29,42 @@ export function simplifyTerrainPoints(points: TerrainPoint[], tolerance: number)
   return [...left.slice(0, -1), ...right];
 }
 
+export function smoothTerrainPoints(points: TerrainPoint[], amount: number): TerrainPoint[] {
+  if (points.length <= 2 || amount <= 0) return points.map((point) => ({ ...point }));
+  const strength = Math.min(1, amount);
+  const result: TerrainPoint[] = [{ ...points[0] }];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const next = points[index + 1];
+    const averageX = (previous.x + current.x * 2 + next.x) / 4;
+    const averageY = (previous.y + current.y * 2 + next.y) / 4;
+    result.push({
+      x: current.x + (averageX - current.x) * strength,
+      y: current.y + (averageY - current.y) * strength,
+      pressure: current.pressure,
+    });
+  }
+  result.push({ ...points.at(-1)! });
+  return result;
+}
+
+export function terrainFlowDepositAlpha(flow: number, pressure = 1): number {
+  return Math.max(0, Math.min(1, flow * pressure));
+}
+
+export function terrainStrokeOpacity(opacity: number): number {
+  return Math.max(0, Math.min(1, opacity));
+}
+
+export function terrainBrushFalloffAlpha(normalizedDistance: number, hardness: number): number {
+  const distanceFromCenter = Math.max(0, Math.min(1, normalizedDistance));
+  const hardRadius = Math.max(0, Math.min(1, hardness));
+  if (distanceFromCenter <= hardRadius) return 1;
+  if (hardRadius >= 1) return 1;
+  return 1 - (distanceFromCenter - hardRadius) / (1 - hardRadius);
+}
+
 function capPoints(points: TerrainPoint[]): TerrainPoint[] {
   if (points.length <= MAX_TERRAIN_POINTS_PER_STROKE) return points;
   const stride = (points.length - 1) / (MAX_TERRAIN_POINTS_PER_STROKE - 1);
@@ -97,7 +133,8 @@ export class BrushEngine {
     const active = this.active;
     this.active = null;
     const tolerance = Math.max(.5, active.brush.size * .018);
-    const points = capPoints(simplifyTerrainPoints(active.points, tolerance));
+    const simplified = simplifyTerrainPoints(active.points, tolerance);
+    const points = capPoints(smoothTerrainPoints(simplified, active.brush.smoothing ?? 0));
     return { id: active.id, mode: active.mode, textureId: active.textureId, brush: { ...active.brush }, points };
   }
 
