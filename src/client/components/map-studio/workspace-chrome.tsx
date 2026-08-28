@@ -1,13 +1,13 @@
 import {
   ArrowLeft, Box, Circle, Focus, Hand, Layers, Maximize2, MousePointer2,
-  PanelLeftClose, PanelRightClose, Redo2, Save, Settings2, Type, Undo2,
+  Paintbrush, PanelLeftClose, PanelRightClose, Redo2, Save, Settings2, Type, Undo2,
   ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { MapEditorObject } from '../../../domain/map-studio/editor';
 
 export type MapSaveState = 'saved' | 'dirty' | 'saving' | 'error';
-export type MapTool = 'SELECT' | 'PAN';
+export type MapTool = 'SELECT' | 'PAN' | 'TERRAIN';
 
 interface WorkspaceTopbarProps {
   mapName: string;
@@ -60,28 +60,31 @@ interface ToolDockProps {
   tool: MapTool;
   archived: boolean;
   toolPanelOpen: boolean;
+  toolPanelKind: 'LAYERS' | 'TERRAIN';
   inspectorOpen: boolean;
   onToolChange: (tool: MapTool) => void;
   onAddObject: (type: MapEditorObject['type']) => void;
   onToggleToolPanel: () => void;
+  onShowLayers: () => void;
   onToggleInspector: () => void;
   onShowSettings: () => void;
 }
 
 export function ToolDock({
-  tool, archived, toolPanelOpen, inspectorOpen, onToolChange, onAddObject,
-  onToggleToolPanel, onToggleInspector, onShowSettings,
+  tool, archived, toolPanelOpen, toolPanelKind, inspectorOpen, onToolChange, onAddObject,
+  onToggleToolPanel, onShowLayers, onToggleInspector, onShowSettings,
 }: ToolDockProps) {
   return (
     <nav className="map-tool-dock" aria-label="Ferramentas do mapa">
       <button type="button" className={tool === 'SELECT' ? 'active' : ''} aria-pressed={tool === 'SELECT'} onClick={() => onToolChange('SELECT')} aria-label="Selecionar" title="Selecionar"><MousePointer2 size={20}/></button>
       <button type="button" className={tool === 'PAN' ? 'active' : ''} aria-pressed={tool === 'PAN'} onClick={() => onToolChange('PAN')} aria-label="Mover tela" title="Mover tela"><Hand size={20}/></button>
       <span className="map-dock-divider" aria-hidden="true"/>
+      <button type="button" disabled={archived} className={tool === 'TERRAIN' ? 'active' : ''} aria-pressed={tool === 'TERRAIN'} onClick={() => onToolChange('TERRAIN')} aria-label="Terrain" title="Terrain"><Paintbrush size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('RECTANGLE')} aria-label="Retângulo" title="Retângulo"><Box size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('ELLIPSE')} aria-label="Elipse" title="Elipse"><Circle size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('TEXT')} aria-label="Texto" title="Texto"><Type size={20}/></button>
       <span className="map-dock-divider" aria-hidden="true"/>
-      <button type="button" className={toolPanelOpen ? 'active' : ''} aria-pressed={toolPanelOpen} onClick={onToggleToolPanel} aria-label="Camadas" title="Camadas"><Layers size={20}/></button>
+      <button type="button" className={toolPanelOpen && toolPanelKind === 'LAYERS' ? 'active' : ''} aria-pressed={toolPanelOpen && toolPanelKind === 'LAYERS'} onClick={onShowLayers} aria-label="Camadas" title="Camadas"><Layers size={20}/></button>
       <button type="button" className={inspectorOpen ? 'active' : ''} aria-pressed={inspectorOpen} onClick={onShowSettings} aria-label="Configurações do mapa" title="Configurações do mapa"><Settings2 size={20}/></button>
       <span className="map-dock-spacer"/>
       <button type="button" onClick={onToggleToolPanel} aria-label={toolPanelOpen ? 'Recolher painel de ferramentas' : 'Abrir painel de ferramentas'} title={toolPanelOpen ? 'Recolher painel' : 'Abrir painel'}><PanelLeftClose size={20}/></button>

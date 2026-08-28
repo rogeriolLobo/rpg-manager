@@ -1,6 +1,8 @@
-import { ArrowDown, ArrowUp, Eye, EyeOff, Layers, Lock, Trash2, Unlock, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Eye, EyeOff, Layers, Lock, Mountain, Trash2, Unlock, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { MapEditorDocument, MapEditorLayer, MapEditorObject } from '../../../domain/map-studio/editor';
+import { listUnifiedMapLayers } from '../../../domain/map-studio/terrain/terrain-document';
+import type { TerrainLayer } from '../../../domain/map-studio/terrain/terrain-types';
 
 interface LayersPanelProps {
   document: MapEditorDocument;
@@ -8,45 +10,68 @@ interface LayersPanelProps {
   archived: boolean;
   onClose: () => void;
   onAddLayer: () => void;
+  onAddTerrainLayer: () => void;
   onActivateLayer: (layerId: string) => void;
   onUpdateLayer: (layerId: string, update: Partial<Pick<MapEditorLayer, 'name' | 'visible' | 'locked'>>) => void;
+  onUpdateTerrainLayer: (layerId: string, update: Partial<Pick<TerrainLayer, 'name' | 'visible' | 'locked' | 'opacity'>>) => void;
   onMoveLayer: (layerId: string, direction: -1 | 1) => void;
+  onRemoveTerrainLayer: (layerId: string) => void;
 }
 
 export function LayersPanel({
-  document, activeLayerId, archived, onClose, onAddLayer, onActivateLayer, onUpdateLayer, onMoveLayer,
+  document, activeLayerId, archived, onClose, onAddLayer, onAddTerrainLayer, onActivateLayer,
+  onUpdateLayer, onUpdateTerrainLayer, onMoveLayer, onRemoveTerrainLayer,
 }: LayersPanelProps) {
+  const layers = listUnifiedMapLayers(document);
   return (
     <aside className="map-tool-panel" aria-label="Painel de camadas">
       <div className="map-panel-heading">
         <h2><Layers size={17}/>Camadas</h2>
         <button type="button" onClick={onClose} aria-label="Fechar painel de camadas" title="Fechar"><X size={17}/></button>
       </div>
-      <button type="button" className="map-panel-primary" disabled={archived} onClick={onAddLayer}>+ Nova camada</button>
-      <div className="map-layer-list">
-        {[...document.layers].reverse().map((layer) => (
-          <div key={layer.id} className={`map-layer-row ${activeLayerId === layer.id ? 'active' : ''}`}>
-            <input
-              className="map-layer-name"
-              aria-label={`Renomear camada ${layer.name}`}
-              title={layer.name}
-              disabled={archived}
-              defaultValue={layer.name}
-              onFocus={() => onActivateLayer(layer.id)}
-              onBlur={(event) => {
-                const name = event.target.value.trim();
-                if (name && name !== layer.name) onUpdateLayer(layer.id, { name });
-                else event.target.value = layer.name;
-              }}
-            />
-            <button type="button" aria-label={`${layer.visible ? 'Ocultar' : 'Mostrar'} ${layer.name}`} title={layer.visible ? 'Ocultar' : 'Mostrar'} onClick={() => onUpdateLayer(layer.id, { visible: !layer.visible })}>{layer.visible ? <Eye size={14}/> : <EyeOff size={14}/>}</button>
-            <button type="button" aria-label={`${layer.locked ? 'Desbloquear' : 'Bloquear'} ${layer.name}`} title={layer.locked ? 'Desbloquear' : 'Bloquear'} onClick={() => onUpdateLayer(layer.id, { locked: !layer.locked })}>{layer.locked ? <Lock size={14}/> : <Unlock size={14}/>}</button>
-            <button type="button" aria-label={`Subir ${layer.name}`} title="Subir" onClick={() => onMoveLayer(layer.id, 1)}><ArrowUp size={14}/></button>
-            <button type="button" aria-label={`Descer ${layer.name}`} title="Descer" onClick={() => onMoveLayer(layer.id, -1)}><ArrowDown size={14}/></button>
-          </div>
-        ))}
+      <div className="map-layer-create-actions">
+        <button type="button" className="map-panel-primary" disabled={archived} onClick={onAddLayer}>+ Nova camada</button>
+        <button type="button" className="map-panel-primary" disabled={archived} onClick={onAddTerrainLayer}><Mountain size={14}/>+ Terrain</button>
       </div>
-      {!document.layers.length && <p className="section-note">Adicione uma camada ou um objeto para começar.</p>}
+      <div className="map-layer-list">
+        {[...layers].reverse().map((layer) => {
+          const update = layer.type === 'TERRAIN' ? onUpdateTerrainLayer : onUpdateLayer;
+          return (
+            <div
+              key={layer.id}
+              className={`map-layer-row ${layer.type === 'TERRAIN' ? 'terrain' : ''} ${activeLayerId === layer.id ? 'active' : ''}`}
+              onPointerDown={() => onActivateLayer(layer.id)}
+              onFocusCapture={() => onActivateLayer(layer.id)}
+            >
+              <div className="map-layer-identity">
+                <input
+                  className="map-layer-name"
+                  aria-label={`Renomear camada ${layer.name}`}
+                  title={layer.name}
+                  disabled={archived}
+                  defaultValue={layer.name}
+                  onFocus={() => onActivateLayer(layer.id)}
+                  onBlur={(event) => {
+                    const name = event.target.value.trim();
+                    if (name && name !== layer.name) update(layer.id, { name });
+                    else event.target.value = layer.name;
+                  }}
+                />
+                {layer.type === 'TERRAIN' && <span className="map-layer-kind"><Mountain size={11}/>Terrain</span>}
+              </div>
+              <button type="button" aria-label={`${layer.visible ? 'Ocultar' : 'Mostrar'} ${layer.name}`} title={layer.visible ? 'Ocultar' : 'Mostrar'} onClick={() => update(layer.id, { visible: !layer.visible })}>{layer.visible ? <Eye size={14}/> : <EyeOff size={14}/>}</button>
+              <button type="button" aria-label={`${layer.locked ? 'Desbloquear' : 'Bloquear'} ${layer.name}`} title={layer.locked ? 'Desbloquear' : 'Bloquear'} onClick={() => update(layer.id, { locked: !layer.locked })}>{layer.locked ? <Lock size={14}/> : <Unlock size={14}/>}</button>
+              <button type="button" aria-label={`Subir ${layer.name}`} title="Subir" onClick={() => onMoveLayer(layer.id, 1)}><ArrowUp size={14}/></button>
+              <button type="button" aria-label={`Descer ${layer.name}`} title="Descer" onClick={() => onMoveLayer(layer.id, -1)}><ArrowDown size={14}/></button>
+              {layer.type === 'TERRAIN' && <button type="button" disabled={archived} aria-label={`Excluir ${layer.name}`} title="Excluir Terrain layer" onClick={() => onRemoveTerrainLayer(layer.id)}><Trash2 size={14}/></button>}
+              {layer.type === 'TERRAIN' && (
+                <label className="map-layer-opacity">Opacity <input aria-label={`Opacity ${layer.name}`} disabled={archived} type="range" min="0" max="100" value={Math.round(layer.opacity * 100)} onChange={(event) => onUpdateTerrainLayer(layer.id, { opacity: Number(event.target.value) / 100 })}/><span>{Math.round(layer.opacity * 100)}%</span></label>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {!layers.length && <p className="section-note">Adicione uma camada, Terrain ou objeto para começar.</p>}
     </aside>
   );
 }
