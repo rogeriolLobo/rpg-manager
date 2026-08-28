@@ -1,18 +1,18 @@
-import {
-  AlertTriangle, ArrowDown, ArrowUp, Box, Circle, Eye, EyeOff, Hand, Layers,
-  Lock, Maximize2, MousePointer2, Redo2, RotateCcw, Save, Type, Undo2, Unlock,
-  ZoomIn, ZoomOut,
-} from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   addMapLayer, addMapObject, cloneMapDocument, findMapObject, findObjectLayer,
   moveMapLayer, removeMapObject, updateMapLayer, updateMapObject,
-  type MapEditorDocument, type MapEditorObject,
+  type MapEditorDocument, type MapEditorLayer, type MapEditorObject,
 } from '../../domain/map-studio/editor';
+import { MapCanvas } from '../components/map-studio/map-canvas';
+import { InspectorPanel, LayersPanel } from '../components/map-studio/workspace-panels';
+import { StatusBar, ToolDock, WorkspaceTopbar, type MapSaveState, type MapTool } from '../components/map-studio/workspace-chrome';
 import { patchJson } from '../api/client';
 
 interface MapStudioEditorProps {
   mapId: string;
+  mapName: string;
   width: number;
   height: number;
   gridType: 'NONE' | 'SQUARE' | 'HEX_POINTY' | 'HEX_FLAT';
@@ -21,10 +21,8 @@ interface MapStudioEditorProps {
   initialDocument: MapEditorDocument;
   initialVersion: number;
   archived: boolean;
+  documentSettings: ReactNode;
 }
-
-type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
-type Tool = 'SELECT' | 'PAN';
 
 interface SaveResponse { success: true; version: number; updatedAt: string }
 interface DragState { objectId: string; startClientX: number; startClientY: number; startX: number; startY: number }
@@ -36,30 +34,45 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function numeric(value: string, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function isEditingField(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.matches('input,textarea,select,[contenteditable="true"]');
 }
 
 export function MapStudioEditor({
-  mapId, width, height, gridType, gridSize, backgroundUrl, initialDocument, initialVersion, archived,
+  mapId, mapName, width, height, gridType, gridSize, backgroundUrl,
+  initialDocument, initialVersion, archived, documentSettings,
 }: MapStudioEditorProps) {
   const [mapState, setMapState] = useState(() => cloneMapDocument(initialDocument));
   const [past, setPast] = useState<MapEditorDocument[]>([]);
   const [future, setFuture] = useState<MapEditorDocument[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(initialDocument.layers.at(-1)?.id ?? null);
-  const [tool, setTool] = useState<Tool>('SELECT');
+  const [tool, setTool] = useState<MapTool>('SELECT');
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [saveState, setSaveState] = useState<SaveState>('saved');
+  const [saveState, setSaveState] = useState<MapSaveState>('saved');
   const [saveError, setSaveError] = useState('');
+  const [toolPanelOpen, setToolPanelOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+  const [inspectorOpen, setInspectorOpen] = useState(() => !window.matchMedia('(max-width: 900px)').matches);
+  const [focusMode, setFocusMode] = useState(false);
   const mapStateRef = useRef(mapState);
   const versionRef = useRef(initialVersion);
   const dragRef = useRef<DragState | null>(null);
   const panRef = useRef<PanState | null>(null);
+  const panelSnapshotRef = useRef({ toolPanelOpen: true, inspectorOpen: true });
 
   useEffect(() => { mapStateRef.current = mapState; }, [mapState]);
+
+  useEffect(() => {
+    const compactViewport = window.matchMedia('(max-width: 900px)');
+    const collapsePanels = () => {
+      if (!compactViewport.matches) return;
+      setToolPanelOpen(false);
+      setInspectorOpen(false);
+    };
+    compactViewport.addEventListener('change', collapsePanels);
+    return () => compactViewport.removeEventListener('change', collapsePanels);
+  }, []);
 
   const commit = useCallback((change: (current: MapEditorDocument) => MapEditorDocument) => {
     if (archived) return;
@@ -126,10 +139,28 @@ export function MapStudioEditor({
   const selected = useMemo(() => findMapObject(mapState, selectedId), [mapState, selectedId]);
   const selectedLayer = useMemo(() => findObjectLayer(mapState, selectedId), [mapState, selectedId]);
 
+  const toggleFocusMode = useCallback(() => {
+    setFocusMode((current) => {
+      if (!current) {
+        panelSnapshotRef.current = { toolPanelOpen, inspectorOpen };
+        setToolPanelOpen(false);
+        setInspectorOpen(false);
+      } else {
+        setToolPanelOpen(panelSnapshotRef.current.toolPanelOpen);
+        setInspectorOpen(panelSnapshotRef.current.inspectorOpen);
+      }
+      return !current;
+    });
+  }, [inspectorOpen, toolPanelOpen]);
+
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const editingField = target?.matches('input,textarea,select,[contenteditable="true"]');
+      const editingField = isEditingField(event.target);
+      if (event.key === 'Tab' && !editingField) {
+        event.preventDefault();
+        toggleFocusMode();
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) redo(); else undo();
@@ -165,7 +196,7 @@ export function MapStudioEditor({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [archived, commit, redo, save, selected, undo]);
+  }, [archived, commit, redo, save, selected, toggleFocusMode, undo]);
 
   const addLayer = () => {
     const id = crypto.randomUUID();
@@ -178,7 +209,7 @@ export function MapStudioEditor({
       ? activeLayerId
       : crypto.randomUUID();
     const object: MapEditorObject = {
-      id: crypto.randomUUID(), type, x: Math.round(width * 0.35), y: Math.round(height * 0.35),
+      id: crypto.randomUUID(), type, x: Math.round(width * .35), y: Math.round(height * .35),
       width: type === 'TEXT' ? 360 : 240, height: type === 'TEXT' ? 90 : 180,
       rotation: 0, fill: type === 'ELLIPSE' ? '#4f7cac' : '#8b5e3c', text: type === 'TEXT' ? 'Texto' : '',
     };
@@ -190,6 +221,7 @@ export function MapStudioEditor({
     });
     setActiveLayerId(layerId);
     setSelectedId(object.id);
+    setInspectorOpen(true);
   };
 
   const beginObjectDrag = (event: ReactPointerEvent<SVGElement>, object: MapEditorObject) => {
@@ -245,103 +277,63 @@ export function MapStudioEditor({
     commit((current) => updateMapObject(current, selected.id, update));
   };
 
+  const updateLayer = (layerId: string, update: Partial<Pick<MapEditorLayer, 'name' | 'visible' | 'locked'>>) => {
+    commit((current) => updateMapLayer(current, layerId, update));
+  };
+
   const viewWidth = width / zoom;
   const viewHeight = height / zoom;
   const viewX = pan.x + (width - viewWidth) / 2;
   const viewY = pan.y + (height - viewHeight) / 2;
   const saveLabel = saveState === 'saving' ? 'Salvando…' : saveState === 'dirty' ? 'Alterações pendentes' : saveState === 'error' ? 'Falha ao salvar' : 'Salvo';
+  const workspaceClasses = ['map-workspace', focusMode ? 'focus-mode' : '', toolPanelOpen ? '' : 'tool-panel-closed', inspectorOpen ? '' : 'inspector-closed'].filter(Boolean).join(' ');
 
   return (
-    <section className="panel map-editor" aria-label="Editor do mapa">
-      <div className="map-editor-toolbar" role="toolbar" aria-label="Ferramentas do mapa">
-        <button type="button" className={tool === 'SELECT' ? 'active' : ''} onClick={() => setTool('SELECT')}><MousePointer2 size={16}/>Selecionar</button>
-        <button type="button" className={tool === 'PAN' ? 'active' : ''} onClick={() => setTool('PAN')}><Hand size={16}/>Mover tela</button>
-        <button type="button" disabled={archived} onClick={() => addObject('RECTANGLE')}><Box size={16}/>Retângulo</button>
-        <button type="button" disabled={archived} onClick={() => addObject('ELLIPSE')}><Circle size={16}/>Elipse</button>
-        <button type="button" disabled={archived} onClick={() => addObject('TEXT')}><Type size={16}/>Texto</button>
-        <button type="button" disabled={!past.length || archived} onClick={undo}><Undo2 size={16}/>Desfazer</button>
-        <button type="button" disabled={!future.length || archived} onClick={redo}><Redo2 size={16}/>Refazer</button>
-        <button type="button" onClick={() => setZoom((value) => clamp(value - .25, .25, 4))}><ZoomOut size={16}/></button>
-        <span aria-label="Zoom atual">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom((value) => clamp(value + .25, .25, 4))}><ZoomIn size={16}/></button>
-        <button type="button" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}><Maximize2 size={16}/>Ajustar</button>
-        <button type="button" disabled={saveState === 'saving' || archived} onClick={() => void save()}><Save size={16}/>Salvar agora</button>
-        <span className={`map-save-state ${saveState}`} aria-live="polite">{saveLabel}</span>
+    <section className={workspaceClasses} aria-label="Editor do mapa" data-focus-mode={focusMode ? 'true' : 'false'}>
+      <WorkspaceTopbar
+        mapName={mapName} saveState={saveState} saveLabel={saveLabel} zoom={zoom} archived={archived}
+        canUndo={past.length > 0} canRedo={future.length > 0} focusMode={focusMode}
+        onUndo={undo} onRedo={redo}
+        onZoomOut={() => setZoom((value) => clamp(value - .25, .25, 4))}
+        onZoomIn={() => setZoom((value) => clamp(value + .25, .25, 4))}
+        onFit={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+        onSave={() => void save()} onToggleFocus={toggleFocusMode}
+      />
+      <div className="map-workspace-body">
+        <ToolDock
+          tool={tool} archived={archived} toolPanelOpen={toolPanelOpen} inspectorOpen={inspectorOpen}
+          onToolChange={setTool} onAddObject={addObject}
+          onToggleToolPanel={() => setToolPanelOpen((open) => !open)}
+          onToggleInspector={() => setInspectorOpen((open) => !open)}
+          onShowSettings={() => { setSelectedId(null); setInspectorOpen(true); }}
+        />
+        {toolPanelOpen && (
+          <LayersPanel
+            document={mapState} activeLayerId={activeLayerId} archived={archived}
+            onClose={() => setToolPanelOpen(false)} onAddLayer={addLayer} onActivateLayer={setActiveLayerId}
+            onUpdateLayer={updateLayer} onMoveLayer={(layerId, direction) => commit((current) => moveMapLayer(current, layerId, direction))}
+          />
+        )}
+        <MapCanvas
+          mapId={mapId} document={mapState} selected={selected} width={width} height={height}
+          gridType={gridType} gridSize={gridSize} backgroundUrl={backgroundUrl} tool={tool}
+          viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`}
+          onObjectPointerDown={beginObjectDrag} onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove} onPointerFinish={finishPointer}
+        />
+        {inspectorOpen && (
+          <InspectorPanel
+            selected={selected} selectedLayer={selectedLayer} archived={archived} onClose={() => setInspectorOpen(false)}
+            settings={<div className="map-document-settings"><label>Fundo<input disabled={archived} type="color" value={mapState.backgroundColor} onChange={(event) => commit((current) => ({ ...current, backgroundColor: event.target.value }))}/></label>{documentSettings}</div>}
+            onUpdateSelected={updateSelected}
+            onRemoveSelected={() => { if (selected) commit((current) => removeMapObject(current, selected.id)); setSelectedId(null); }}
+          />
+        )}
+        {saveState === 'error' && (
+          <div className="map-save-error" role="alert"><AlertTriangle size={17}/><span>{saveError}</span><button type="button" onClick={() => void save()}><RotateCcw size={15}/>Tentar novamente</button></div>
+        )}
       </div>
-
-      {saveState === 'error' && (
-        <div className="map-save-error" role="alert"><AlertTriangle size={17}/><span>{saveError}</span><button type="button" onClick={() => void save()}><RotateCcw size={15}/>Tentar novamente</button></div>
-      )}
-
-      <div className="map-editor-layout">
-        <aside className="map-layers-panel">
-          <div className="section-heading"><h3><Layers size={17}/>Camadas</h3><button type="button" disabled={archived} onClick={addLayer}>+ Camada</button></div>
-          {[...mapState.layers].reverse().map((layer) => (
-            <div key={layer.id} className={`map-layer-row ${activeLayerId === layer.id ? 'active' : ''}`}>
-              <button type="button" className="map-layer-name" onClick={() => setActiveLayerId(layer.id)}>{layer.name}</button>
-              <button type="button" aria-label={`${layer.visible ? 'Ocultar' : 'Mostrar'} ${layer.name}`} onClick={() => commit((current) => updateMapLayer(current, layer.id, { visible: !layer.visible }))}>{layer.visible ? <Eye size={14}/> : <EyeOff size={14}/>}</button>
-              <button type="button" aria-label={`${layer.locked ? 'Desbloquear' : 'Bloquear'} ${layer.name}`} onClick={() => commit((current) => updateMapLayer(current, layer.id, { locked: !layer.locked }))}>{layer.locked ? <Lock size={14}/> : <Unlock size={14}/>}</button>
-              <button type="button" aria-label={`Subir ${layer.name}`} onClick={() => commit((current) => moveMapLayer(current, layer.id, 1))}><ArrowUp size={14}/></button>
-              <button type="button" aria-label={`Descer ${layer.name}`} onClick={() => commit((current) => moveMapLayer(current, layer.id, -1))}><ArrowDown size={14}/></button>
-            </div>
-          ))}
-          {!mapState.layers.length && <p className="section-note">Adicione uma camada ou um objeto para começar.</p>}
-          <label>Fundo<input disabled={archived} type="color" value={mapState.backgroundColor} onChange={(event) => commit((current) => ({ ...current, backgroundColor: event.target.value }))}/></label>
-        </aside>
-
-        <div className={`map-canvas-viewport ${tool === 'PAN' ? 'is-panning' : ''}`}>
-          <svg
-            role="img"
-            aria-label="Canvas do mapa"
-            viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={finishPointer}
-            onPointerCancel={finishPointer}
-          >
-            <defs>
-              <pattern id={`grid-${mapId}`} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse">
-                <path d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`} fill="none" stroke="rgba(40,40,40,.22)" strokeWidth={Math.max(1, gridSize / 40)}/>
-              </pattern>
-            </defs>
-            <rect x="0" y="0" width={width} height={height} fill={mapState.backgroundColor}/>
-            {backgroundUrl && <image href={backgroundUrl} x="0" y="0" width={width} height={height} preserveAspectRatio="xMidYMid slice"/>}
-            {gridType !== 'NONE' && <rect x="0" y="0" width={width} height={height} fill={`url(#grid-${mapId})`}/>}
-            {mapState.layers.map((layer) => layer.visible && (
-              <g key={layer.id} opacity={layer.locked ? .72 : 1}>
-                {layer.objects.map((object) => {
-                  const transform = `rotate(${object.rotation} ${object.x + object.width / 2} ${object.y + object.height / 2})`;
-                  const common = { transform, onPointerDown: (event: ReactPointerEvent<SVGElement>) => beginObjectDrag(event, object) };
-                  if (object.type === 'ELLIPSE') return <ellipse key={object.id} {...common} cx={object.x + object.width / 2} cy={object.y + object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill}/>;
-                  if (object.type === 'TEXT') return <text key={object.id} {...common} x={object.x} y={object.y + object.height * .72} fill={object.fill} fontSize={Math.max(14, object.height * .55)}>{object.text || 'Texto'}</text>;
-                  return <rect key={object.id} {...common} x={object.x} y={object.y} width={object.width} height={object.height} rx={8} fill={object.fill}/>;
-                })}
-              </g>
-            ))}
-            {selected && (
-              <rect x={selected.x} y={selected.y} width={selected.width} height={selected.height} transform={`rotate(${selected.rotation} ${selected.x + selected.width / 2} ${selected.y + selected.height / 2})`} fill="none" stroke="#d47b2a" strokeWidth={Math.max(2, width / 700)} strokeDasharray="12 8" pointerEvents="none"/>
-            )}
-          </svg>
-        </div>
-
-        <aside className="map-inspector-panel">
-          <h3>Seleção</h3>
-          {selected ? (
-            <div className="map-inspector-grid">
-              <strong>{selected.type}</strong>
-              {selectedLayer?.locked && <p className="section-note">A camada está bloqueada.</p>}
-              <label>X<input disabled={archived || selectedLayer?.locked} type="number" value={Math.round(selected.x)} onChange={(event) => updateSelected({ x: numeric(event.target.value, selected.x) })}/></label>
-              <label>Y<input disabled={archived || selectedLayer?.locked} type="number" value={Math.round(selected.y)} onChange={(event) => updateSelected({ y: numeric(event.target.value, selected.y) })}/></label>
-              <label>Largura<input disabled={archived || selectedLayer?.locked} min={4} type="number" value={Math.round(selected.width)} onChange={(event) => updateSelected({ width: Math.max(4, numeric(event.target.value, selected.width)) })}/></label>
-              <label>Altura<input disabled={archived || selectedLayer?.locked} min={4} type="number" value={Math.round(selected.height)} onChange={(event) => updateSelected({ height: Math.max(4, numeric(event.target.value, selected.height)) })}/></label>
-              <label>Rotação<input disabled={archived || selectedLayer?.locked} type="number" value={Math.round(selected.rotation)} onChange={(event) => updateSelected({ rotation: numeric(event.target.value, selected.rotation) })}/></label>
-              <label>Cor<input disabled={archived || selectedLayer?.locked} type="color" value={selected.fill} onChange={(event) => updateSelected({ fill: event.target.value })}/></label>
-              {selected.type === 'TEXT' && <label className="span-2">Texto<input disabled={archived || selectedLayer?.locked} maxLength={500} value={selected.text} onChange={(event) => updateSelected({ text: event.target.value })}/></label>}
-              <button type="button" disabled={archived || selectedLayer?.locked} onClick={() => { commit((current) => removeMapObject(current, selected.id)); setSelectedId(null); }}>Remover objeto</button>
-            </div>
-          ) : <p className="section-note">Selecione um objeto no canvas. Arraste para mover; use os campos para redimensionar e rotacionar.</p>}
-        </aside>
-      </div>
+      <StatusBar width={width} height={height} gridType={gridType} zoom={zoom} saveLabel={saveLabel}/>
     </section>
   );
 }
