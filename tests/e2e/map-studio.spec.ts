@@ -192,6 +192,9 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
 
   await terrainPanel.getByRole('button', { name: 'Textura Grass' }).click();
   await terrainPanel.getByRole('button', { name: 'Soft Round' }).click();
+  await expect(terrainPanel.getByLabel('Seleção Terrain ativa')).toContainText('Grass');
+  await expect(terrainPanel.getByLabel('Seleção Terrain ativa')).toContainText('Soft Round');
+  await expect(page.getByLabel('Status do mapa')).toContainText('Paint · Grass · Soft Round');
   await drawTerrainStroke(page);
   await expect(terrainSurface).toHaveAttribute('data-stroke-count', '1');
   await expect(terrainSurface).toHaveAttribute('data-last-mode', 'PAINT');
@@ -276,10 +279,59 @@ test('Terrain Engine pinta, apaga e preserva strokes como operações lógicas',
   await drawTerrainStroke(page, 32);
   await expect(terrainSurface).toHaveAttribute('data-stroke-count', '12');
   await page.getByRole('button', { name: 'Modo Foco' }).click();
+  await testInfo.attach('terrain-materials-preview', { body: await area.screenshot(), contentType: 'image/png' });
 
   await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('img', { name: 'Terrain Terrain Base' })).toHaveAttribute('data-stroke-count', '12');
+});
+
+test('Terrain Soft Round preserva chroma no falloff sem halo escuro', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.includes('mobile'), 'Cobertura raster desktop do Terrain Engine');
+  await registerAndCreateMap(page, 'Mapa Terrain Halo E2E');
+  await page.getByRole('button', { name: 'Terrain', exact: true }).click();
+  const terrainPanel = page.getByRole('complementary', { name: 'Painel Terrain' });
+  await terrainPanel.getByRole('button', { name: 'Create Terrain Layer' }).click();
+  await terrainPanel.getByRole('button', { name: 'Textura Plain Color' }).click();
+  await terrainPanel.getByRole('button', { name: 'Soft Round' }).click();
+  await terrainPanel.getByLabel(/^Size/).fill('240');
+  await terrainPanel.getByLabel(/^Opacity/).fill('100');
+  await terrainPanel.getByLabel(/^Hardness/).fill('0');
+  await terrainPanel.getByLabel(/^Flow/).fill('100');
+
+  const area = page.getByLabel('Área de criação do mapa');
+  const box = await area.boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  const terrainSurface = page.locator('.map-terrain-surface[data-layer-id]');
+  await expect(terrainSurface).toHaveAttribute('data-stroke-count', '1');
+
+  const edge = await terrainSurface.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    const expected = [79, 124, 172];
+    let count = 0;
+    let distance = 0;
+    let maximum = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const alpha = pixels[index + 3];
+      if (alpha < 40 || alpha > 180) continue;
+      const sampleDistance = Math.abs(pixels[index] - expected[0])
+        + Math.abs(pixels[index + 1] - expected[1])
+        + Math.abs(pixels[index + 2] - expected[2]);
+      count += 1;
+      distance += sampleDistance;
+      maximum = Math.max(maximum, sampleDistance);
+    }
+    return { count, averageDistance: count ? distance / count : Number.POSITIVE_INFINITY, maximum };
+  });
+
+  expect(edge.count).toBeGreaterThan(100);
+  expect(edge.averageDistance).toBeLessThan(12);
+  expect(edge.maximum).toBeLessThan(40);
+  await testInfo.attach('terrain-falloff-analysis', {
+    body: Buffer.from(JSON.stringify(edge, null, 2)),
+    contentType: 'application/json',
+  });
 });
 
 test('Map Studio permanece utilizável em viewport mobile', async ({ page }, testInfo) => {

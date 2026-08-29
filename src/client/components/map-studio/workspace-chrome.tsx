@@ -100,14 +100,16 @@ interface StatusBarProps {
   gridType: MapGridType;
   zoom: number;
   saveLabel: string;
+  toolStatus: string;
 }
 
-export function StatusBar({ width, height, gridType, zoom, saveLabel }: StatusBarProps) {
+export function StatusBar({ width, height, gridType, zoom, saveLabel, toolStatus }: StatusBarProps) {
   return (
     <footer className="map-workspace-status" aria-label="Status do mapa">
       <span>{width} × {height}px</span>
       <span>{gridStatusLabel(gridType)}</span>
       <span>{Math.round(zoom * 100)}%</span>
+      <span className="map-status-tool">{toolStatus}</span>
       <span>{saveLabel}</span>
       <span className="map-status-hint">Tab: Modo Foco</span>
     </footer>

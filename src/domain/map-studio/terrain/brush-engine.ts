@@ -49,6 +49,13 @@ export function smoothTerrainPoints(points: TerrainPoint[], amount: number): Ter
   return result;
 }
 
+export function prepareTerrainStrokePoints(points: TerrainPoint[], brush: TerrainBrush, reduceForPersistence: boolean): TerrainPoint[] {
+  const smoothed = smoothTerrainPoints(points, brush.smoothing ?? 0);
+  if (!reduceForPersistence) return capPoints(smoothed);
+  const tolerance = Math.max(.5, brush.size * .018);
+  return capPoints(simplifyTerrainPoints(smoothed, tolerance));
+}
+
 export function terrainFlowDepositAlpha(flow: number, pressure = 1): number {
   return Math.max(0, Math.min(1, flow * pressure));
 }
@@ -62,7 +69,9 @@ export function terrainBrushFalloffAlpha(normalizedDistance: number, hardness: n
   const hardRadius = Math.max(0, Math.min(1, hardness));
   if (distanceFromCenter <= hardRadius) return 1;
   if (hardRadius >= 1) return 1;
-  return 1 - (distanceFromCenter - hardRadius) / (1 - hardRadius);
+  const progress = (distanceFromCenter - hardRadius) / (1 - hardRadius);
+  const smoothProgress = progress * progress * (3 - 2 * progress);
+  return 1 - smoothProgress;
 }
 
 function capPoints(points: TerrainPoint[]): TerrainPoint[] {
@@ -132,9 +141,7 @@ export class BrushEngine {
     if (!this.active) return null;
     const active = this.active;
     this.active = null;
-    const tolerance = Math.max(.5, active.brush.size * .018);
-    const simplified = simplifyTerrainPoints(active.points, tolerance);
-    const points = capPoints(smoothTerrainPoints(simplified, active.brush.smoothing ?? 0));
+    const points = prepareTerrainStrokePoints(active.points, active.brush, true);
     return { id: active.id, mode: active.mode, textureId: active.textureId, brush: { ...active.brush }, points };
   }
 
@@ -149,7 +156,7 @@ export class BrushEngine {
       mode: this.active.mode,
       textureId: this.active.textureId,
       brush: { ...this.active.brush },
-      points: this.active.points.map((point) => ({ ...point })),
+      points: prepareTerrainStrokePoints(this.active.points, this.active.brush, false),
     };
   }
 }

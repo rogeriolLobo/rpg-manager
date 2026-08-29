@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useMemo, useRef, type PointerEvent as 
 import type { MapEditorDocument, MapEditorObject } from '../../../domain/map-studio/editor';
 import type { MapGridType } from '../../../domain/map-studio/grid-engine';
 import { listUnifiedMapLayers } from '../../../domain/map-studio/terrain/terrain-document';
-import type { TerrainStroke, TerrainViewport } from '../../../domain/map-studio/terrain/terrain-types';
+import type { TerrainMode, TerrainStroke, TerrainViewport } from '../../../domain/map-studio/terrain/terrain-types';
 import type { MapTool } from './workspace-chrome';
 import { GridOverlay } from './grid-overlay';
 import { TerrainLayerSurface, type TerrainLayerSurfaceHandle } from './terrain-layer-surface';
@@ -25,6 +25,8 @@ interface MapCanvasProps {
   viewport: TerrainViewport;
   brushSize: number;
   brushHardness: number;
+  brushColor: string;
+  brushMode: TerrainMode;
   onObjectPointerDown: (event: ReactPointerEvent<SVGElement>, object: MapEditorObject) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -34,7 +36,7 @@ interface MapCanvasProps {
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas({
-  mapId, document, selected, width, height, gridType, gridSize, backgroundUrl, tool, viewport, brushSize, brushHardness,
+  mapId, document, selected, width, height, gridType, gridSize, backgroundUrl, tool, viewport, brushSize, brushHardness, brushColor, brushMode,
   onObjectPointerDown, onPointerDown, onPointerMove, onPointerFinish, onPointerCancel, onPointerLeave,
 }, ref) {
   const viewportRef = useRef<HTMLElement>(null);
@@ -72,9 +74,11 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       element.style.width = `${diameter}px`;
       element.style.height = `${diameter}px`;
       element.style.setProperty('--brush-hardness', `${Math.max(8, brushHardness * 100)}%`);
+      element.style.setProperty('--brush-color', brushColor);
+      element.dataset.mode = brushMode;
       element.style.transform = `translate(${localX - diameter / 2}px,${localY - diameter / 2}px)`;
     },
-  }), [brushHardness, brushSize, height, tool, viewport, width]);
+  }), [brushColor, brushHardness, brushMode, brushSize, height, tool, viewport, width]);
 
   return (
     <main
