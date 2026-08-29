@@ -1,7 +1,7 @@
 import type { TextureDefinition } from '../../../domain/map-studio/terrain/texture-registry';
 import type { TerrainBrush, TerrainPoint } from '../../../domain/map-studio/terrain/terrain-types';
 import { resolveTerrainBrushPreset, terrainBrushNoise } from '../../../domain/map-studio/terrain/brush-presets';
-import { terrainFlowDepositAlpha } from '../../../domain/map-studio/terrain/brush-engine';
+import { terrainBrushFalloffAlpha, terrainFlowDepositAlpha } from '../../../domain/map-studio/terrain/brush-engine';
 
 function hash(value: string): number {
   let result = 2166136261;
@@ -20,7 +20,8 @@ function random(seed: number): () => number {
 
 function drawMarks(context: CanvasRenderingContext2D, definition: TextureDefinition, radius: number, scale: number, seed: number): void {
   const next = random(seed);
-  const amount = Math.max(3, Math.min(16, Math.round(10 / Math.max(.35, scale))));
+  const amount = Math.max(0, Math.min(24, Math.round(definition.detailDensity / Math.max(.35, scale))));
+  if (amount === 0) return;
   context.strokeStyle = definition.palette[2];
   context.fillStyle = definition.palette[1];
   context.lineWidth = Math.max(1, radius * .025 * scale);
@@ -52,6 +53,29 @@ function drawMarks(context: CanvasRenderingContext2D, definition: TextureDefinit
   }
 }
 
+export function terrainColorWithAlpha(color: string, alpha: number): string {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/iu.exec(color);
+  if (!match) throw new Error(`Cor Terrain inválida: ${color}`);
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  return `rgba(${Number.parseInt(match[1], 16)}, ${Number.parseInt(match[2], 16)}, ${Number.parseInt(match[3], 16)}, ${safeAlpha})`;
+}
+
+export function transparentTerrainColor(color: string): string {
+  return terrainColorWithAlpha(color, 0);
+}
+
+export function terrainBrushGradientStops(color: string, hardness: number): ReadonlyArray<readonly [number, string]> {
+  const hardRadius = Math.max(0, Math.min(1, hardness));
+  const stops: Array<readonly [number, string]> = [[0, color]];
+  if (hardRadius > 0) stops.push([hardRadius, color]);
+  if (hardRadius >= 1) return stops;
+  for (const progress of [.25, .5, .75, 1]) {
+    const offset = hardRadius + (1 - hardRadius) * progress;
+    stops.push([offset, terrainColorWithAlpha(color, terrainBrushFalloffAlpha(offset, hardRadius))]);
+  }
+  return stops;
+}
+
 export function drawTextureStamp(
   context: CanvasRenderingContext2D,
   definition: TextureDefinition,
@@ -72,17 +96,15 @@ export function drawTextureStamp(
   context.rotate(brush.textureRotation * Math.PI / 180);
   context.globalAlpha = alpha * (noise ? 1 - preset.rendererConfig.alphaVariance + noise[2] * preset.rendererConfig.alphaVariance : 1);
   const gradient = context.createRadialGradient(0, 0, 0, 0, 0, radius);
-  gradient.addColorStop(0, baseColor);
-  if (brush.hardness > 0) gradient.addColorStop(Math.min(.999, brush.hardness), baseColor);
-  gradient.addColorStop(1, brush.hardness >= 1 ? baseColor : 'transparent');
+  terrainBrushGradientStops(baseColor, brush.hardness).forEach(([offset, color]) => gradient.addColorStop(offset, color));
   context.fillStyle = gradient;
   context.beginPath();
   context.arc(0, 0, radius, 0, Math.PI * 2);
   context.fill();
-  context.beginPath();
-  context.arc(0, 0, radius * .94, 0, Math.PI * 2);
-  context.clip();
-  context.globalAlpha = alpha * .52;
+  // Preserve the brush mask alpha: texture details enrich the material but must
+  // never replace the soft falloff with opaque dark pixels at the stamp edge.
+  context.globalCompositeOperation = 'source-atop';
+  context.globalAlpha = alpha * definition.detailOpacity;
   drawMarks(context, definition, radius, brush.textureScale, hash(`${strokeId}:${stampIndex}`));
   context.restore();
 }

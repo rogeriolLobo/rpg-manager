@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyMapDocument } from '../../src/domain/map-studio/editor';
-import { BrushEngine, interpolateTerrainStamps, simplifyTerrainPoints, smoothTerrainPoints, terrainBrushFalloffAlpha, terrainFlowDepositAlpha, terrainStrokeOpacity } from '../../src/domain/map-studio/terrain/brush-engine';
+import { BrushEngine, interpolateTerrainStamps, prepareTerrainStrokePoints, simplifyTerrainPoints, smoothTerrainPoints, terrainBrushFalloffAlpha, terrainFlowDepositAlpha, terrainStrokeOpacity } from '../../src/domain/map-studio/terrain/brush-engine';
 import { applyTerrainBrushPreset, listTerrainBrushPresets, resolveTerrainBrushPreset, terrainBrushNoise } from '../../src/domain/map-studio/terrain/brush-presets';
 import { addTerrainLayer, addTerrainStroke, findTerrainLayer, getTerrainDocument, listUnifiedMapLayers, moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer } from '../../src/domain/map-studio/terrain/terrain-document';
 import { TerrainTileIndex } from '../../src/domain/map-studio/terrain/terrain-spatial-index';
 import { textureRegistry } from '../../src/domain/map-studio/terrain/texture-registry';
 import { DEFAULT_TERRAIN_BRUSH, type TerrainLayer, type TerrainStroke } from '../../src/domain/map-studio/terrain/terrain-types';
 import { clampTerrainPoint, isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint } from '../../src/client/components/map-studio/use-terrain-tool';
+import { terrainBrushGradientStops, terrainColorWithAlpha, transparentTerrainColor } from '../../src/client/components/map-studio/texture-renderers';
 import { mapEditorDocumentSchema, terrainDocumentSchema } from '../../src/shared/validation/schemas';
 
 const layerId = '00000000-0000-4000-8000-000000000401';
@@ -63,6 +64,19 @@ describe('Map Studio Terrain engine', () => {
     expect(smoothTerrainPoints(points, 0)).toEqual(points);
   });
 
+  it('usa o mesmo smoothing no draft e no stroke final sem divergência visual', () => {
+    const brush = { ...DEFAULT_TERRAIN_BRUSH, smoothing: 1 };
+    const points = [{ x: 0, y: 0 }, { x: 50, y: 80 }, { x: 100, y: 0 }];
+    const engine = new BrushEngine();
+    engine.beginStroke(id(21), 'PAINT', 'grass', brush, points[0]);
+    engine.addPoint(points[1]);
+    const draft = engine.addPoint(points[2])!;
+    const committed = engine.endStroke()!;
+
+    expect(draft.points).toEqual(prepareTerrainStrokePoints(points, brush, false));
+    expect(committed.points).toEqual(draft.points);
+  });
+
   it('mantém flow e opacity como controles matematicamente distintos', () => {
     expect(terrainFlowDepositAlpha(.4, .5)).toBe(.2);
     expect(terrainFlowDepositAlpha(2)).toBe(1);
@@ -74,9 +88,24 @@ describe('Map Studio Terrain engine', () => {
     expect(terrainBrushFalloffAlpha(0, 0)).toBe(1);
     expect(terrainBrushFalloffAlpha(.5, 0)).toBe(.5);
     expect(terrainBrushFalloffAlpha(.75, .5)).toBe(.5);
+    expect(terrainBrushFalloffAlpha(.75, 0)).toBeCloseTo(.15625);
     expect(terrainBrushFalloffAlpha(.75, 1)).toBe(1);
     const erased = stroke(22, 'ERASE');
     expect(erased.brush.hardness).toBe(DEFAULT_TERRAIN_BRUSH.hardness);
+  });
+
+  it('preserva o RGB do material no alpha zero para não criar fringe escuro', () => {
+    expect(transparentTerrainColor('#557a35')).toBe('rgba(85, 122, 53, 0)');
+    expect(transparentTerrainColor('#4F7CAC')).toBe('rgba(79, 124, 172, 0)');
+    expect(terrainColorWithAlpha('#4f7cac', .5)).toBe('rgba(79, 124, 172, 0.5)');
+    expect(terrainBrushGradientStops('#4f7cac', 0)).toEqual([
+      [0, '#4f7cac'],
+      [.25, 'rgba(79, 124, 172, 0.84375)'],
+      [.5, 'rgba(79, 124, 172, 0.5)'],
+      [.75, 'rgba(79, 124, 172, 0.15625)'],
+      [1, 'rgba(79, 124, 172, 0)'],
+    ]);
+    expect(() => transparentTerrainColor('transparent')).toThrow('Cor Terrain inválida');
   });
 
   it('oferece três presets reais e preserva fallback de strokes legados', () => {
@@ -133,6 +162,8 @@ describe('Map Studio Terrain engine', () => {
     ]);
     expect(textureRegistry.applyDefaults('water', DEFAULT_TERRAIN_BRUSH)).toEqual(textureRegistry.applyDefaults('water', DEFAULT_TERRAIN_BRUSH));
     expect(textureRegistry.get('plain').renderer).toBe('plain');
+    expect(textureRegistry.get('plain')).toMatchObject({ detailDensity: 0, detailOpacity: 0 });
+    expect(textureRegistry.list().filter((definition) => definition.id !== 'plain').every((definition) => definition.detailOpacity > 0 && definition.detailOpacity <= .3)).toBe(true);
   });
 
   it('valida Terrain, rejeita payload inválido e continua aceitando documento legado', () => {
