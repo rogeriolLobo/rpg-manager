@@ -10,6 +10,8 @@ import {
   moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer,
 } from '../../domain/map-studio/terrain/terrain-document';
 import type { TerrainLayer, TerrainStroke, TerrainViewport } from '../../domain/map-studio/terrain/terrain-types';
+import { resolveTerrainBrushPreset } from '../../domain/map-studio/terrain/brush-presets';
+import { textureRegistry } from '../../domain/map-studio/terrain/texture-registry';
 import type { MapGridType } from '../../domain/map-studio/grid-engine';
 import { MapCanvas, type MapCanvasHandle } from '../components/map-studio/map-canvas';
 import { TerrainToolPanel } from '../components/map-studio/terrain-tool-panel';
@@ -378,6 +380,11 @@ export function MapStudioEditor({
   };
 
   const saveLabel = saveState === 'saving' ? 'Salvando…' : saveState === 'dirty' ? 'Alterações pendentes' : saveState === 'error' ? 'Falha ao salvar' : 'Salvo';
+  const activeTexture = textureRegistry.get(terrainTool.textureId);
+  const activePreset = resolveTerrainBrushPreset(terrainTool.brush);
+  const toolStatus = tool === 'TERRAIN'
+    ? `${terrainTool.mode === 'PAINT' ? 'Paint' : 'Erase'} · ${activeTexture.name} · ${activePreset.name}`
+    : tool === 'PAN' ? 'Pan' : 'Select';
   const workspaceClasses = ['map-workspace', focusMode ? 'focus-mode' : '', toolPanelOpen ? '' : 'tool-panel-closed', inspectorOpen ? '' : 'inspector-closed'].filter(Boolean).join(' ');
 
   return (
@@ -425,6 +432,7 @@ export function MapStudioEditor({
           mapId={mapId} document={mapState} selected={selected} width={width} height={height}
           gridType={gridPreview.type} gridSize={gridPreview.size} backgroundUrl={backgroundUrl} tool={tool}
           viewport={viewport} brushSize={terrainTool.brush.size} brushHardness={terrainTool.brush.hardness}
+          brushColor={activeTexture.id === 'plain' ? terrainTool.brush.color : activeTexture.palette[0]} brushMode={terrainTool.mode}
           onObjectPointerDown={beginObjectDrag} onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove} onPointerFinish={finishPointer}
           onPointerCancel={cancelPointer}
@@ -442,7 +450,7 @@ export function MapStudioEditor({
           <div className="map-save-error" role="alert"><AlertTriangle size={17}/><span>{saveError}</span><button type="button" onClick={() => void save()}><RotateCcw size={15}/>Tentar novamente</button></div>
         )}
       </div>
-      <StatusBar width={width} height={height} gridType={gridPreview.type} zoom={zoom} saveLabel={saveLabel}/>
+      <StatusBar width={width} height={height} gridType={gridPreview.type} zoom={zoom} saveLabel={saveLabel} toolStatus={toolStatus}/>
     </section>
   );
 }

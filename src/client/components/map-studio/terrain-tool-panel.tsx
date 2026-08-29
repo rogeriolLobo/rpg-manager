@@ -1,5 +1,5 @@
 import { Eraser, Paintbrush, X } from 'lucide-react';
-import { applyTerrainBrushPreset, listTerrainBrushPresets } from '../../../domain/map-studio/terrain/brush-presets';
+import { applyTerrainBrushPreset, listTerrainBrushPresets, resolveTerrainBrushPreset } from '../../../domain/map-studio/terrain/brush-presets';
 import { textureRegistry } from '../../../domain/map-studio/terrain/texture-registry';
 import type { TerrainBrush, TerrainLayer, TerrainMode, TerrainTextureId } from '../../../domain/map-studio/terrain/terrain-types';
 
@@ -26,6 +26,8 @@ export function TerrainToolPanel({
   onModeChange, onTextureChange, onBrushChange,
 }: TerrainToolPanelProps) {
   const disabled = archived || !activeLayer || activeLayer.locked || !activeLayer.visible;
+  const activeTexture = textureRegistry.get(textureId);
+  const activePreset = resolveTerrainBrushPreset(brush);
   return (
     <aside className="map-tool-panel terrain-tool-panel" aria-label="Painel Terrain">
       <div className="map-panel-heading">
@@ -39,7 +41,12 @@ export function TerrainToolPanel({
         </div>
       ) : (
         <>
-          <p className="terrain-active-layer">Layer: <strong>{activeLayer.name}</strong></p>
+          <div className="terrain-active-summary" aria-label="Seleção Terrain ativa">
+            <span className="terrain-active-swatch" style={{ background: activeTexture.preview }}/>
+            <span><small>{mode === 'PAINT' ? 'Painting' : 'Erasing'} on</small><strong>{activeLayer.name}</strong></span>
+            <span><small>Material</small><strong>{activeTexture.name}</strong></span>
+            <span><small>Brush</small><strong>{activePreset.name}</strong></span>
+          </div>
           {(activeLayer.locked || !activeLayer.visible) && <p className="terrain-feedback" role="status">{activeLayer.locked ? 'Desbloqueie a layer para pintar.' : 'Mostre a layer para pintar.'}</p>}
           {feedback && activeLayer.visible && !activeLayer.locked && <p className="terrain-feedback" role="status">{feedback}</p>}
           <div className="terrain-mode" role="group" aria-label="Modo Terrain">
