@@ -484,12 +484,13 @@ export const mapDocumentInputSchema = z.strictObject({
   backgroundAssetId: z.string().trim().max(80).nullable().default(null),
 });
 
-export const MAP_EDITOR_OBJECT_TYPES = ['RECTANGLE','ELLIPSE','TEXT'] as const;
+export const MAP_EDITOR_SHAPE_TYPES = ['RECTANGLE','ELLIPSE','TEXT'] as const;
+export const MAP_EDITOR_OBJECT_TYPES = [...MAP_EDITOR_SHAPE_TYPES, 'STAMP'] as const;
 const mapEditorCoordinateSchema = z.number().finite().min(-32768).max(32768);
 const mapEditorSizeSchema = z.number().finite().min(4).max(32768);
 export const mapEditorObjectSchema = z.strictObject({
   id: z.string().uuid(),
-  type: z.enum(MAP_EDITOR_OBJECT_TYPES),
+  type: z.enum(MAP_EDITOR_SHAPE_TYPES),
   x: mapEditorCoordinateSchema,
   y: mapEditorCoordinateSchema,
   width: mapEditorSizeSchema,
@@ -545,8 +546,29 @@ export const terrainDocumentSchema = z.strictObject({
   layers: z.array(terrainLayerSchema).max(20),
   layerOrder: z.array(z.string().uuid()).max(60),
 });
+export const stampObjectSchema = z.strictObject({
+  id: z.string().uuid(),
+  type: z.literal('STAMP'),
+  assetId: z.string().trim().min(1).max(120).regex(/^[a-z0-9][a-z0-9:/_-]*$/u),
+  layerId: z.string().uuid(),
+  x: mapEditorCoordinateSchema,
+  y: mapEditorCoordinateSchema,
+  width: mapEditorSizeSchema,
+  height: mapEditorSizeSchema,
+  rotation: z.number().finite().min(-3600).max(3600),
+  opacity: z.number().finite().min(0).max(1),
+  flipX: z.boolean(),
+  flipY: z.boolean(),
+});
+export const stampDocumentSchema = z.strictObject({
+  version: z.literal(1),
+  objects: z.array(stampObjectSchema).max(2000),
+});
 const mapEditorExtensionsSchema = z.object({
   terrain: terrainDocumentSchema.optional(),
+  // STAMP fica no envelope de extensões para que releases anteriores preservem
+  // os objetos sem precisar compreender ou renderizar o novo tipo.
+  stamps: stampDocumentSchema.optional(),
 }).catchall(z.unknown()).refine(
   (extensions) => Object.keys(extensions).every((key) => key.trim().length > 0 && key.length <= 80),
   'As chaves de extensão devem ter entre 1 e 80 caracteres.',
@@ -571,6 +593,8 @@ export type TerrainDocumentInput = z.infer<typeof terrainDocumentSchema>;
 export type TerrainLayerInput = z.infer<typeof terrainLayerSchema>;
 export type TerrainPointInput = z.infer<typeof terrainPointSchema>;
 export type TerrainStrokeInput = z.infer<typeof terrainStrokeSchema>;
+export type StampObjectInput = z.infer<typeof stampObjectSchema>;
+export type StampDocumentInput = z.infer<typeof stampDocumentSchema>;
 
 export const worldInviteInputSchema = z.strictObject({
   expiresInDays: z.number().int().min(1).max(30).default(7),

@@ -114,6 +114,42 @@ const terrainDocument = {
   },
 };
 
+const stampDocument = {
+  ...editorDocument,
+  extensions: {
+    stamps: {
+      version: 1 as const,
+      objects: [{
+        id: '00000000-0000-4000-8000-000000000121',
+        type: 'STAMP' as const,
+        assetId: 'builtin:core/nature/tree-broadleaf',
+        layerId: '00000000-0000-4000-8000-000000000101',
+        x: 250,
+        y: 180,
+        width: 144,
+        height: 168,
+        rotation: 32,
+        opacity: .65,
+        flipX: true,
+        flipY: false,
+      }, {
+        id: '00000000-0000-4000-8000-000000000122',
+        type: 'STAMP' as const,
+        assetId: 'builtin:core/nature/rock',
+        layerId: '00000000-0000-4000-8000-000000000101',
+        x: 520,
+        y: 340,
+        width: 84,
+        height: 64.8,
+        rotation: -17,
+        opacity: 1,
+        flipX: false,
+        flipY: true,
+      }],
+    },
+  },
+};
+
 describe('Map Studio User-First', () => {
   it('protege toda a superfície /maps com autenticação', async () => {
     expect((await request('/maps')).status).toBe(401);
@@ -249,6 +285,38 @@ describe('Map Studio User-First', () => {
       expectedVersion: 1,
       document: { ...terrainDocument, extensions: { terrain: { ...terrainDocument.extensions.terrain, layers: [{ ...terrainDocument.extensions.terrain.layers[0], strokes: [{ ...terrainDocument.extensions.terrain.layers[0].strokes[0], points: [] }] }] } } },
     }, owner)).status).toBe(422);
+  });
+
+  it('salva, carrega, transforma e recarrega Stamp único e Stamp Brush', async () => {
+    const owner = await register(`map-stamps-${seq}`);
+    const created = await request('/maps', 'POST', input, owner);
+    const mapId = ((await created.json()) as { item: { id: string } }).item.id;
+
+    const saved = await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: stampDocument }, owner);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ version: 1 });
+
+    const loaded = await request(`/maps/${mapId}`, 'GET', undefined, owner);
+    expect((await loaded.json()) as unknown).toMatchObject({ item: { document: stampDocument, documentVersion: 1 } });
+
+    const transformed = {
+      ...stampDocument,
+      extensions: { stamps: { ...stampDocument.extensions.stamps, objects: stampDocument.extensions.stamps.objects.map((stamp, index) => index === 0
+        ? { ...stamp, x: 420, y: 260, width: 216, height: 252, rotation: 91, opacity: .4, flipX: false, flipY: true }
+        : stamp) } },
+    };
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 1, document: transformed }, owner)).status).toBe(200);
+    const reloaded = await request(`/maps/${mapId}`, 'GET', undefined, owner);
+    expect((await reloaded.json()) as unknown).toMatchObject({ item: { document: transformed, documentVersion: 2 } });
+  });
+
+  it('mantém owner isolation para documentos com Stamps', async () => {
+    const owner = await register(`map-stamp-owner-${seq}`);
+    const other = await register(`map-stamp-other-${seq}`);
+    const created = await request('/maps', 'POST', input, owner);
+    const mapId = ((await created.json()) as { item: { id: string } }).item.id;
+    expect((await request(`/maps/${mapId}/content`, 'PATCH', { expectedVersion: 0, document: stampDocument }, other)).status).toBe(404);
+    expect((await request(`/maps/${mapId}`, 'GET', undefined, other)).status).toBe(404);
   });
 
   it('isola ownership e não permite operar mapa de outro usuário', async () => {

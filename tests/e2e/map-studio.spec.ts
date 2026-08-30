@@ -35,6 +35,13 @@ async function drawTerrainStroke(page: Page, offset = 0) {
   await page.mouse.up();
 }
 
+async function totalStampCount(page: Page): Promise<number> {
+  return page.locator('.map-stamp-surface').evaluateAll((surfaces) => surfaces.reduce(
+    (total, surface) => total + Number((surface as HTMLElement).dataset.stampCount ?? 0),
+    0,
+  ));
+}
+
 test('Map Studio usa workspace dedicado e preserva edição, autosave e atalhos', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do workspace');
   await registerAndCreateMap(page, 'Mapa One-Shot', true);
@@ -334,6 +341,113 @@ test('Terrain Soft Round preserva chroma no falloff sem halo escuro', async ({ p
   });
 });
 
+test('Asset Library posiciona e transforma Stamp e Stamp Brush como operações persistentes', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.includes('mobile'), 'Cobertura desktop do Asset/Stamp Engine');
+  await registerAndCreateMap(page, 'Mapa Assets E2E');
+
+  await page.getByRole('button', { name: 'Assets', exact: true }).click();
+  const library = page.getByRole('complementary', { name: 'Biblioteca de assets' });
+  await expect(library).toBeVisible();
+  await expect(library.locator('.asset-preview-grid button')).toHaveCount(24);
+  await library.getByPlaceholder('Buscar assets').fill('pinheiro');
+  await expect(library.getByRole('button', { name: 'Selecionar asset Pinheiro' })).toBeVisible();
+  await library.getByPlaceholder('Buscar assets').fill('');
+  await library.getByLabel('Filtrar categoria').selectOption('SPACE');
+  await expect(library.locator('.asset-preview-grid button')).toHaveCount(4);
+  await library.getByLabel('Filtrar categoria').selectOption('NATURE');
+  await library.getByRole('button', { name: 'Selecionar asset Árvore frondosa' }).click();
+  await expect(library.getByLabel('Asset ativo')).toContainText('Árvore frondosa');
+
+  const area = page.getByLabel('Área de criação do mapa');
+  const box = await area.boundingBox();
+  expect(box).not.toBeNull();
+  const center = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+  await page.mouse.click(center.x, center.y);
+  await expect.poll(() => totalStampCount(page)).toBe(1);
+  await expect(page.getByRole('heading', { name: 'Seleção' })).toBeVisible();
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Inspector do mapa' })
+      .locator('.stamp-inspector-asset'),
+  ).toContainText('Árvore frondosa');
+
+  await page.getByRole('button', { name: 'Desfazer' }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(0);
+  await page.getByRole('button', { name: 'Refazer' }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(1);
+
+  await page.getByRole('button', { name: 'Selecionar', exact: true }).click();
+  const initialX = Number(await page.getByLabel('X', { exact: true }).inputValue());
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 55, center.y + 35, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await page.getByLabel('X', { exact: true }).inputValue())).toBeGreaterThan(initialX);
+
+  const widthInput = page.getByLabel('Largura', { exact: true });
+  const heightInput = page.getByLabel('Altura', { exact: true });
+  const initialAspect = Number(await widthInput.inputValue()) / Number(await heightInput.inputValue());
+  await widthInput.fill('192');
+  await expect.poll(async () => Number(await widthInput.inputValue()) / Number(await heightInput.inputValue())).toBeCloseTo(initialAspect, 1);
+  await page.getByLabel('Rotação', { exact: true }).fill('47');
+  await page.getByLabel('Opacity do Stamp').fill('64');
+  await page.getByRole('button', { name: 'Flip X' }).click();
+  await page.getByRole('button', { name: 'Flip Y' }).click();
+  await expect(page.getByRole('button', { name: 'Flip X' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Flip Y' })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Duplicar', exact: true }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(2);
+  await page.getByRole('button', { name: 'Remover objeto' }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(1);
+
+  await page.getByRole('button', { name: 'Camadas', exact: true }).click();
+  const layers = page.getByRole('complementary', { name: 'Painel de camadas' });
+  await layers.getByRole('button', { name: 'Ocultar Stamps' }).click();
+  await expect(page.locator('.map-stamp-surface[data-layer-id]')).toHaveAttribute('data-visible', 'false');
+  await layers.getByRole('button', { name: 'Mostrar Stamps' }).click();
+  await layers.getByRole('button', { name: 'Bloquear Stamps' }).click();
+  await page.getByRole('button', { name: 'Selecionar', exact: true }).click();
+  await page.mouse.move(center.x + 55, center.y + 35);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 100, center.y + 70);
+  await page.mouse.up();
+  await expect.poll(() => totalStampCount(page)).toBe(1);
+  await layers.getByRole('button', { name: 'Desbloquear Stamps' }).click();
+  await layers.getByRole('button', { name: '+ Nova camada' }).click();
+  await layers.getByRole('button', { name: 'Subir Stamps' }).click();
+
+  await page.getByRole('button', { name: 'Assets', exact: true }).click();
+  await library.getByRole('button', { name: 'Stamp Brush' }).click();
+  await library.getByPlaceholder('Buscar assets').fill('rocha');
+  await library.getByRole('button', { name: 'Selecionar asset Rocha' }).click();
+  await library.getByLabel(/^Density/).fill('3');
+  await library.getByLabel(/^Spacing/).fill('72');
+  await library.getByLabel(/^Scale variance/).fill('45');
+  await library.getByLabel(/^Rotation variance/).fill('90');
+  await library.getByLabel(/^Position jitter/).fill('55');
+  await page.mouse.move(center.x - 150, center.y - 80);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 180, center.y + 90, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(() => totalStampCount(page)).toBeGreaterThan(5);
+  const afterBrush = await totalStampCount(page);
+  await page.getByRole('button', { name: 'Desfazer' }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(1);
+  await page.getByRole('button', { name: 'Refazer' }).click();
+  await expect.poll(() => totalStampCount(page)).toBe(afterBrush);
+
+  await page.getByRole('button', { name: 'Modo Foco' }).click();
+  await expect(page.getByRole('region', { name: 'Editor do mapa' })).toHaveAttribute('data-focus-mode', 'true');
+  await page.getByRole('button', { name: 'Aumentar zoom' }).click();
+  await page.getByRole('button', { name: 'Mover tela' }).click();
+  await page.getByRole('button', { name: 'Modo Foco' }).click();
+  await expect(page.getByLabel('Status do mapa').getByText('Salvo', { exact: true })).toBeVisible();
+  await testInfo.attach('asset-stamp-map', { body: await area.screenshot(), contentType: 'image/png' });
+  await page.reload();
+  await expect.poll(() => totalStampCount(page)).toBe(afterBrush);
+});
+
 test('Map Studio permanece utilizável em viewport mobile', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.includes('mobile'), 'Cobertura responsiva mobile');
   await registerAndCreateMap(page, 'Mapa Mobile');
@@ -347,6 +461,10 @@ test('Map Studio permanece utilizável em viewport mobile', async ({ page }, tes
   await page.getByRole('button', { name: 'Fechar painel de camadas' }).click();
   await page.getByRole('button', { name: 'Configurações do mapa' }).click();
   await page.getByRole('button', { name: 'Fechar inspector' }).click();
+  await page.getByRole('button', { name: 'Assets', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Biblioteca de assets' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Selecionar asset Árvore frondosa' })).toBeVisible();
+  await page.getByRole('button', { name: 'Fechar biblioteca de assets' }).click();
   const canvas = page.getByRole('img', { name: 'Canvas do mapa' });
   await expect(canvas).toBeVisible();
   const box = await canvas.boundingBox();

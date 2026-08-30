@@ -1,15 +1,20 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, forwardRef, useImperativeHandle, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import type { AssetDefinition } from '../../../domain/map-studio/assets/asset-library';
 import type { MapEditorDocument, MapEditorObject } from '../../../domain/map-studio/editor';
 import type { MapGridType } from '../../../domain/map-studio/grid-engine';
+import { listStampObjectsForLayer } from '../../../domain/map-studio/stamps/stamp-document';
 import { listUnifiedMapLayers } from '../../../domain/map-studio/terrain/terrain-document';
 import type { TerrainMode, TerrainStroke, TerrainViewport } from '../../../domain/map-studio/terrain/terrain-types';
 import type { MapTool } from './workspace-chrome';
 import { GridOverlay } from './grid-overlay';
+import { AssetVector } from './asset-vector';
+import { StampLayerSurface } from './stamp-layer-surface';
 import { TerrainLayerSurface, type TerrainLayerSurfaceHandle } from './terrain-layer-surface';
 
 export interface MapCanvasHandle {
   renderTerrainDraft: (layerId: string, stroke: TerrainStroke | null) => void;
   updateBrushCursor: (clientX: number, clientY: number, visible: boolean) => void;
+  updateStampCursor: (clientX: number, clientY: number, visible: boolean) => void;
 }
 
 interface MapCanvasProps {
@@ -27,6 +32,8 @@ interface MapCanvasProps {
   brushHardness: number;
   brushColor: string;
   brushMode: TerrainMode;
+  stampPreviewAsset: AssetDefinition | null;
+  stampPreviewScale: number;
   onObjectPointerDown: (event: ReactPointerEvent<SVGElement>, object: MapEditorObject) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -37,10 +44,12 @@ interface MapCanvasProps {
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas({
   mapId, document, selected, width, height, gridType, gridSize, backgroundUrl, tool, viewport, brushSize, brushHardness, brushColor, brushMode,
+  stampPreviewAsset, stampPreviewScale,
   onObjectPointerDown, onPointerDown, onPointerMove, onPointerFinish, onPointerCancel, onPointerLeave,
 }, ref) {
   const viewportRef = useRef<HTMLElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
+  const stampCursorRef = useRef<HTMLDivElement>(null);
   const terrainRefs = useRef(new Map<string, TerrainLayerSurfaceHandle>());
   const unifiedLayers = useMemo(() => listUnifiedMapLayers(document), [document]);
   const viewBox = `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`;
@@ -78,12 +87,37 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       element.dataset.mode = brushMode;
       element.style.transform = `translate(${localX - diameter / 2}px,${localY - diameter / 2}px)`;
     },
-  }), [brushColor, brushHardness, brushMode, brushSize, height, tool, viewport, width]);
+    updateStampCursor(clientX, clientY, visible) {
+      const element = stampCursorRef.current;
+      const canvas = viewportRef.current;
+      if (!element || !canvas || !visible || tool !== 'ASSETS' || !stampPreviewAsset) {
+        if (element) element.hidden = true;
+        return;
+      }
+      const bounds = canvas.getBoundingClientRect();
+      const scale = Math.min(bounds.width / viewport.width, bounds.height / viewport.height);
+      const offsetX = (bounds.width - viewport.width * scale) / 2;
+      const offsetY = (bounds.height - viewport.height * scale) / 2;
+      const localX = clientX - bounds.left;
+      const localY = clientY - bounds.top;
+      const inside = localX >= offsetX && localX <= bounds.width - offsetX && localY >= offsetY && localY <= bounds.height - offsetY;
+      if (!inside) {
+        element.hidden = true;
+        return;
+      }
+      const previewWidth = stampPreviewAsset.defaultWidth * stampPreviewScale * scale;
+      const previewHeight = stampPreviewAsset.defaultHeight * stampPreviewScale * scale;
+      element.hidden = false;
+      element.style.width = `${previewWidth}px`;
+      element.style.height = `${previewHeight}px`;
+      element.style.transform = `translate(${localX - previewWidth / 2}px,${localY - previewHeight / 2}px)`;
+    },
+  }), [brushColor, brushHardness, brushMode, brushSize, height, stampPreviewAsset, stampPreviewScale, tool, viewport, width]);
 
   return (
     <main
       ref={viewportRef}
-      className={`map-canvas-viewport ${tool === 'PAN' ? 'is-panning' : ''} ${tool === 'TERRAIN' ? 'is-painting' : ''}`}
+      className={`map-canvas-viewport ${tool === 'PAN' ? 'is-panning' : ''} ${tool === 'TERRAIN' ? 'is-painting' : ''} ${tool === 'ASSETS' ? 'is-stamping' : ''}`}
       aria-label="Área de criação do mapa"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -105,23 +139,34 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
           layer={layer}
           viewport={viewport}
         />
-      ) : layer.visible ? (
-        <svg key={layer.id} className="map-canvas-surface map-object-surface" viewBox={viewBox} aria-hidden="true">
-          <g opacity={layer.locked ? .72 : 1}>
-            {layer.objects.map((object) => {
-              const transform = `rotate(${object.rotation} ${object.x + object.width / 2} ${object.y + object.height / 2})`;
-              const common = {
-                transform,
-                'data-map-object': object.id,
-                onPointerDown: (event: ReactPointerEvent<SVGElement>) => onObjectPointerDown(event, object),
-              };
-              if (object.type === 'ELLIPSE') return <ellipse key={object.id} {...common} cx={object.x + object.width / 2} cy={object.y + object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill}/>;
-              if (object.type === 'TEXT') return <text key={object.id} {...common} x={object.x} y={object.y + object.height * .72} fill={object.fill} fontSize={Math.max(14, object.height * .55)}>{object.text || 'Texto'}</text>;
-              return <rect key={object.id} {...common} x={object.x} y={object.y} width={object.width} height={object.height} rx={8} fill={object.fill}/>;
-            })}
-          </g>
-        </svg>
-      ) : null)}
+      ) : (
+        <Fragment key={layer.id}>
+          <StampLayerSurface
+            layerId={layer.id}
+            layerName={layer.name}
+            visible={layer.visible}
+            stamps={listStampObjectsForLayer(document, layer.id)}
+            viewport={viewport}
+          />
+          {layer.visible && (
+            <svg className="map-canvas-surface map-object-surface" viewBox={viewBox} aria-hidden="true">
+              <g opacity={layer.locked ? .72 : 1}>
+                {layer.objects.map((object) => {
+                  const transform = `rotate(${object.rotation} ${object.x + object.width / 2} ${object.y + object.height / 2})`;
+                  const common = {
+                    transform,
+                    'data-map-object': object.id,
+                    onPointerDown: (event: ReactPointerEvent<SVGElement>) => onObjectPointerDown(event, object),
+                  };
+                  if (object.type === 'ELLIPSE') return <ellipse key={object.id} {...common} cx={object.x + object.width / 2} cy={object.y + object.height / 2} rx={object.width / 2} ry={object.height / 2} fill={object.fill}/>;
+                  if (object.type === 'TEXT') return <text key={object.id} {...common} x={object.x} y={object.y + object.height * .72} fill={object.fill} fontSize={Math.max(14, object.height * .55)}>{object.text || 'Texto'}</text>;
+                  return <rect key={object.id} {...common} x={object.x} y={object.y} width={object.width} height={object.height} rx={8} fill={object.fill}/>;
+                })}
+              </g>
+            </svg>
+          )}
+        </Fragment>
+      ))}
       <svg className="map-canvas-surface map-overlay-surface" viewBox={viewBox} aria-hidden="true">
         <GridOverlay mapId={mapId} type={gridType} size={gridSize} width={width} height={height}/>
         {selected && (
@@ -129,6 +174,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         )}
       </svg>
       <div ref={cursorRef} hidden className="map-brush-cursor" aria-hidden="true"/>
+      <div ref={stampCursorRef} hidden className="map-stamp-cursor" aria-hidden="true">
+        {stampPreviewAsset && <AssetVector asset={stampPreviewAsset}/>}
+      </div>
     </main>
   );
 });

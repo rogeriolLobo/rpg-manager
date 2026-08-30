@@ -1,10 +1,12 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
-  addMapLayer, addMapObject, cloneMapDocument, findMapObject, findObjectLayer,
-  removeMapObject, updateMapLayer, updateMapObject,
-  type MapEditorDocument, type MapEditorLayer, type MapEditorObject,
+  addMapLayer, addMapObject, addMapObjects, cloneMapDocument, duplicateMapObject, findMapObject, findObjectLayer,
+  moveMapObjectToLayer, removeMapObject, updateMapLayer, updateMapObject,
+  type MapEditorDocument, type MapEditorLayer, type MapEditorObject, type MapEditorObjectUpdate, type MapEditorShape,
 } from '../../domain/map-studio/editor';
+import { findTopmostStampAtPoint, getStampDocument } from '../../domain/map-studio/stamps/stamp-document';
+import { MAX_STAMPS_PER_DOCUMENT, type StampObject } from '../../domain/map-studio/stamps/stamp-types';
 import {
   addTerrainLayer, addTerrainStroke, listUnifiedMapLayers,
   moveUnifiedMapLayer, removeTerrainLayer, updateTerrainLayer,
@@ -14,10 +16,12 @@ import { resolveTerrainBrushPreset } from '../../domain/map-studio/terrain/brush
 import { textureRegistry } from '../../domain/map-studio/terrain/texture-registry';
 import type { MapGridType } from '../../domain/map-studio/grid-engine';
 import { MapCanvas, type MapCanvasHandle } from '../components/map-studio/map-canvas';
+import { AssetToolPanel } from '../components/map-studio/asset-tool-panel';
 import { TerrainToolPanel } from '../components/map-studio/terrain-tool-panel';
+import { useStampTool } from '../components/map-studio/use-stamp-tool';
 import { clampTerrainPoint, isScreenPointInsideViewport, isTerrainPointInsideMap, screenToMapPoint, useTerrainTool, viewportScale } from '../components/map-studio/use-terrain-tool';
 import { InspectorPanel, LayersPanel } from '../components/map-studio/workspace-panels';
-import { StatusBar, ToolDock, WorkspaceTopbar, type MapSaveState, type MapTool } from '../components/map-studio/workspace-chrome';
+import { StatusBar, ToolDock, WorkspaceTopbar, type MapSaveState, type MapTool, type ToolPanelKind } from '../components/map-studio/workspace-chrome';
 import { patchJson } from '../api/client';
 
 interface MapStudioEditorProps {
@@ -60,7 +64,7 @@ export function MapStudioEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(listUnifiedMapLayers(initialDocument).at(-1)?.id ?? null);
   const [tool, setTool] = useState<MapTool>('SELECT');
-  const [toolPanelKind, setToolPanelKind] = useState<'LAYERS' | 'TERRAIN'>('LAYERS');
+  const [toolPanelKind, setToolPanelKind] = useState<ToolPanelKind>('LAYERS');
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [saveState, setSaveState] = useState<MapSaveState>('saved');
@@ -116,6 +120,20 @@ export function MapStudioEditor({
     commit((current) => addTerrainStroke(current, layerId, stroke));
   }, [commit]);
 
+  const commitStamps = useCallback((layerId: string, stamps: readonly StampObject[]) => {
+    commit((current) => {
+      const withLayer = current.layers.some((layer) => layer.id === layerId)
+        ? current
+        : addMapLayer(current, layerId, 'Stamps');
+      return addMapObjects(withLayer, layerId, stamps);
+    });
+    setActiveLayerId(layerId);
+    if (stamps.length === 1) {
+      setSelectedId(stamps[0].id);
+      setInspectorOpen(true);
+    }
+  }, [commit]);
+
   const terrainTool = useTerrainTool({
     document: mapState,
     activeLayerId,
@@ -123,6 +141,14 @@ export function MapStudioEditor({
     canvasRef,
     onCommitStroke: commitTerrainStroke,
   });
+  const stampTool = useStampTool({
+    archived,
+    mapWidth: width,
+    mapHeight: height,
+    availableSlots: MAX_STAMPS_PER_DOCUMENT - getStampDocument(mapState).objects.length,
+    onCommit: commitStamps,
+  });
+  const cancelStampPlacement = stampTool.cancel;
 
   const save = useCallback(async (snapshot = mapStateRef.current) => {
     if (archived) return;
@@ -193,6 +219,12 @@ export function MapStudioEditor({
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const editingField = isEditingField(event.target);
+      if (event.key === 'Escape' && tool === 'ASSETS' && !editingField) {
+        event.preventDefault();
+        cancelStampPlacement();
+        canvasRef.current?.updateStampCursor(0, 0, false);
+        return;
+      }
       if (event.key === 'Tab' && !editingField) {
         event.preventDefault();
         toggleFocusMode();
@@ -233,7 +265,7 @@ export function MapStudioEditor({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [archived, commit, redo, save, selected, toggleFocusMode, undo]);
+  }, [archived, cancelStampPlacement, commit, redo, save, selected, toggleFocusMode, tool, undo]);
 
   const addLayer = () => {
     const id = crypto.randomUUID();
@@ -260,15 +292,23 @@ export function MapStudioEditor({
   };
 
   const selectTool = (nextTool: MapTool) => {
+    if (tool === 'ASSETS' && nextTool !== 'ASSETS') {
+      stampTool.cancelGesture();
+      canvasRef.current?.updateStampCursor(0, 0, false);
+    }
     setTool(nextTool);
     if (nextTool === 'TERRAIN') {
       setSelectedId(null);
       setToolPanelKind('TERRAIN');
       setToolPanelOpen(true);
+    } else if (nextTool === 'ASSETS') {
+      setSelectedId(null);
+      setToolPanelKind('ASSETS');
+      setToolPanelOpen(true);
     }
   };
 
-  const addObject = (type: MapEditorObject['type']) => {
+  const addObject = (type: MapEditorShape['type']) => {
     const layerId = activeLayerId && mapState.layers.some((layer) => layer.id === activeLayerId)
       ? activeLayerId
       : crypto.randomUUID();
@@ -314,6 +354,34 @@ export function MapStudioEditor({
       if (terrainTool.begin(point)) {
         event.currentTarget.setPointerCapture(event.pointerId);
       }
+    } else if (tool === 'ASSETS') {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (!isScreenPointInsideViewport(event.clientX, event.clientY, bounds, viewport)) return;
+      const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, 1);
+      if (!isTerrainPointInsideMap(point, width, height)) return;
+      const activeObjectLayer = mapStateRef.current.layers.find((layer) => layer.id === activeLayerId && layer.visible && !layer.locked);
+      const fallbackObjectLayer = [...mapStateRef.current.layers].reverse().find((layer) => layer.visible && !layer.locked);
+      const layerId = activeObjectLayer?.id ?? fallbackObjectLayer?.id ?? crypto.randomUUID();
+      setActiveLayerId(layerId);
+      if (stampTool.begin(point, layerId)) event.currentTarget.setPointerCapture(event.pointerId);
+    } else if (tool === 'SELECT' && !(event.target as Element).closest('[data-map-object]')) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (!isScreenPointInsideViewport(event.clientX, event.clientY, bounds, viewport)) {
+        setSelectedId(null);
+        return;
+      }
+      const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, 1);
+      const stamp = findTopmostStampAtPoint(mapStateRef.current, point.x, point.y);
+      if (!stamp) {
+        setSelectedId(null);
+        return;
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setSelectedId(stamp.id);
+      setPast((items) => [...items, cloneMapDocument(mapStateRef.current)].slice(-HISTORY_LIMIT));
+      setFuture([]);
+      setSaveState('dirty');
+      dragRef.current = { objectId: stamp.id, startClientX: event.clientX, startClientY: event.clientY, startX: stamp.x, startY: stamp.y };
     } else if (!(event.target as Element).closest('[data-map-object]')) {
       setSelectedId(null);
     }
@@ -322,6 +390,7 @@ export function MapStudioEditor({
   const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     canvasRef.current?.updateBrushCursor(event.clientX, event.clientY, true);
+    canvasRef.current?.updateStampCursor(event.clientX, event.clientY, true);
     if (panRef.current) {
       const scale = viewportScale(bounds, viewport);
       setPan({
@@ -341,11 +410,15 @@ export function MapStudioEditor({
       const pressure = event.pointerType === 'mouse' ? 1 : Math.max(.05, event.pressure || 1);
       const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, pressure);
       terrainTool.add(clampTerrainPoint(point, width, height));
+    } else if (tool === 'ASSETS' && stampTool.isDrawing()) {
+      const point = screenToMapPoint(event.clientX, event.clientY, bounds, viewport, 1);
+      stampTool.add(clampTerrainPoint(point, width, height));
     }
   };
 
   const finishPointer = (event: ReactPointerEvent<HTMLElement>) => {
     if (tool === 'TERRAIN') terrainTool.finish();
+    if (tool === 'ASSETS') stampTool.finish();
     dragRef.current = null;
     panRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -353,14 +426,28 @@ export function MapStudioEditor({
 
   const cancelPointer = (event: ReactPointerEvent<HTMLElement>) => {
     if (tool === 'TERRAIN') terrainTool.cancel();
+    if (tool === 'ASSETS') stampTool.cancelGesture();
     dragRef.current = null;
     panRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const updateSelected = (update: Partial<Omit<MapEditorObject, 'id' | 'type'>>) => {
+  const updateSelected = (update: MapEditorObjectUpdate) => {
     if (!selected) return;
     commit((current) => updateMapObject(current, selected.id, update));
+  };
+
+  const moveSelectedLayer = (layerId: string) => {
+    if (!selected) return;
+    commit((current) => moveMapObjectToLayer(current, selected.id, layerId));
+    setActiveLayerId(layerId);
+  };
+
+  const duplicateSelected = () => {
+    if (!selected) return;
+    const nextId = crypto.randomUUID();
+    commit((current) => duplicateMapObject(current, selected.id, nextId));
+    setSelectedId(nextId);
   };
 
   const updateLayer = (layerId: string, update: Partial<Pick<MapEditorLayer, 'name' | 'visible' | 'locked'>>) => {
@@ -384,7 +471,9 @@ export function MapStudioEditor({
   const activePreset = resolveTerrainBrushPreset(terrainTool.brush);
   const toolStatus = tool === 'TERRAIN'
     ? `${terrainTool.mode === 'PAINT' ? 'Paint' : 'Erase'} · ${activeTexture.name} · ${activePreset.name}`
-    : tool === 'PAN' ? 'Pan' : 'Select';
+    : tool === 'ASSETS'
+      ? `${stampTool.mode === 'BRUSH' ? 'Stamp Brush' : 'Stamp'}${stampTool.selectedAsset ? ` · ${stampTool.selectedAsset.name}` : ''}`
+      : tool === 'PAN' ? 'Pan' : 'Select';
   const workspaceClasses = ['map-workspace', focusMode ? 'focus-mode' : '', toolPanelOpen ? '' : 'tool-panel-closed', inspectorOpen ? '' : 'inspector-closed'].filter(Boolean).join(' ');
 
   return (
@@ -427,22 +516,41 @@ export function MapStudioEditor({
             onModeChange={terrainTool.setMode} onTextureChange={terrainTool.selectTexture} onBrushChange={terrainTool.setBrush}
           />
         )}
+        {toolPanelOpen && toolPanelKind === 'ASSETS' && (
+          <AssetToolPanel
+            archived={archived}
+            selectedAsset={stampTool.selectedAsset}
+            mode={stampTool.mode}
+            settings={stampTool.settings}
+            feedback={stampTool.feedback}
+            onClose={() => setToolPanelOpen(false)}
+            onSelectAsset={stampTool.selectAsset}
+            onModeChange={stampTool.setMode}
+            onSettingsChange={stampTool.setSettings}
+          />
+        )}
         <MapCanvas
           ref={canvasRef}
           mapId={mapId} document={mapState} selected={selected} width={width} height={height}
           gridType={gridPreview.type} gridSize={gridPreview.size} backgroundUrl={backgroundUrl} tool={tool}
           viewport={viewport} brushSize={terrainTool.brush.size} brushHardness={terrainTool.brush.hardness}
           brushColor={activeTexture.id === 'plain' ? terrainTool.brush.color : activeTexture.palette[0]} brushMode={terrainTool.mode}
+          stampPreviewAsset={stampTool.selectedAsset} stampPreviewScale={stampTool.mode === 'BRUSH' ? stampTool.settings.scale : 1}
           onObjectPointerDown={beginObjectDrag} onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove} onPointerFinish={finishPointer}
           onPointerCancel={cancelPointer}
-          onPointerLeave={() => canvasRef.current?.updateBrushCursor(0, 0, false)}
+          onPointerLeave={() => {
+            canvasRef.current?.updateBrushCursor(0, 0, false);
+            canvasRef.current?.updateStampCursor(0, 0, false);
+          }}
         />
         {inspectorOpen && (
           <InspectorPanel
-            selected={selected} selectedLayer={selectedLayer} archived={archived} onClose={() => setInspectorOpen(false)}
+            document={mapState} selected={selected} selectedLayer={selectedLayer} archived={archived} onClose={() => setInspectorOpen(false)}
             settings={<div className="map-document-settings"><label>Fundo<input disabled={archived} type="color" value={mapState.backgroundColor} onChange={(event) => commit((current) => ({ ...current, backgroundColor: event.target.value }))}/></label>{documentSettings(setGridPreviewOverride)}</div>}
             onUpdateSelected={updateSelected}
+            onMoveSelectedLayer={moveSelectedLayer}
+            onDuplicateSelected={duplicateSelected}
             onRemoveSelected={() => { if (selected) commit((current) => removeMapObject(current, selected.id)); setSelectedId(null); }}
           />
         )}
