@@ -1,14 +1,15 @@
 import {
   ArrowLeft, Box, Circle, Focus, Hand, Layers, Maximize2, MousePointer2,
-  Paintbrush, PanelLeftClose, PanelRightClose, Redo2, Save, Settings2, Type, Undo2,
+  PackageOpen, Paintbrush, PanelLeftClose, PanelRightClose, Redo2, Save, Settings2, Type, Undo2,
   ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import type { MapEditorObject } from '../../../domain/map-studio/editor';
+import type { MapEditorShape } from '../../../domain/map-studio/editor';
 import { gridStatusLabel, type MapGridType } from '../../../domain/map-studio/grid-engine';
 
 export type MapSaveState = 'saved' | 'dirty' | 'saving' | 'error';
-export type MapTool = 'SELECT' | 'PAN' | 'TERRAIN';
+export type MapTool = 'SELECT' | 'PAN' | 'TERRAIN' | 'ASSETS';
+export type ToolPanelKind = 'LAYERS' | 'TERRAIN' | 'ASSETS';
 
 interface WorkspaceTopbarProps {
   mapName: string;
@@ -61,10 +62,10 @@ interface ToolDockProps {
   tool: MapTool;
   archived: boolean;
   toolPanelOpen: boolean;
-  toolPanelKind: 'LAYERS' | 'TERRAIN';
+  toolPanelKind: ToolPanelKind;
   inspectorOpen: boolean;
   onToolChange: (tool: MapTool) => void;
-  onAddObject: (type: MapEditorObject['type']) => void;
+  onAddObject: (type: MapEditorShape['type']) => void;
   onToggleToolPanel: () => void;
   onShowLayers: () => void;
   onToggleInspector: () => void;
@@ -81,6 +82,7 @@ export function ToolDock({
       <button type="button" className={tool === 'PAN' ? 'active' : ''} aria-pressed={tool === 'PAN'} onClick={() => onToolChange('PAN')} aria-label="Mover tela" title="Mover tela"><Hand size={20}/></button>
       <span className="map-dock-divider" aria-hidden="true"/>
       <button type="button" disabled={archived} className={tool === 'TERRAIN' ? 'active' : ''} aria-pressed={tool === 'TERRAIN'} onClick={() => onToolChange('TERRAIN')} aria-label="Terrain" title="Terrain"><Paintbrush size={20}/></button>
+      <button type="button" disabled={archived} className={tool === 'ASSETS' ? 'active' : ''} aria-pressed={tool === 'ASSETS'} onClick={() => onToolChange('ASSETS')} aria-label="Assets" title="Assets"><PackageOpen size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('RECTANGLE')} aria-label="Retângulo" title="Retângulo"><Box size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('ELLIPSE')} aria-label="Elipse" title="Elipse"><Circle size={20}/></button>
       <button type="button" disabled={archived} onClick={() => onAddObject('TEXT')} aria-label="Texto" title="Texto"><Type size={20}/></button>

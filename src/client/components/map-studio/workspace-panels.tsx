@@ -1,8 +1,11 @@
-import { ArrowDown, ArrowUp, Eye, EyeOff, Layers, Lock, Mountain, Trash2, Unlock, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Layers, Lock, Mountain, Trash2, Unlock, X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { MapEditorDocument, MapEditorLayer, MapEditorObject } from '../../../domain/map-studio/editor';
+import { assetLibrary } from '../../../domain/map-studio/assets/asset-library';
+import type { MapEditorDocument, MapEditorLayer, MapEditorObject, MapEditorObjectUpdate } from '../../../domain/map-studio/editor';
+import { resizeStampPreservingAspect } from '../../../domain/map-studio/stamps/stamp-engine';
 import { listUnifiedMapLayers } from '../../../domain/map-studio/terrain/terrain-document';
 import type { TerrainLayer } from '../../../domain/map-studio/terrain/terrain-types';
+import { AssetVector } from './asset-vector';
 
 interface LayersPanelProps {
   document: MapEditorDocument;
@@ -77,12 +80,15 @@ export function LayersPanel({
 }
 
 interface InspectorPanelProps {
+  document: MapEditorDocument;
   selected: MapEditorObject | null;
   selectedLayer: MapEditorLayer | null;
   archived: boolean;
   settings: ReactNode;
   onClose: () => void;
-  onUpdateSelected: (update: Partial<Omit<MapEditorObject, 'id' | 'type'>>) => void;
+  onUpdateSelected: (update: MapEditorObjectUpdate) => void;
+  onMoveSelectedLayer: (layerId: string) => void;
+  onDuplicateSelected: () => void;
   onRemoveSelected: () => void;
 }
 
@@ -92,9 +98,10 @@ function numeric(value: string, fallback: number): number {
 }
 
 export function InspectorPanel({
-  selected, selectedLayer, archived, settings, onClose, onUpdateSelected, onRemoveSelected,
+  document, selected, selectedLayer, archived, settings, onClose, onUpdateSelected, onMoveSelectedLayer, onDuplicateSelected, onRemoveSelected,
 }: InspectorPanelProps) {
   const disabled = archived || Boolean(selectedLayer?.locked);
+  const selectedAsset = selected?.type === 'STAMP' ? assetLibrary.get(selected.assetId) : null;
   return (
     <aside className="map-inspector-panel" aria-label="Inspector do mapa">
       <div className="map-panel-heading">
@@ -103,17 +110,38 @@ export function InspectorPanel({
       </div>
       {selected ? (
         <div className="map-inspector-grid">
-          <strong>{selected.type === 'TEXT' ? 'Texto' : selected.type === 'ELLIPSE' ? 'Elipse' : 'Retângulo'}</strong>
-          <p className="map-selection-layer">Camada: {selectedLayer?.name ?? 'Sem camada'}</p>
+          <strong>{selected.type === 'STAMP' ? 'Stamp' : selected.type === 'TEXT' ? 'Texto' : selected.type === 'ELLIPSE' ? 'Elipse' : 'Retângulo'}</strong>
+          {selectedAsset && <div className="stamp-inspector-asset"><AssetVector asset={selectedAsset}/><span><small>Asset</small>{selectedAsset.name}</span></div>}
+          <label className="span-2">Camada<select disabled={disabled} value={selectedLayer?.id ?? ''} onChange={(event) => onMoveSelectedLayer(event.target.value)}>
+            {document.layers.map((layer) => <option key={layer.id} value={layer.id} disabled={layer.locked}>{layer.name}</option>)}
+          </select></label>
           {selectedLayer?.locked && <p className="section-note">A camada está bloqueada.</p>}
           <label>X<input disabled={disabled} type="number" value={Math.round(selected.x)} onChange={(event) => onUpdateSelected({ x: numeric(event.target.value, selected.x) })}/></label>
           <label>Y<input disabled={disabled} type="number" value={Math.round(selected.y)} onChange={(event) => onUpdateSelected({ y: numeric(event.target.value, selected.y) })}/></label>
-          <label>Largura<input disabled={disabled} min={4} type="number" value={Math.round(selected.width)} onChange={(event) => onUpdateSelected({ width: Math.max(4, numeric(event.target.value, selected.width)) })}/></label>
-          <label>{selected.type === 'TEXT' ? 'Tamanho' : 'Altura'}<input disabled={disabled} min={4} type="number" value={Math.round(selected.height)} onChange={(event) => onUpdateSelected({ height: Math.max(4, numeric(event.target.value, selected.height)) })}/></label>
+          <label>Largura<input disabled={disabled} min={4} type="number" value={Math.round(selected.width)} onChange={(event) => {
+            const width = Math.max(4, numeric(event.target.value, selected.width));
+            onUpdateSelected(selected.type === 'STAMP' ? resizeStampPreservingAspect(selected, 'width', width) : { width });
+          }}/></label>
+          <label>{selected.type === 'TEXT' ? 'Tamanho' : 'Altura'}<input disabled={disabled} min={4} type="number" value={Math.round(selected.height)} onChange={(event) => {
+            const height = Math.max(4, numeric(event.target.value, selected.height));
+            onUpdateSelected(selected.type === 'STAMP' ? resizeStampPreservingAspect(selected, 'height', height) : { height });
+          }}/></label>
           <label>Rotação<input disabled={disabled} type="number" value={Math.round(selected.rotation)} onChange={(event) => onUpdateSelected({ rotation: numeric(event.target.value, selected.rotation) })}/></label>
-          <label>Cor<input disabled={disabled} type="color" value={selected.fill} onChange={(event) => onUpdateSelected({ fill: event.target.value })}/></label>
+          {selected.type !== 'STAMP' && <label>Cor<input disabled={disabled} type="color" value={selected.fill} onChange={(event) => onUpdateSelected({ fill: event.target.value })}/></label>}
           {selected.type === 'TEXT' && <label className="span-2">Texto<input disabled={disabled} maxLength={500} value={selected.text} onChange={(event) => onUpdateSelected({ text: event.target.value })}/></label>}
-          <button type="button" className="map-remove-object" disabled={disabled} onClick={onRemoveSelected}><Trash2 size={15}/>Remover objeto</button>
+          {selected.type === 'STAMP' && (
+            <>
+              <label className="span-2">Opacity <input aria-label="Opacity do Stamp" disabled={disabled} type="range" min="0" max="100" value={Math.round(selected.opacity * 100)} onChange={(event) => onUpdateSelected({ opacity: Number(event.target.value) / 100 })}/><span>{Math.round(selected.opacity * 100)}%</span></label>
+              <div className="stamp-transform-actions span-2">
+                <button type="button" disabled={disabled} className={selected.flipX ? 'active' : ''} aria-pressed={selected.flipX} onClick={() => onUpdateSelected({ flipX: !selected.flipX })}><FlipHorizontal2 size={15}/>Flip X</button>
+                <button type="button" disabled={disabled} className={selected.flipY ? 'active' : ''} aria-pressed={selected.flipY} onClick={() => onUpdateSelected({ flipY: !selected.flipY })}><FlipVertical2 size={15}/>Flip Y</button>
+              </div>
+            </>
+          )}
+          <div className="map-object-actions span-2">
+            <button type="button" disabled={disabled} onClick={onDuplicateSelected}><Copy size={15}/>Duplicar</button>
+            <button type="button" className="map-remove-object" disabled={disabled} onClick={onRemoveSelected}><Trash2 size={15}/>Remover objeto</button>
+          </div>
         </div>
       ) : settings}
     </aside>
