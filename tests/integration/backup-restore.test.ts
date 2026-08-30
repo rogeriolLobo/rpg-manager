@@ -253,6 +253,18 @@ describe('F-015: Backup/Restore completo', () => {
           }],
           layerOrder: ['00000000-0000-4000-8000-000000000203', '00000000-0000-4000-8000-000000000201'],
         },
+        stamps: {
+          version: 1,
+          objects: [{
+            id: '00000000-0000-4000-8000-000000000205', type: 'STAMP',
+            assetId: 'builtin:core/structures/small-house', layerId: '00000000-0000-4000-8000-000000000201',
+            x: 320, y: 240, width: 168, height: 144, rotation: 22, opacity: .7, flipX: true, flipY: false,
+          }, {
+            id: '00000000-0000-4000-8000-000000000206', type: 'STAMP',
+            assetId: 'builtin:core/nature/tree-pine', layerId: '00000000-0000-4000-8000-000000000201',
+            x: 540, y: 330, width: 82, height: 128, rotation: -18, opacity: 1, flipX: false, flipY: true,
+          }],
+        },
       },
       layers: [{
         id: '00000000-0000-4000-8000-000000000201', name: 'Marcadores', visible: true, locked: false,
